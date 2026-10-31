@@ -72,6 +72,22 @@ class Outcome:
         return self.refusal is None
 
 
+@dataclass
+class Board:
+    """Everything the ORBAT or sign-up list message shows."""
+
+    squads: list[tuple[Squad, list[Slot]]] = field(default_factory=list)
+    signups: list[Signup] = field(default_factory=list)  # reserve in queue order, the others by time
+    offered: set[int] = field(default_factory=set)  # slots held for an open offer
+
+    def status(self, status: str) -> list[int]:
+        return [s.member_id for s in self.signups if s.status == status]
+
+    @property
+    def slots(self) -> list[Slot]:
+        return [slot for _, slots in self.squads for slot in slots]
+
+
 class Notifier(Protocol):
     """What the Discord layer does when sign-up changes."""
 
@@ -108,6 +124,23 @@ class SignupService:
         self.roles_of = roles_of
         self.clock = clock or scheduler.clock
         scheduler.register(OFFER_KIND, self._offer_expired)
+
+    # ---------------------------------------------------------------- reading
+
+    async def board(self, event_id: int) -> Board:
+        async with self.db.session() as session:
+            squads = (await session.execute(select(Squad).where(Squad.event_id == event_id)
+                                            .order_by(Squad.position))).scalars().all()
+            slots = (await session.execute(select(Slot).where(Slot.event_id == event_id)
+                                           .order_by(Slot.position))).scalars().all()
+            signups = (await session.execute(select(Signup).where(Signup.event_id == event_id).order_by(
+                Signup.reserve_position.is_(None), Signup.reserve_position, Signup.updated_at, Signup.id))).scalars().all()
+            offered = set((await session.execute(select(Offer.slot_id).where(Offer.event_id == event_id,
+                                                                             Offer.state == "open"))).scalars())
+        by_squad: dict[int, list[Slot]] = {}
+        for slot in slots:
+            by_squad.setdefault(slot.squad_id, []).append(slot)
+        return Board([(squad, by_squad.get(squad.id, [])) for squad in squads], list(signups), offered)
 
     # ---------------------------------------------------------------- rules
 

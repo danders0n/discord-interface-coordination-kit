@@ -37,9 +37,10 @@ def test_migrations_keep_the_events_that_exist(tmp_path):
                              "required_dlc, created_by, created_at) VALUES ('internal', 'Old', 'published', "
                              "'2026-11-01 18:00:00', '2026-11-01 18:30:00', 180, '[]', 1, '2026-10-01 00:00:00')"))
         command.upgrade(config, "head")
-        row = conn.execute(sa.text("SELECT title, mission_type, how_to_join, dont_end_automatically FROM event")).one()
+        row = conn.execute(sa.text("SELECT title, mission_type, how_to_join, dont_end_automatically, messages "
+                                   "FROM event")).one()
     engine.dispose()
-    assert tuple(row) == ("Old", "", "", 0)
+    assert tuple(row) == ("Old", "", "", 0, "{}")
 
 
 async def test_upgrade_twice_is_a_no_op(db):

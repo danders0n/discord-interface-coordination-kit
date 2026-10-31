@@ -83,6 +83,13 @@ class Event(Base):
     briefing_notes: Mapped[str] = mapped_column(Text, default="")
     dont_end_automatically: Mapped[bool] = mapped_column(Boolean, default=False)
     cancel_reason: Mapped[str | None] = mapped_column(Text)
+    # Phase 4b: the event channel and the bot's messages in it, in order (key -> message id).
+    channel_id: Mapped[int | None] = mapped_column(BigInteger)
+    thread_id: Mapped[int | None] = mapped_column(BigInteger)
+    messages: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    announcement_id: Mapped[int | None] = mapped_column(BigInteger)
+    archived_at: Mapped[datetime | None]  # moved to an archive category
+    exported_at: Mapped[datetime | None]  # moved into the database (phase 8)
 
 
 class OtherGroup(Base):

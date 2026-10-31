@@ -17,7 +17,10 @@ from app.discord_util import NO_MENTIONS, on_app_command_error
 from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
 from app.servers.cog import ServerCog
+from app.eventchannel.service import EventChannels
+from app.events.service import EventService
 from app.services import Services
+from app.signup.service import Member, SignupService
 from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
@@ -39,10 +42,38 @@ class EventBot(commands.Bot):
         self.services = services
         self._tasks: list[asyncio.Task] = []
         self._started = False
+        self.build_events()
 
     @property
     def guild_object(self) -> discord.Object:
         return discord.Object(id=self.services.settings.guild_id)
+
+    def guild(self) -> discord.Guild | None:
+        return self.get_guild(self.services.settings.guild_id)
+
+    def roles_of(self, member_id: int) -> frozenset[int] | None:
+        """A member's role ids now, or None when they are not on the server (for offers and flags)."""
+        guild = self.guild()
+        member = guild.get_member(member_id) if guild is not None else None
+        return frozenset(role.id for role in member.roles) if member is not None else None
+
+    def build_events(self) -> None:
+        """The event stack (docs/PLAN.md, phase 4): the channels are the notifier of the event and sign-up
+        services, and need the guild, so the bot puts them together."""
+        s = self.services
+        channels = EventChannels(s.db, s.store, lambda: s.ids, s.scheduler, self.guild)
+        events = EventService(s.db, s.store, lambda: s.ids, s.scheduler, s.reservations, channels, link=channels.link)
+        signups = SignupService(s.db, s.store, lambda: s.ids, s.scheduler, channels, self.roles_of)
+        channels.events, channels.signups = events, signups
+        s.channels, s.events, s.signups = channels, events, signups
+
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if before.guild.id == self.services.settings.guild_id and before.roles != after.roles:
+            await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)))
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if member.guild.id == self.services.settings.guild_id:
+            await self.services.signups.member_left(member.id)
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
@@ -93,6 +124,7 @@ class EventBot(commands.Bot):
             text += "\n" + t("Problems with the configuration:", settings.language) + "\n"
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
+        await self.services.channels.refresh_all()  # whatever changed while the bot was down
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

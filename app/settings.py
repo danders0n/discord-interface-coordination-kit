@@ -51,6 +51,8 @@ class Channels(BaseModel):
     staff_log_thread: str = Field("Staff log", min_length=1, max_length=100)
     moderation_thread: str = Field("Moderacja", min_length=1, max_length=100, description="Approval requests")
     link_reminder: Ref | None = Field(None, description="Steam link reminders for members with closed DMs")
+    archive_pattern: str = Field("Archiwum Q{quarter} {year}", min_length=1, max_length=90,
+                                 description="Name of a quarter's archive category: {quarter} and {year} are filled in")
 
 
 class Roles(BaseModel):
@@ -103,6 +105,7 @@ class Times(BaseModel):
     stale_cancel_hours: int = Field(24, ge=0, description="Still not published this long before the assembly: cancelled")
     reminder_minutes: list[int] = Field(default_factory=lambda: [24 * 60, 60],
                                         description="Reminder pings, this long before the assembly")
+    archive_hours: int = Field(48, ge=0, description="After the end (start + duration), the channel moves to the archive")
 
 
 class Events(BaseModel):

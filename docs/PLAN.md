@@ -1,7 +1,7 @@
 # Plan: community event bot
 
-Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic) and 4a (the
-event service) built on 2026-10-31; 4b-4d and the later phases are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
+event service) and 4b (the event channel) built on 2026-10-31; 4c-4d and the later phases are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 
@@ -85,7 +85,7 @@ name or acronym; a group is never deleted, because events refer to it.
 | Order kept | The bot stores every message id and edits the messages in place. The ORBAT is **last** (decided 2026-10-31), so a new continuation message is simply posted at the end and nothing is deleted; a continuation no longer needed is deleted from the end. A preset added later than the ORBAT is the one exception: the preset message is posted then, and the ORBAT messages are re-posted after it. |
 | Discussion | A **public thread** in the channel ("Dyskusja"), created **with the channel** (a draft's thread is as hidden as its channel). **Every ping goes to the thread** (decided 2026-10-31): sign-up opening, reminders, offers when DMs are closed, approval results, stale-draft warnings, cancelling. The main channel holds only the bot's own messages, so their order never breaks; the attendance report is the one message added there later, after the ORBAT has stopped changing. |
 | Native Discord Scheduled Event | **None.** |
-| Archive | A configured delay after the attendance report (see *Supervisor: attendance*), the channel moves to the archive category of the event date's **quarter**, e.g. `Archiwum Q1 2026` (the name pattern is in config). The bot creates the category when missing. The channel and its thread become read-only and locked. If a quarter reaches Discord's 50-channel limit, an overflow category `Archiwum Q1 2026 (2)` is created (assumed). |
+| Archive | Until phase 6 makes the report: `archive_hours` (config; 48) after the end. Then: a configured delay after the attendance report (see *Supervisor: attendance*), the channel moves to the archive category of the event date's **quarter**, e.g. `Archiwum Q1 2026` (the name pattern is in config). The bot creates the category when missing. The channel and its thread become read-only and locked. If a quarter reaches Discord's 50-channel limit, an overflow category `Archiwum Q1 2026 (2)` is created (assumed). |
 | Retention | Discord allows 500 channels per server, categories included, so only the **current quarter and the 3 before it** stay as channels (the number is in config). When a new quarter begins, the oldest kept quarter is moved into the database (see *Long-term archive*), its channels are deleted, and so are its now empty categories. |
 
 ### Long-term archive

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.db import Database
 from app.reservations.service import ReservationService
@@ -25,6 +26,10 @@ class Services:
     reservations: ReservationService
     # The configuration's channels and roles as ids on the server; empty until the bot has seen the guild.
     ids: Ids = field(default_factory=Ids)
+    # The event stack, built by the bot (it needs the guild): app.bot.EventBot.build_events.
+    events: Any = None
+    signups: Any = None
+    channels: Any = None
 
     @property
     def settings(self) -> Settings:

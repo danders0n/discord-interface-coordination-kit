@@ -489,6 +489,10 @@ class EventService:
         except Frozen as exc:
             raise EventError(Problem.TIMES_LOCKED) from exc
 
+    async def refresh_reservation(self, event_id: int) -> None:
+        """Send the reservation again (its link, once the channel exists)."""
+        await self._rebook(await self.get(event_id))
+
     async def _rebook(self, event: Event) -> None:
         """Keep an existing reservation in step (name, times); events without one stay without."""
         booked = await self.reservations.get(event.id)

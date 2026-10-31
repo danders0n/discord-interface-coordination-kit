@@ -14,11 +14,12 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–3 and 4a are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–3, 4a and 4b are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
 supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
-(`app/events/`, phase 4a); none of these is wired to Discord yet (phases 4b-4d). The
+(`app/events/`, phase 4a), and the event channel (`app/eventchannel/`, phase 4b); the wizard, panel and
+sign-up buttons come in phases 4c-4d. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -90,6 +91,12 @@ exactly the settings.
   day, aware UTC out), `groups.py` (other groups), `service.py` (`EventService`: create, update with proposals
   for members' new times, publish or send for approval, approve / reject / withdraw, cancel, end, and the timed
   actions; refusals are `Problem` codes; the Discord side listens through `EventNotifier`).
+- `app/eventchannel/`: `render.py` (pure: event + board -> `Message`s keyed `info`, `briefing`, `preset`,
+  `orbat:N`), `sync.py` (keeps them in order: edit in place, append / delete continuations at the end, re-post
+  after a late preset or a message deleted by hand), `service.py` (`EventChannels`: the draft's hidden channel and
+  thread, batched redraws via `Redrawer`, background renames, publish + announcement, cancel + thread ping, archive
+  by quarter with overflow categories; it is the notifier of `EventService` and `SignupService`). `EventBot.
+  build_events` wires the three together; `refresh_all` redraws after a restart.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 
