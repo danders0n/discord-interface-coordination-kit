@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.db import Database
+from app.resolve import Ids
 from app.scheduler import Scheduler
 from app.settings import Settings, SettingsStore
 from app.staff_log import StaffLog
+from app.staff_threads import StaffThreads
 from app.supervisor_client import SupervisorClient
 
 
@@ -18,6 +20,9 @@ class Services:
     scheduler: Scheduler
     staff: StaffLog
     supervisor: SupervisorClient
+    threads: StaffThreads
+    # The configuration's channels and roles as ids on the server; empty until the bot has seen the guild.
+    ids: Ids = field(default_factory=Ids)
 
     @property
     def settings(self) -> Settings:

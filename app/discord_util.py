@@ -26,7 +26,7 @@ def services(interaction: discord.Interaction) -> Any:
 
 def access(interaction: discord.Interaction) -> Access:
     roles = getattr(interaction.user, "roles", ())
-    return Access(services(interaction).settings, (role.id for role in roles))
+    return Access(services(interaction).ids, (role.id for role in roles))
 
 
 def require(perm: Perm):

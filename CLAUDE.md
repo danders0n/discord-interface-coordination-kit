@@ -62,7 +62,11 @@ exactly the settings.
 - `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
 - `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()`, the command error handler.
 - `app/settings.py`: `.env` model and `SettingsStore` (`/reload`; restart-only values keep their old value).
-- `app/permissions.py`: `Access` from role ids (no discord.py); per-event rights come later in the services.
+  Channels and roles are `Ref`s: an id or a name.
+- `app/resolve.py`: turns the `Ref`s into `Ids` on the server (start-up, `/reload`); code reads `services.ids`,
+  never the raw settings, for channels and roles.
+- `app/permissions.py`: `Access` from role ids against `Ids` (no discord.py); per-event rights come later.
+- `app/staff_threads.py`: the staff log and moderation threads in the staff channel (made, remembered, reopened).
 - `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
 - `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
 - `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue.

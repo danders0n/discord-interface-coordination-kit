@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app import startup_checks
 from app.discord_util import reply, require
 from app.i18n import t
 from app.permissions import Perm
@@ -30,6 +31,11 @@ class AdminCog(commands.Cog):
         if result.needs_restart:
             text += "\n" + t("These take effect after a restart: {names}", locale,
                              names=", ".join(f"`{name}`" for name in result.needs_restart))
+        if interaction.guild is not None:  # names may point elsewhere now: resolve them again
+            self.services.ids, problems = startup_checks.check(interaction.guild, self.services.settings)
+            if problems:
+                text += "\n" + t("Problems with the configuration:", locale) + "\n"
+                text += "\n".join(f"- {problem}" for problem in problems[:15])
         await reply(interaction, text)
         self.services.staff.post(t("Settings reloaded by {member}.", self.services.settings.language,
                                    member=interaction.user.mention))

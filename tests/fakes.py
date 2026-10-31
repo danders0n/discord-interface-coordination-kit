@@ -3,6 +3,7 @@ what the bot sends, edits and opens, so tests call command and button callbacks 
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -11,6 +12,8 @@ import discord
 from discord import app_commands
 
 from app.discord_util import NotAllowed, on_app_command_error
+
+_ids = itertools.count(900_000)
 
 
 @dataclass
@@ -42,13 +45,37 @@ class Sent:
     kwargs: dict[str, Any]
 
 
-@dataclass
+@dataclass(eq=False)
+class FakeThread:
+    id: int
+    name: str
+    parent_id: int
+    archived: bool = False
+    sent: list[Sent] = field(default_factory=list)
+    edits: list[dict[str, Any]] = field(default_factory=list)
+
+    async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
+        if self.archived:
+            raise AssertionError("sent to an archived thread")
+        message = Sent(content, kwargs)
+        self.sent.append(message)
+        return message
+
+    async def edit(self, **changes: Any) -> FakeThread:
+        self.edits.append(changes)
+        for name, value in changes.items():
+            setattr(self, name, value)
+        return self
+
+
+@dataclass(eq=False)
 class FakeChannel:
     id: int
     name: str = "channel"
     type: discord.ChannelType = discord.ChannelType.text
     permissions: discord.Permissions = field(default_factory=discord.Permissions.all)
     sent: list[Sent] = field(default_factory=list)
+    guild: Any = None
 
     def permissions_for(self, _member: Any) -> discord.Permissions:
         return self.permissions
@@ -58,20 +85,55 @@ class FakeChannel:
         self.sent.append(message)
         return message
 
+    async def create_thread(self, *, name: str, type: discord.ChannelType, auto_archive_duration: int) -> FakeThread:
+        thread = FakeThread(next(_ids), name, self.id)
+        self.guild.threads[thread.id] = thread
+        return thread
 
-@dataclass
+
 class FakeGuild:
-    id: int
-    name: str = "guild"
-    channels: dict[int, FakeChannel] = field(default_factory=dict)
-    roles: dict[int, FakeRole] = field(default_factory=dict)
-    me: FakeMember = field(default_factory=lambda: FakeMember(1, "bot"))
+    def __init__(self, id: int, name: str = "guild", channels: list[FakeChannel] = (),
+                 roles: list[FakeRole] = (), me: FakeMember | None = None) -> None:
+        self.id = id
+        self.name = name
+        self.channel_map = {c.id: c for c in channels}
+        self.role_map = {r.id: r for r in roles}
+        self.threads: dict[int, FakeThread] = {}
+        self.me = me or FakeMember(1, "bot")
+        for channel in channels:
+            channel.guild = self
+
+    @property
+    def channels(self) -> list[FakeChannel]:
+        return list(self.channel_map.values())
+
+    @property
+    def roles(self) -> list[FakeRole]:
+        return list(self.role_map.values())
+
+    def add(self, item: FakeChannel | FakeRole) -> None:
+        if isinstance(item, FakeRole):
+            self.role_map[item.id] = item
+        else:
+            item.guild = self
+            self.channel_map[item.id] = item
 
     def get_channel(self, channel_id: int) -> FakeChannel | None:
-        return self.channels.get(channel_id)
+        return self.channel_map.get(channel_id)
 
     def get_role(self, role_id: int) -> FakeRole | None:
-        return self.roles.get(role_id)
+        return self.role_map.get(role_id)
+
+    def get_thread(self, thread_id: int) -> FakeThread | None:
+        """Like Discord's cache: archived threads aren't in it, only a fetch finds them."""
+        thread = self.threads.get(thread_id)
+        return thread if thread is not None and not thread.archived else None
+
+    async def fetch_channel(self, channel_id: int) -> Any:
+        found = self.threads.get(channel_id) or self.channel_map.get(channel_id)
+        if found is None:
+            raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Unknown Channel")
+        return found
 
 
 class FakeResponse:
@@ -103,11 +165,12 @@ class FakeFollowup:
 
 class FakeInteraction:
     def __init__(self, services: Any, user: FakeMember, locale: discord.Locale = discord.Locale.american_english,
-                 command: Any = None) -> None:
+                 command: Any = None, guild: FakeGuild | None = None) -> None:
         self.client = SimpleNamespace(services=services)
         self.user = user
         self.locale = locale
         self.command = command
+        self.guild = guild
         self.response = FakeResponse()
         self.followup = FakeFollowup()
 

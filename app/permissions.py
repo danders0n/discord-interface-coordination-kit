@@ -1,14 +1,14 @@
 """Who may do what (docs/PLAN.md, *Who may do what*): the role -> permission mapping from `.env`.
 
-Works on role ids, so the services don't need discord.py. Per-event rights (creator, co-organisers) are checked by
-the events service on top of these."""
+Works on role ids against the resolved configuration (app/resolve.py), so the services don't need discord.py.
+Per-event rights (creator, co-organisers) are checked by the events service on top of these."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from enum import StrEnum
 
-from app.settings import Settings
+from app.resolve import Ids
 
 
 class Perm(StrEnum):
@@ -26,29 +26,29 @@ ADMINISTRATION = (Perm.MANAGE_ANY_EVENT, Perm.APPROVE_EVENTS, Perm.BOT_ADMIN)
 
 
 class Access:
-    """One member's rights, from their role ids."""
+    """One member's rights, from their role ids. Before the configuration is resolved nobody holds anything."""
 
-    def __init__(self, settings: Settings, role_ids: Iterable[int]) -> None:
-        self.settings = settings
+    def __init__(self, ids: Ids, role_ids: Iterable[int]) -> None:
+        self.ids = ids
         self.role_ids = frozenset(role_ids)
 
     def has(self, perm: Perm) -> bool:
-        return not self.role_ids.isdisjoint(getattr(self.settings.permissions, perm.value))
+        return not self.role_ids.isdisjoint(self.ids.permissions.get(perm.value, ()))
 
     def any(self, *perms: Perm) -> bool:
         return any(self.has(p) for p in perms)
 
     @property
     def is_member(self) -> bool:
-        return self.settings.roles.member in self.role_ids
+        return not self.role_ids.isdisjoint(self.ids.member)
 
     @property
     def is_mission_maker(self) -> bool:
-        return self.settings.roles.mission_maker in self.role_ids
+        return self.ids.mission_maker is not None and self.ids.mission_maker in self.role_ids
 
     @property
     def may_sign_up(self) -> bool:
-        return not self.role_ids.isdisjoint(self.settings.roles.signup)
+        return not self.role_ids.isdisjoint(self.ids.signup)
 
     @property
     def may_create_events(self) -> bool:

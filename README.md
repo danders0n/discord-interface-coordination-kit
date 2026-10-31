@@ -28,9 +28,11 @@ copy .env.example .env      # then fill it in, see below
    in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage
    Channels and Manage Roles, plus *Mention @everyone, @here and All Roles* unless the announcement and climate roles
    are mentionable. At start-up the bot checks this and posts what is missing to the staff log.
-3. Create two categories (drafts: hidden from members; events: members may read but not write) and the header,
-   announcements, moderation and staff log channels. Turn on Developer Mode (*Settings → Advanced*) and copy each
-   id into `.env`, as well as the roles' ids.
+3. Create two categories (drafts: hidden from members; events: members may read but not write), the header and
+   announcements channels, and one staff-only channel. In the staff channel the bot makes two threads itself,
+   *Staff log* and *Moderacja* (names in `.env`). Put each channel and role into `.env` by **name or id**: a name is
+   quicker, an id survives renames (turn on Developer Mode in *Settings → Advanced*, then right-click → *Copy ID*).
+   A name that matches nothing, or more than one channel or role, is reported in the staff log.
 4. Staff commands (`/reload`, later `/server`, `/link set`, `/attendance report`, `/privacy erase`) are hidden from
    everyone but admins at first. In *Server Settings → Integrations → the bot*, allow them for the roles you gave
    those permissions in `.env`. The bot still checks the roles on every use.
@@ -48,8 +50,10 @@ in every minute, and the supervisor alerts through its own Discord webhook when 
 
 ## Configuration
 
-Everything is in `.env`; [.env.example](.env.example) lists each setting with its default. Lists take ids separated
-by `;` or JSON. `python -m app check-config` validates a file without starting anything. `/reload` (bot admins)
+Everything is in `.env`; [.env.example](.env.example) lists each setting with its default. Channels and roles take
+a name or an id; lists separate them by `;` or use JSON. `python -m app check-config` validates a file without
+starting anything (names are only matched against the server when the bot connects) and lists unknown `BOT_`
+variables, such as typos or settings renamed in a newer version. `/reload` (bot admins)
 applies a changed file; the token, the guild, the data folder and the supervisor URL and token need a restart.
 
 The `/privacy` text ships in `app/privacy/`; to change it, put `privacy.pl.md` / `privacy.en.md` into the data

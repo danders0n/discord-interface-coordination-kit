@@ -25,6 +25,10 @@ log = logging.getLogger("app")
 
 
 def load_or_exit(env_file: str) -> Settings:
+    unknown = settings_module.unknown_variables(env_file)
+    if unknown:
+        print(f"Unknown settings (typos, or renamed in a newer version; see .env.example): {', '.join(unknown)}",
+              file=sys.stderr)
     try:
         return settings_module.load(env_file)
     except ValidationError as exc:
@@ -47,6 +51,7 @@ async def prepare_database(settings: Settings) -> Database:
 async def run(settings: Settings, env_file: str) -> None:
     from app.bot import EventBot  # (discord.py only for the command that needs it)
     from app.services import Services
+    from app.staff_threads import StaffThreads
 
     staff = StaffLog()
     staff.bind(asyncio.get_running_loop())
@@ -56,7 +61,8 @@ async def run(settings: Settings, env_file: str) -> None:
     scheduler = Scheduler(db)
     await backup.register(scheduler, store)
     token = settings.supervisor.token.get_secret_value() if settings.supervisor.token else None
-    services = Services(store, db, scheduler, staff, SupervisorClient(settings.supervisor.url, token))
+    services = Services(store, db, scheduler, staff, SupervisorClient(settings.supervisor.url, token),
+                        StaffThreads(db, store))
     async with EventBot(services) as bot:
         await bot.start(settings.discord_token.get_secret_value())
 

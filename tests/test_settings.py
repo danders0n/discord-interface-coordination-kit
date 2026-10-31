@@ -14,8 +14,7 @@ BOT_CHANNELS__DRAFTS_CATEGORY=2
 BOT_CHANNELS__EVENTS_CATEGORY=3
 BOT_CHANNELS__HEADER=4
 BOT_CHANNELS__ANNOUNCEMENTS=5
-BOT_CHANNELS__MODERATION=6
-BOT_CHANNELS__STAFF_LOG=7
+BOT_CHANNELS__STAFF=7
 BOT_ROLES__MEMBER=8
 BOT_ROLES__MISSION_MAKER=9
 """
@@ -78,30 +77,36 @@ def test_a_missing_section_names_its_variables(tmp_path):
     with pytest.raises(ValidationError) as caught:
         load(env)
     lines = describe_errors(caught.value)
-    assert "BOT_CHANNELS__STAFF_LOG: Field required" in lines
-    assert not any(line.startswith("BOT_CHANNELS__LINK_REMINDER") for line in lines)
+    assert "BOT_CHANNELS__STAFF: Field required" in lines
+    assert not any(line.startswith(("BOT_CHANNELS__LINK_REMINDER", "BOT_CHANNELS__STAFF_LOG_THREAD")) for line in lines)
 
 
-def _leaves(model, prefix="BOT_") -> set[str]:
-    from pydantic import BaseModel
-    names = set()
-    for name, field in model.model_fields.items():
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            names |= _leaves(annotation, f"{prefix}{name.upper()}__")
-        else:
-            names.add(f"{prefix}{name.upper()}")
-    return names
+def test_ids_and_names_mix(tmp_path):
+    env = write(tmp_path, "BOT_ROLES__SIGNUP=Klanowicz;123; Kadet \nBOT_PERMISSIONS__BOT_ADMIN=@Admin\n"
+                          'BOT_PERMISSIONS__APPROVE_EVENTS=["Moderator", 5]\n')
+    env.write_text(env.read_text().replace("BOT_CHANNELS__STAFF=7", "BOT_CHANNELS__STAFF=#staff"))
+    settings = load(env)
+    assert settings.roles.signup == ["Klanowicz", 123, "Kadet"]
+    assert settings.permissions.bot_admin == ["Admin"]
+    assert settings.permissions.approve_events == ["Moderator", 5]
+    assert settings.channels.staff == "staff" and settings.channels.header == 4
+    assert settings.channels.staff_log_thread == "Staff log"
 
 
 def test_env_example_lists_every_setting_and_nothing_else():
     import re
-    from pathlib import Path
 
-    from app.settings import Settings
+    from app.settings import variables
     example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
     listed = set(re.findall(r"^#?\s*(BOT_[A-Z_]+)=", example, re.M))
-    assert listed == _leaves(Settings)
+    assert listed == variables()
+
+
+def test_unknown_variables_are_found(tmp_path, monkeypatch):
+    from app.settings import unknown_variables
+    env = write(tmp_path, "BOT_CHANNELS__STAFF_LOG=7\nBOT_ROLES__MEMEBR=1\n")
+    monkeypatch.setenv("BOT_LANGAUGE", "pl")
+    assert unknown_variables(env) == ["BOT_CHANNELS__STAFF_LOG", "BOT_LANGAUGE", "BOT_ROLES__MEMEBR"]
 
 
 def test_reload_with_errors_changes_nothing(tmp_path):

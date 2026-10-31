@@ -32,7 +32,7 @@ the supervisor's player statistics. It also keeps the group's squad.xml in step 
 supervisor):
 
 - **A member's event:** a *Klanowicz* creates an internal event. No reservation exists yet. With the briefing and
-  ORBAT in place they press *Send for approval*: the reservation is created, the moderation channel gets the
+  ORBAT in place they press *Send for approval*: the reservation is created, the moderation thread gets the
   request, a moderator presses *Approve*, and the event is published at once. Had the moderator pressed *Reject*
   with a reason, the event would be a draft again, without a reservation, and the creator pinged.
 - **A rejected change:** the creator moves that approved event by a day. Nothing moves yet: the moderators get a
@@ -110,7 +110,7 @@ Members (both are switched on in the Discord developer portal).
 | Calendar | Decided 2026-10-31. The header message also lists the **published events of the next N days** (config; assumed 14): date as a Discord timestamp, kind, title, taken / total slots (in a Zeus event, *Coming* and the limit), and a link to the channel. It is edited whenever one of them changes, batched like the other edits. `/events` shows the same list privately, plus the member's own sign-ups. |
 | Flow | A short step-by-step **ephemeral wizard** (selects, buttons, modals). It creates a **draft**; everything else is filled in the **organiser panel**. The wizard's answers live in memory until its last step creates the draft: after a restart its buttons say the session expired and to start again (decided 2026-10-31). The panel's buttons carry the event id in `custom_id`, so they keep working. |
 | Wizard fields | Kind, then the host group (guest) or the invited groups (hosted, optional at this point), title, mission type, climate, date, assembly time, start time, duration. |
-| Who | Any member with the group's **member role** (config, e.g. *Klanowicz*); guest events only the mission maker role and above. Whether the event then needs approval depends on the creator (see *Approval*). |
+| Who | Any member with one of the group's **member roles** (config, a list, e.g. *Klanowicz*); guest events only the mission maker role and above. Whether the event then needs approval depends on the creator (see *Approval*). |
 | Kind | *Internal*, *Guest*, *Hosted* or *Zeus* (see *Event kinds*). |
 | Other groups | Picked from the known groups, or added on the spot (see *Event kinds*). |
 | Mission type | Picked from a **fixed list in config**. For display only; it changes no rules. |
@@ -127,7 +127,7 @@ Members (both are switched on in the Discord developer portal).
 |---|---|
 | Draft | The channel is hidden from members while the organisers prepare it. When the reservation already exists (see *On finish*), the time slot is held and a clash shows up early. |
 | Publish | *Publish* in the panel, for creators who may publish (see *Approval*); the others get *Send for approval* in its place. Both are refused until the **briefing** and the **ORBAT** exist (a Zeus event has no ORBAT, so only the briefing; a guest event also needs the *How to join* text); the modset preset is optional (some missions are vanilla). The panel shows a checklist of what is missing. Publishing makes the channel visible (read-only), creates the discussion thread, and posts the announcement. |
-| Stale draft | Still a draft, or still waiting for approval, **N hours** before the assembly (config; e.g. 48 h): the creator is pinged in the draft's thread, and the staff log is told; a waiting event is also re-posted to the moderation channel. Still not published at **M hours** (config; e.g. 24 h): the event is cancelled automatically, any reservation is deleted, and the **channel is deleted** (a draft has nothing worth archiving). |
+| Stale draft | Still a draft, or still waiting for approval, **N hours** before the assembly (config; e.g. 48 h): the creator is pinged in the draft's thread, and the staff log is told; a waiting event is also re-posted to the moderation thread. Still not published at **M hours** (config; e.g. 24 h): the event is cancelled automatically, any reservation is deleted, and the **channel is deleted** (a draft has nothing worth archiving). |
 | Sign-up start | Optional, set in the panel as a date and time (config time zone). Without one, sign-up opens at publish; a time before the publish moment also means "at publish". Until it opens, the info embed shows *Sign-up opens \<t:…:R\>* and *Sign up* / *Reserve* / `/slot take` (in a Zeus event, *Coming*) are disabled, while *Maybe* and *Can't come* (*Not coming*) work. When it opens, the announcement role and the climate role are pinged in the event channel. There is no priority window. |
 
 ### Approval
@@ -140,7 +140,7 @@ Decided 2026-10-31.
 | Zeus | A member's **Zeus event** is published at once, but its **host reservation** needs approval (decided 2026-10-31): *Request the server* sends the same kind of request; until it is approved the event has no reservation, and the info embed says so. Mission makers and above reserve at once. |
 | Sending | *Send for approval* in the panel, once the publish checklist is complete. The event becomes **pending**. For an internal or hosted event the reservation is created now, so a clash shows up in the request. While pending, the details, briefing and ORBAT are **locked**; *Withdraw request* turns it back into a draft (and deletes the reservation) so it can be edited (decided 2026-10-31). |
 | Kind | The kind can be changed **only in a draft** (decided 2026-10-31), before publishing or sending for approval, when there are no sign-ups yet; the reservation and profile are created or deleted to fit the new kind. After that, a wrong kind means cancelling and creating a new event. A member can't pick *Guest*. |
-| Where | A **moderation channel** (config) gets an embed: title, kind, other groups, times, the creator, the reservation state, and a link to the hidden channel, which *approve events* roles can see. It has persistent *Approve* and *Reject* buttons; *Reject* asks for a reason in a modal. **Approve is disabled while the reservation failed** (shown with the reason); the moderator rejects, or resolves the clash and presses *Retry reservation*, which turns Approve on (decided 2026-10-31). |
+| Where | The **moderation thread** in the staff channel (see *Notifications*) gets an embed: title, kind, other groups, times, the creator, the reservation state, and a link to the hidden channel, which *approve events* roles can see. It has persistent *Approve* and *Reject* buttons; *Reject* asks for a reason in a modal. **Approve is disabled while the reservation failed** (shown with the reason); the moderator rejects, or resolves the clash and presses *Retry reservation*, which turns Approve on (decided 2026-10-31). |
 | Approve | **Approving publishes** the event at once (one step for the moderator). The creator is pinged in the event's thread. |
 | Reject | The event goes back to draft with the reason shown in the panel, the creator is pinged, and the reservation is deleted. |
 | Changes after approval | Changing the **date, times or duration** of an approved member's event is a **proposal**: the event and its reservation stay on the old times until a moderator approves it (decided 2026-10-31). The request shows old and new times; approving moves the event and the reservation (a clash shows as 409 in the request, and Approve stays off); rejecting changes nothing, and the creator is pinged with the reason. Briefing, ORBAT, preset and the rest change freely, as *Edits after publish*. |
@@ -231,14 +231,14 @@ Decided 2026-10-31. A Zeus event has no ORBAT, only a list of who is coming.
 | Roles with *manage any event* (config) | The same, on every event; publish without approval; edit and delete any ORBAT template; correct other groups' names. |
 | The *member role* (config, e.g. *Klanowicz*) | Use the wizard for internal, hosted and Zeus events. Their internal and hosted events need approval before they are published. |
 | The *mission maker* role (config) | Use the wizard and publish without approval. As organisers, build the event's supervisor profile and upload missions. |
-| Roles with *approve events* (config) | See pending events, approve or reject them in the moderation channel; publish their own events without approval. |
+| Roles with *approve events* (config) | See pending events, approve or reject them in the moderation thread; publish their own events without approval. |
 | Roles with *server control* / *server message* (config) | The `/server` commands. |
 | Roles with *server override* (config) | *Start anyway?* during a reservation. |
 | Roles with *manage links* (config) | Set, change or remove anyone's Steam link and nick. |
 | Roles with *bot admin* (config) | `/reload`, `/attendance report`, `/privacy erase`. |
 | Everyone with a sign-up role | Sign up; `/events`, `/link`, `/privacy`, `/archive event` (their own events); `/attendance`, `/profile`, `/mission-maker` and `/group` with the limits in *Who sees what*. |
 
-The role → permission mapping lives in `.env`, as lists of role ids. Every Discord user acts on the supervisor through the bot's
+The role → permission mapping lives in `.env`, as lists of role ids or names. Every Discord user acts on the supervisor through the bot's
 one supervisor account, so these checks are the only thing limiting what each member can do there.
 
 ### Notifications
@@ -248,8 +248,9 @@ one supervisor account, so these checks are the only thing limiting what each me
 | Announcement | On **publish**: a short notice in the **announcements channel** (config), mentioning the announcement role (config) and the event's **climate role**, and linking to the event channel. It is edited when the event changes or is cancelled. |
 | Sign-up open ping | When sign-up opens: the announcement role and the climate role, in the event's thread. |
 | Reminder ping | In the event's thread, mentioning every slot holder (in a Zeus event, everyone *Coming*), at the **offsets before the assembly** set in config (e.g. 24 h, 1 h). |
-| Approval request | In the **moderation channel** (config), see *Approval*. |
-| Staff log | A **staff log channel** (config) gets stale drafts, approval decisions, reservation failures and auto-ends, `/server` use and overrides, Steam link changes and duplicates, and attendance reports. |
+| Approval request | In the **moderation thread**, see *Approval*. |
+| Staff threads | Decided 2026-10-31. The staff log and the moderation requests are **threads** in one staff-only channel (config, `BOT_CHANNELS__STAFF`; thread names in config). The bot makes them, remembers their ids, unarchives one Discord archived after a quiet week before writing, follows a renamed thread name, and makes a new one when the old is deleted or the staff channel changes. |
+| Staff log | The **staff log thread** gets stale drafts, approval decisions, reservation failures and auto-ends, `/server` use and overrides, Steam link changes and duplicates, and attendance reports. |
 
 A ping that mentions members (reminders, cancelling) is **split** when it would pass Discord's 2000 characters:
 the first message has the text and the first mentions, the next ones only mentions (decided 2026-10-31).
@@ -315,7 +316,7 @@ event server for the reservation. It is optional: an event without one runs on t
 | Commands | `/server start`, `stop`, `restart`, `say`, with the server picked by autocomplete from `GET /api/servers`. |
 | Safety | Stop and restart ask for confirmation (an ephemeral button) that shows how many players are online. |
 | During a reservation | A refused start or restart (409 with `reservation`) is shown with the reservation's name and end time. Members with the **server override** role get *Start anyway?*, which resends with `override=true`. |
-| Log | Every use goes to the staff log channel, and overrides are marked. |
+| Log | Every use goes to the staff log, and overrides are marked. |
 
 ### Supervisor: attendance
 
@@ -381,7 +382,7 @@ config**. Slash command names and descriptions are localized through `app_comman
 
 | Topic | Decision |
 |---|---|
-| Config | **Everything in `.env`** (decided 2026-10-31), read with pydantic-settings and validated at startup, following the supervisor's convention: one prefix (assumed `BOT_`), `__` for nested fields, lists as JSON or separated by `;`, real environment variables override the file. Channels and roles are given by their Discord **ids** (Developer Mode → *Copy ID*). A `.env.example` lists every setting with its default and a comment. Its contents are listed under *Config contents*. |
+| Config | **Everything in `.env`** (decided 2026-10-31), read with pydantic-settings and validated at startup, following the supervisor's convention: one prefix (assumed `BOT_`), `__` for nested fields, lists as JSON or separated by `;`, real environment variables override the file. Channels and roles are given by Discord **id or name** (decided 2026-10-31): names are matched on the server, ignoring case, at start-up and on `/reload`; a name that matches nothing or several is reported, and an id never breaks on a rename (Developer Mode → *Copy ID*). `check-config` also lists unknown `BOT_` variables (typos, renamed settings). A `.env.example` lists every setting with its default and a comment. Its contents are listed under *Config contents*. |
 | `/reload` | Only the **bot admin** role. The bot reads `.env` again and **validates it first**: on error nothing changes, and the errors are shown. An item removed from the config that existing events still use (a mission type, climate role, or role) stays readable on those events, because events store it **by value**, but it can't be picked for new ones. The reply lists the affected events. The token and the supervisor URL need a restart. |
 | Secrets | The Discord bot token and the supervisor API token, in the same `.env`. |
 | Check at startup | The bot checks that every configured channel and role exists, and that it has the Discord permissions it needs (View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage Channels, Manage Roles for channel overwrites, and *Mention @everyone, @here and All Roles* unless the announcement and climate roles are mentionable). What is missing is logged and posted to the staff log (assumed). |
@@ -430,7 +431,8 @@ Decided 2026-10-31, following the supervisor's conventions where it has one.
 
 Config contents (all in `.env`):
 - the Discord bot token, the supervisor API token;
-- guild id; categories and channels (drafts, events, header, announcements, moderation, staff log, reminder),
+- guild id; categories and channels (drafts, events, header, announcements, staff, reminder), the names of the
+  staff log and moderation threads,
   and the archive category name pattern;
 - the sign-up roles;
 - our group (acronym, full name), mission types, climate roles (other groups live in the database);

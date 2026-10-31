@@ -1,23 +1,40 @@
 """Configuration: everything in `.env` (docs/PLAN.md, *Configuration and deployment*).
 
 Read with pydantic-settings like the supervisor: prefix ``BOT_``, ``__`` between nested names, and lists as JSON
-or separated by ``;`` (``BOT_PERMISSIONS__BOT_ADMIN=123;456``). Real environment variables win over the file.
-Channels and roles are Discord ids. ``/reload`` reads the file again through :class:`SettingsStore`."""
+or separated by ``;`` (``BOT_PERMISSIONS__BOT_ADMIN=123;Moderator``). Real environment variables win over the file.
+Channels and roles are a Discord **id or name** (:data:`Ref`); names are turned into ids on the server at start-up
+and on ``/reload`` (app/resolve.py). ``/reload`` reads the file again through :class:`SettingsStore`."""
 
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 
 ENV_PREFIX = "BOT_"
 ENV_FILE = ".env"
 LIST_SPLIT = re.compile(r"[;\n]")
+
+
+def _ref(value: Any) -> Any:
+    """Digits are an id; anything else is a name (trimmed, a leading # or @ dropped)."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+        text = text.lstrip("#@").strip()
+        if not text:
+            raise ValueError("an empty name")
+        return text
+    return value
+
+
+Ref = Annotated[int | str, BeforeValidator(_ref)]
 
 
 class Group(BaseModel):
@@ -26,32 +43,33 @@ class Group(BaseModel):
 
 
 class Channels(BaseModel):
-    drafts_category: int = Field(description="Hidden category for drafts and events waiting for approval")
-    events_category: int = Field(description="Category of published events")
-    header: int = Field(description="Channel with the Create event button and the calendar")
-    announcements: int
-    moderation: int = Field(description="Approval requests")
-    staff_log: int
-    link_reminder: int | None = Field(None, description="Steam link reminders for members with closed DMs")
+    drafts_category: Ref = Field(description="Hidden category for drafts and events waiting for approval")
+    events_category: Ref = Field(description="Category of published events")
+    header: Ref = Field(description="Channel with the Create event button and the calendar")
+    announcements: Ref
+    staff: Ref = Field(description="Staff-only channel: the bot keeps the staff log and moderation threads in it")
+    staff_log_thread: str = Field("Staff log", min_length=1, max_length=100)
+    moderation_thread: str = Field("Moderacja", min_length=1, max_length=100, description="Approval requests")
+    link_reminder: Ref | None = Field(None, description="Steam link reminders for members with closed DMs")
 
 
 class Roles(BaseModel):
-    member: int = Field(description="The group's member role, e.g. Klanowicz: may use the wizard")
-    mission_maker: int
-    announcement: int | None = Field(None, description="Mentioned in announcements and when sign-up opens")
-    signup: list[int] = Field(default_factory=list, description="Roles that may sign up for events")
+    member: list[Ref] = Field(min_length=1, description="The group's member roles, e.g. Klanowicz: may use the wizard")
+    mission_maker: Ref
+    announcement: Ref | None = Field(None, description="Mentioned in announcements and when sign-up opens")
+    signup: list[Ref] = Field(default_factory=list, description="Roles that may sign up for events")
 
 
 class Permissions(BaseModel):
     """Permission -> the roles that hold it."""
 
-    approve_events: list[int] = Field(default_factory=list)
-    manage_any_event: list[int] = Field(default_factory=list)
-    server_control: list[int] = Field(default_factory=list)
-    server_message: list[int] = Field(default_factory=list)
-    server_override: list[int] = Field(default_factory=list)
-    manage_links: list[int] = Field(default_factory=list)
-    bot_admin: list[int] = Field(default_factory=list)
+    approve_events: list[Ref] = Field(default_factory=list)
+    manage_any_event: list[Ref] = Field(default_factory=list)
+    server_control: list[Ref] = Field(default_factory=list)
+    server_message: list[Ref] = Field(default_factory=list)
+    server_override: list[Ref] = Field(default_factory=list)
+    manage_links: list[Ref] = Field(default_factory=list)
+    bot_admin: list[Ref] = Field(default_factory=list)
 
 
 class Supervisor(BaseModel):
@@ -143,6 +161,28 @@ class ListFriendlyDotEnvSource(DotEnvSettingsSource):
 def load(env_file: str | Path = ENV_FILE) -> Settings:
     """Read and validate the settings; raises :class:`pydantic.ValidationError`."""
     return Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+
+def variables(model: type[BaseModel] | None = None, prefix: str = ENV_PREFIX) -> set[str]:
+    """Every variable name the settings read (``BOT_CHANNELS__STAFF`` ...)."""
+    names: set[str] = set()
+    for name, field in (model or Settings).model_fields.items():
+        if isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel):
+            names |= variables(field.annotation, f"{prefix}{name.upper()}__")
+        else:
+            names.add(f"{prefix}{name.upper()}")
+    return names
+
+
+def unknown_variables(env_file: str | Path = ENV_FILE) -> list[str]:
+    """``BOT_`` variables in the file or the environment that no setting reads: typos and renamed settings."""
+    import os
+
+    from dotenv import dotenv_values
+
+    found = set(dotenv_values(env_file)) if Path(env_file).is_file() else set()
+    found |= set(os.environ)
+    return sorted(name for name in found if name.upper().startswith(ENV_PREFIX) and name.upper() not in variables())
 
 
 def _required_leaves(model: type[BaseModel], prefix: str) -> list[str]:

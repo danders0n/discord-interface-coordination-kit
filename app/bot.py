@@ -17,6 +17,7 @@ from app.discord_util import NO_MENTIONS, on_app_command_error
 from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
 from app.services import Services
+from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
 
@@ -54,12 +55,17 @@ class EventBot(commands.Bot):
             asyncio.create_task(heartbeat.run(self.services.supervisor), name="heartbeat"),
         ]
 
+    def staff_channel(self) -> tuple[discord.Guild, discord.TextChannel]:
+        guild = self.get_guild(self.services.settings.guild_id)
+        channel = guild.get_channel(self.services.ids.staff) if guild and self.services.ids.staff else None
+        if guild is None or not isinstance(channel, discord.TextChannel):
+            raise LookupError("The staff channel (BOT_CHANNELS__STAFF) is not resolved")
+        return guild, channel
+
     async def _send_staff(self, text: str) -> None:
         await self.wait_until_ready()
-        channel = self.get_channel(self.services.settings.channels.staff_log)
-        if not isinstance(channel, discord.abc.Messageable):
-            raise LookupError(f"Staff log channel {self.services.settings.channels.staff_log} not found")
-        await channel.send(text, allowed_mentions=NO_MENTIONS)
+        guild, channel = self.staff_channel()
+        await self.services.threads.send(guild, channel, "staff_log", text, allowed_mentions=NO_MENTIONS)
 
     async def on_ready(self) -> None:
         if self._started:
@@ -71,9 +77,16 @@ class EventBot(commands.Bot):
         if guild is None:
             log.error("The bot is not on the server %s (BOT_GUILD_ID)", settings.guild_id)
             return
-        problems = startup_checks.check(guild, settings)
+        self.services.ids, problems = startup_checks.check(guild, settings)
         for problem in problems:
             log.warning("Start-up check: %s", problem)
+        if self.services.ids.staff is not None:
+            for kind in KINDS:  # made now, so staff see where the bot will write
+                try:
+                    await self.services.threads.get(guild, guild.get_channel(self.services.ids.staff), kind)
+                except discord.HTTPException as exc:
+                    problems.append(t("Could not make the {thread} thread: {reason}", settings.language,
+                                      thread=self.services.threads.name(kind), reason=exc.text or exc))
         text = t("Bot started.", settings.language)
         if problems:
             text += "\n" + t("Problems with the configuration:", settings.language) + "\n"
