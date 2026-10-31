@@ -53,6 +53,24 @@ class ScheduledAction(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class HostReservation(Base):
+    """An event's reservation of the host on the supervisor (docs/PLAN.md, *Supervisor: reservation*): what the bot
+    asked for, and how it went. One per event; the event table (phase 4) refers to it by ``event_id``."""
+
+    __tablename__ = "host_reservation"
+
+    event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    reservation_id: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(20))  # booked | retrying | failed | ended | cancelling | cancelled
+    error: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String(80))
+    starts_at: Mapped[datetime]
+    ends_at: Mapped[datetime]
+    link: Mapped[str | None] = mapped_column(String(500))
+    profile_id: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
 class BotState(Base):
     """Small values the bot keeps between restarts (the header message id, the last start)."""
 

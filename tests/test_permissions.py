@@ -24,7 +24,7 @@ def test_sign_up_roles_from_settings(services):
 def test_permissions_by_role(services):
     admin = Access(services.ids, [ADMIN])
     assert admin.has(Perm.BOT_ADMIN) and admin.has(Perm.MANAGE_ANY_EVENT) and admin.is_administration
-    assert not admin.has(Perm.SERVER_CONTROL)
+    assert admin.has(Perm.SERVER_CONTROL) and not admin.has(Perm.SERVER_MESSAGE)
 
 
 def test_before_the_server_is_known_nobody_holds_anything():

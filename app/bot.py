@@ -16,6 +16,7 @@ from app.admin.cog import AdminCog
 from app.discord_util import NO_MENTIONS, on_app_command_error
 from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
+from app.servers.cog import ServerCog
 from app.services import Services
 from app.staff_threads import KINDS
 
@@ -46,7 +47,7 @@ class EventBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.tree.on_error = on_app_command_error
-        for cog in (AdminCog(self.services), PrivacyCog(self.services)):
+        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         self._tasks = [

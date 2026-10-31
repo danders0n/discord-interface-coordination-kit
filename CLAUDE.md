@@ -14,8 +14,9 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phase 1 (skeleton) is built**: settings, database and migrations, backups, i18n, permissions, the
-scheduled-action loop, logging and the staff log, start-up checks, the heartbeat, `/reload` and `/privacy`. The
+Status: **phases 1 and 2 are built**: settings, database and migrations, backups, i18n, permissions, the
+scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
+supervisor client, host reservations as a service (`app/reservations/`), and `/server`. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -70,8 +71,15 @@ exactly the settings.
 - `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
 - `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
 - `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue.
-- `app/supervisor_client/`, `app/heartbeat.py`: HTTP client, capabilities, heartbeat loop.
-- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts).
+- `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (servers, reservations, `ReservationRefused` for a
+  409 with `reservation`), capabilities, heartbeat loop.
+- `app/reservations/service.py`: an event's host reservation: `book` (create or move; `Frozen` from the quiet
+  period), `retry`, `end`, `cancel` (ends one under way first); unreachable → scheduled retries, refused →
+  `failed` + staff note. State in `host_reservation`.
+- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts), `app/servers/` (`/server`
+  with confirmation and override buttons).
+- `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
+  creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 
 ## Cross-cutting rules
 

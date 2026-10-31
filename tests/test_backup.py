@@ -2,7 +2,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app.db import backup
+from app.db import backup, migrate
 from app.settings import SettingsStore
 
 WARSAW = ZoneInfo("Europe/Warsaw")
@@ -16,7 +16,7 @@ async def test_backup_copies_the_live_database_and_keeps_the_newest(db, settings
     kept = sorted(p.name for p in folder.glob("bot-*.db"))
     assert kept == ["bot-20261103-030000.db", "bot-20261104-030000.db", "bot-20261105-030000.db"]
     copy = sqlite3.connect(folder / kept[-1])
-    assert copy.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0001"
+    assert copy.execute("SELECT version_num FROM alembic_version").fetchone()[0] == migrate.head()
     copy.close()
 
 

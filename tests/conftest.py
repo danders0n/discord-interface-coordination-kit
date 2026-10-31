@@ -9,6 +9,7 @@ import pytest
 from fakes import FakeChannel, FakeGuild, FakeRole
 
 from app.db import Database, migrate
+from app.reservations.service import ReservationService
 from app.resolve import resolve
 from app.scheduler import Scheduler
 from app.services import Services
@@ -30,7 +31,10 @@ def make_settings(data_dir: Path, **overrides) -> Settings:
                      "announcements": ANNOUNCE, "staff": STAFF},
         "roles": {"member": [MEMBER], "mission_maker": MISSION_MAKER, "announcement": ANNOUNCEMENT,
                   "signup": [MEMBER, KADET]},
-        "permissions": {"bot_admin": [ADMIN], "approve_events": [MODERATOR], "manage_any_event": [ADMIN]},
+        "permissions": {"bot_admin": [ADMIN], "approve_events": [MODERATOR], "manage_any_event": [ADMIN],
+                        "server_control": [ADMIN, MISSION_MAKER], "server_message": [MODERATOR],
+                        "server_override": [ADMIN]},
+        "supervisor": {"event_server": "event"},
     } | overrides
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
 
@@ -82,7 +86,23 @@ async def services(settings: Settings, db: Database, clock: Clock, guild: FakeGu
     staff.bind(asyncio.get_running_loop())
     client = SupervisorClient("http://127.0.0.1:1", None)
     store = SettingsStore(settings)
-    built = Services(store, db, Scheduler(db, clock), staff, client, StaffThreads(db, store))
+    scheduler = Scheduler(db, clock)
+    built = Services(store, db, scheduler, staff, client, StaffThreads(db, store),
+                     ReservationService(db, client, store, scheduler, staff.post))
     built.ids, _ = resolve(guild, settings)
     yield built
     await client.close()
+
+
+@pytest.fixture
+async def fake(services, clock):
+    """A running fake supervisor, with the services' client pointed at it and its clock tied to the tests'."""
+    from aiohttp.test_utils import TestServer
+    from fake_supervisor import TOKEN, State, make_app
+
+    state = State(now=clock.now)
+    server = TestServer(make_app(state))
+    await server.start_server()
+    services.supervisor.url, services.supervisor.token = str(server.make_url("")).rstrip("/"), TOKEN
+    yield state
+    await server.close()

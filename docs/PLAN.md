@@ -1,6 +1,7 @@
 # Plan: community event bot
 
-Status: phase 1 (skeleton) built on 2026-10-31; the other phases are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+Status: phases 1 (skeleton) and 2 (supervisor: reservations, `/server`) built on 2026-10-31; the other phases
+are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 
@@ -457,6 +458,7 @@ Config contents (all in `.env`):
 | Table | Holds |
 |---|---|
 | `event` | Kind (`internal` / `guest` / `hosted` / `zeus`), host group (guest), *How to join* text, sign-up limit (Zeus), title, type, climate (by value), author, creator, date and times (UTC), duration, status (`draft` / `pending` / `published` / `ended` / `cancelled`; `ended` is set by the attendance trigger: sign-up closed, the report still correctable), and apart from it `archived_at` (the channel moved to an archive category) and `exported_at` (moved into the database), the approval (what is asked: the event, a Zeus reservation, or a change of times with the proposed values; moderation message id, decided by, reason), *Don't end automatically*, a remembered early `finished`, sign-up start, briefing fields and image, preset (name, mods, DLC, file), channel / thread / message ids, reservation id and state, the time of the attendance trigger; the supervisor profile (id, build state, job id, mission template, hostname, max players, signatures, the previous profile of the event server, *keep*) |
+| `host_reservation` | Built in phase 2. One per event (keyed by the event's id): the supervisor reservation's id, state (`booked` / `retrying` / `failed` / `ended` / `cancelling` / `cancelled`), the supervisor's error, and what was asked (name, times, link, profile). It holds the event's "reservation id and state" |
 | `event_organiser` | Event, member (co-organisers) |
 | `other_group` | Acronym, full name, added by |
 | `event_guest_group` | Event, group (the invited groups of a hosted event) |

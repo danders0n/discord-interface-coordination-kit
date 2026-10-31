@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.db import Database
+from app.reservations.service import ReservationService
 from app.resolve import Ids
 from app.scheduler import Scheduler
 from app.settings import Settings, SettingsStore
@@ -21,6 +22,7 @@ class Services:
     staff: StaffLog
     supervisor: SupervisorClient
     threads: StaffThreads
+    reservations: ReservationService
     # The configuration's channels and roles as ids on the server; empty until the bot has seen the guild.
     ids: Ids = field(default_factory=Ids)
 

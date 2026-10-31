@@ -28,6 +28,14 @@ class SupervisorUnreachable(SupervisorError):
         super().__init__(0, message)
 
 
+class ReservationRefused(SupervisorError):
+    """A start or restart a reservation refused (409 with ``reservation``: id, name, server_id, starts_at, until)."""
+
+    @property
+    def reservation(self) -> dict[str, Any]:
+        return self.body["reservation"]
+
+
 @dataclass
 class SystemInfo:
     version: Any = None
@@ -45,6 +53,7 @@ class SupervisorClient:
         self.token = token
         self._session = session
         self.info = SystemInfo()
+        self._info_read = False
 
     async def _http(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -67,7 +76,8 @@ class SupervisorClient:
                 except ValueError:
                     body = text
                 if response.status >= 400:
-                    raise SupervisorError(response.status, _message(body, response.reason), body)
+                    error = ReservationRefused if isinstance(body, dict) and "reservation" in body else SupervisorError
+                    raise error(response.status, _message(body, response.reason), body)
                 return body
         except aiohttp.ClientError as exc:
             raise SupervisorUnreachable(f"The supervisor at {self.url} could not be reached: {exc}") from exc
@@ -86,10 +96,71 @@ class SupervisorClient:
             body = {}
         self.info = SystemInfo(version=body.get("version"), api_level=int(body.get("api_level") or 0),
                                timezone=body.get("timezone"), capabilities=frozenset(body.get("capabilities") or ()))
+        self._info_read = True
+        return self.info
+
+    async def ensure_info(self) -> SystemInfo:
+        """The capabilities, read once (the heartbeat loop reads them again after a reconnect)."""
+        if not self._info_read:
+            await self.refresh_info()
         return self.info
 
     async def heartbeat(self, name: str, interval_s: int) -> None:
         await self.request("POST", "/api/integrations/heartbeat", json={"name": name, "interval_s": interval_s})
+
+    # ---------------------------------------------------------------- servers
+
+    async def servers(self) -> list[dict[str, Any]]:
+        """Every server's status: ``server`` (id, slug, name, protected ...), ``state``, ``players_online``."""
+        return await self.request("GET", "/api/servers")
+
+    async def server_status(self, slug: str) -> dict[str, Any]:
+        return await self.request("GET", f"/api/servers/{slug}/status", params={"query": "false"})
+
+    async def start(self, slug: str, override: bool = False) -> dict[str, Any]:
+        return await self.request("POST", f"/api/servers/{slug}/start", json={"override": override})
+
+    async def stop(self, slug: str) -> dict[str, Any]:
+        return await self.request("POST", f"/api/servers/{slug}/stop", json={})
+
+    async def restart(self, slug: str, override: bool = False) -> dict[str, Any]:
+        return await self.request("POST", f"/api/servers/{slug}/restart", json={"override": override})
+
+    async def say(self, slug: str, message: str) -> None:
+        await self.request("POST", f"/api/servers/{slug}/say", json={"message": message})
+
+    # ---------------------------------------------------------------- reservations
+
+    async def reservations(self, managed_by: str | None = None, external_ref: str | None = None) -> list[dict[str, Any]]:
+        params = {k: v for k, v in (("managed_by", managed_by), ("external_ref", external_ref)) if v is not None}
+        return await self.request("GET", "/api/reservations", params=params)
+
+    async def create_reservation(self, body: dict[str, Any]) -> dict[str, Any]:
+        """201 for a new one; with a known ``managed_by`` / ``external_ref``, 200 and the existing one unchanged."""
+        return await self.request("POST", "/api/reservations", json=body)
+
+    async def update_reservation(self, reservation_id: int, body: dict[str, Any]) -> dict[str, Any]:
+        """``PUT`` replaces the whole reservation: send every field."""
+        return await self.request("PUT", f"/api/reservations/{reservation_id}", json=body)
+
+    async def delete_reservation(self, reservation_id: int) -> None:
+        await self.request("DELETE", f"/api/reservations/{reservation_id}")
+
+    async def end_reservation(self, reservation_id: int) -> bool:
+        """End it now if it is under way (or in its quiet period). False when it wasn't."""
+        try:
+            if self.info.has("reservation_end_by_id"):
+                await self.request("POST", f"/api/reservations/{reservation_id}/end")
+                return True
+            current = await self.request("GET", "/api/reservations/current")
+            if not current or current.get("reservation_id") != reservation_id:
+                return False
+            await self.request("POST", "/api/reservations/current/end")
+            return True
+        except SupervisorError as exc:
+            if exc.status in (404, 409):
+                return False
+            raise
 
 
 def _message(body: Any, fallback: str | None) -> str:

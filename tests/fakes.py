@@ -140,10 +140,14 @@ class FakeResponse:
     def __init__(self) -> None:
         self.sent: list[Sent] = []
         self.modals: list[Any] = []
+        self.edited: list[dict[str, Any]] = []
         self.deferred = False
 
     def is_done(self) -> bool:
-        return bool(self.sent or self.modals or self.deferred)
+        return bool(self.sent or self.modals or self.deferred or self.edited)
+
+    async def edit_message(self, **kwargs: Any) -> None:
+        self.edited.append(kwargs)
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
         self.sent.append(Sent(content, kwargs))

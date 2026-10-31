@@ -61,8 +61,9 @@ async def run(settings: Settings, env_file: str) -> None:
     scheduler = Scheduler(db)
     await backup.register(scheduler, store)
     token = settings.supervisor.token.get_secret_value() if settings.supervisor.token else None
-    services = Services(store, db, scheduler, staff, SupervisorClient(settings.supervisor.url, token),
-                        StaffThreads(db, store))
+    client = SupervisorClient(settings.supervisor.url, token)
+    services = Services(store, db, scheduler, staff, client, StaffThreads(db, store),
+                        ReservationService(db, client, store, scheduler, staff.post))
     async with EventBot(services) as bot:
         await bot.start(settings.discord_token.get_secret_value())
 
