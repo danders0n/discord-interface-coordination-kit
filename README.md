@@ -1,0 +1,112 @@
+# Event bot
+
+A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservations and event profiles on
+[arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
+squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
+
+**Status: phase 1 (skeleton).** The bot starts, checks its configuration on the server, keeps its database, backups,
+logs and staff log, reports to the supervisor, and answers `/reload` and `/privacy`. Events come in the next phases.
+
+## Install
+
+Python 3.11 or newer, on the same machine as the supervisor.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env      # then fill it in, see below
+.venv\Scripts\python.exe -m app check-config
+.venv\Scripts\python.exe -m app
+```
+
+### The Discord application
+
+1. In the [developer portal](https://discord.com/developers/applications), create an application with a bot. Under
+   *Bot*, switch on the privileged **Server Members** and **Message Content** intents. Copy the token into
+   `BOT_DISCORD_TOKEN`.
+2. Invite it with the `bot` and `applications.commands` scopes. It needs View Channels, Send Messages, Send Messages
+   in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage
+   Channels and Manage Roles, plus *Mention @everyone, @here and All Roles* unless the announcement and climate roles
+   are mentionable. At start-up the bot checks this and posts what is missing to the staff log.
+3. Create two categories (drafts: hidden from members; events: members may read but not write) and the header,
+   announcements, moderation and staff log channels. Turn on Developer Mode (*Settings → Advanced*) and copy each
+   id into `.env`, as well as the roles' ids.
+4. Staff commands (`/reload`, later `/server`, `/link set`, `/attendance report`, `/privacy erase`) are hidden from
+   everyone but admins at first. In *Server Settings → Integrations → the bot*, allow them for the roles you gave
+   those permissions in `.env`. The bot still checks the roles on every use.
+
+### The supervisor account
+
+In the supervisor's folder, create the bot's user with the `integration` role and print its token once:
+
+```powershell
+.venv\Scripts\python.exe -m app create-user discord-bot --role integration --token discord-bot
+```
+
+Put the token into `BOT_SUPERVISOR__TOKEN`. With a supervisor that offers the `heartbeat` capability, the bot reports
+in every minute, and the supervisor alerts through its own Discord webhook when the bot falls silent.
+
+## Configuration
+
+Everything is in `.env`; [.env.example](.env.example) lists each setting with its default. Lists take ids separated
+by `;` or JSON. `python -m app check-config` validates a file without starting anything. `/reload` (bot admins)
+applies a changed file; the token, the guild, the data folder and the supervisor URL and token need a restart.
+
+The `/privacy` text ships in `app/privacy/`; to change it, put `privacy.pl.md` / `privacy.en.md` into the data
+folder.
+
+## Run as a service (NSSM)
+
+As for the supervisor ([its DEPLOYMENT.md](../arma-server-supervisior/docs/DEPLOYMENT.md)):
+
+```powershell
+$dir = "D:\Workspace\python\deployment-interface-coordination-Kit"
+nssm install EventBot "$dir\.venv\Scripts\python.exe" "-m app"
+nssm set EventBot AppDirectory $dir
+nssm set EventBot DisplayName "Event bot"
+nssm set EventBot Start SERVICE_AUTO_START
+nssm set EventBot DependOnService ArmaSupervisor
+nssm set EventBot AppStdout "$dir\data\service.log"
+nssm set EventBot AppStderr "$dir\data\service.log"
+nssm start EventBot
+```
+
+## Data, logs and backups
+
+Everything lives in `BOT_DATA_DIR` (`data` by default):
+
+| Path | What |
+|---|---|
+| `bot.db` | The database (SQLite, WAL). Migrated at every start; backed up first when a migration is due. |
+| `backups/bot-*.db` | A copy every night at 04:00 local time, the newest `BOT_BACKUP__KEEP` kept. `python -m app backup` makes one now. |
+| `logs/bot.log` | The application log, rotated daily, `BOT_LOGS__KEEP_DAYS` kept. Each error has an id, also posted to the staff log. |
+| `service.log` | What NSSM caught: failures before logging starts. |
+
+The nightly backup covers the database only. **The host's own backups must include the data folder** (later phases
+keep briefing images and archived attachments there) **and `.env`.**
+
+## Update
+
+```powershell
+.\update.ps1     # checks .env, backs up, git pull, pip install, restarts the service
+```
+
+## Development
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m pytest tests/test_scheduler.py::test_a_repeating_action_moves_on -q
+```
+
+The tests need no network and no Discord: services are tested directly, the Discord layer through the fakes in
+`tests/fakes.py`, the supervisor through the aiohttp app in `tests/fake_supervisor.py`.
+
+- **Texts:** every text a member sees goes through `t("English text", locale, ...)` and needs a Polish entry in
+  `app/i18n/pl.json` with the same `{fields}`; `tests/test_i18n.py` fails otherwise.
+- **Database migrations:** after changing `app/db/models.py`, run
+  `python -m app new-migration "what changed"`, read the file it writes in `app/db/migrations/versions/`, and commit
+  it with the change. `tests/test_db.py` fails while the models and the migrations differ.
+- **Test instance:** a separate Discord server, a second bot token, and its own `.env` and data folder. Point
+  `BOT_SUPERVISOR__URL` at the fake supervisor (`python -m tests.fake_supervisor 8099`, token `test-token`), never at
+  the real one: a reservation takes the whole host.

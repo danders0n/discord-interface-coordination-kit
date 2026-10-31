@@ -1,0 +1,26 @@
+from conftest import ADMIN, KADET, MEMBER, MISSION_MAKER, MODERATOR
+
+from app.permissions import Access, Perm
+
+
+def test_a_member_creates_but_needs_approval(settings):
+    member = Access(settings, [MEMBER])
+    assert member.may_create_events and member.may_sign_up
+    assert not member.publishes_without_approval and not member.is_administration
+
+
+def test_whoever_presses_publish_decides(settings):
+    assert Access(settings, [MEMBER, MISSION_MAKER]).publishes_without_approval
+    assert Access(settings, [MEMBER, MODERATOR]).publishes_without_approval  # a moderator just publishes
+
+
+def test_sign_up_roles_from_settings(settings):
+    assert Access(settings, [KADET]).may_sign_up
+    assert not Access(settings, [KADET]).may_create_events
+    assert not Access(settings, []).may_sign_up
+
+
+def test_permissions_by_role(settings):
+    admin = Access(settings, [ADMIN])
+    assert admin.has(Perm.BOT_ADMIN) and admin.has(Perm.MANAGE_ANY_EVENT) and admin.is_administration
+    assert not admin.has(Perm.SERVER_CONTROL)

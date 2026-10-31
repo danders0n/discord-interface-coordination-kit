@@ -1,0 +1,11 @@
+[project]
+name = "event-bot"
+version = "0.1.0"
+description = "Discord bot for an Arma 3 group: events, ORBAT sign-ups, host reservations on arma-server-supervisor, attendance and squad.xml"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]

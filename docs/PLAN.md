@@ -1,6 +1,6 @@
 # Plan: community event bot
 
-Status: planned, nothing built. Written 2026-10-14 from design interviews with the owner, and revised the same
+Status: phase 1 (skeleton) built on 2026-10-31; the other phases are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 

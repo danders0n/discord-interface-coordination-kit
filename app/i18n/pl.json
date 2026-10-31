@@ -1,0 +1,22 @@
+{
+  "Bot started.": "Bot wystartował.",
+  "Problems with the configuration:": "Problemy z konfiguracją:",
+  "You don't have the permission for this.": "Nie masz do tego uprawnień.",
+  "Something went wrong. Staff can find the details in the log.": "Coś poszło nie tak. Administracja znajdzie szczegóły w logu.",
+  "⚠ Error `{id}` in `{where}`: {message}": "⚠ Błąd `{id}` w `{where}`: {message}",
+  "The bot can't mention {role}: make the role mentionable, or give the bot \"Mention @everyone, @here and All Roles\"": "Bot nie może oznaczyć {role}: pozwól oznaczać tę rolę albo daj botu uprawnienie „Wzmianka @everyone, @here i wszystkich ról”",
+  "{variable}: no channel {id} on this server": "{variable}: na tym serwerze nie ma kanału {id}",
+  "a category": "kategorią",
+  "a text channel": "kanałem tekstowym",
+  "{variable}: {name} is not {wanted}": "{variable}: {name} nie jest {wanted}",
+  "{variable}: the bot lacks {permissions} in {name}": "{variable}: bot nie ma uprawnień {permissions} w {name}",
+  "{variable}: no role {id} on this server": "{variable}: na tym serwerze nie ma roli {id}",
+  "reload": "przeładuj",
+  "Read the bot's settings again": "Wczytaj ponownie ustawienia bota",
+  "Settings reloaded.": "Ustawienia wczytane ponownie.",
+  "Settings reloaded by {member}.": "Ustawienia wczytane ponownie przez: {member}.",
+  "These take effect after a restart: {names}": "Te zmiany zadziałają dopiero po restarcie: {names}",
+  "The settings have errors, nothing was changed:": "Ustawienia mają błędy, nic nie zostało zmienione:",
+  "privacy": "prywatność",
+  "What the bot stores about you, and how to have it erased": "Co bot o Tobie zapisuje i jak to usunąć"
+}

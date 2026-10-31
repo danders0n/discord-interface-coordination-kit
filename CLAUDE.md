@@ -14,16 +14,18 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **nothing is built yet.** The full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the
-assumptions made while planning, a draft data model, and the build phases. Read the relevant section before
-implementing a feature, and keep the plan and this file up to date as the code lands.
+Status: **phase 1 (skeleton) is built**: settings, database and migrations, backups, i18n, permissions, the
+scheduled-action loop, logging and the staff log, start-up checks, the heartbeat, `/reload` and `/privacy`. The
+full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
+data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
+this file up to date as the code lands. [README.md](README.md) covers installing and running it.
 
 ## Stack
 
 | Topic | Decision |
 |---|---|
 | Discord | discord.py: `app_commands` slash commands, buttons / selects / modals, persistent views and `DynamicItem` |
-| Storage | SQLite through SQLAlchemy 2.0 async + aiosqlite (never block the event loop); Alembic migrations applied at startup; a daily online backup |
+| Storage | SQLite through SQLAlchemy 2.x async + aiosqlite (never block the event loop); Alembic migrations applied at startup; a daily online backup |
 | Supervisor client | HTTP over `aiohttp` (already a discord.py dependency). Never import the supervisor's code or open its database; code worth reusing, such as the preset parser in `app/steam/presets.py`, is ported |
 | Config | Everything in `.env` (channels and roles by id, the role → permission mapping, times, secrets), read with pydantic-settings like the supervisor: one prefix, `__` for nesting, lists as JSON or `;`-separated. `/reload` re-reads it |
 | Install | `pip` + pinned `requirements.txt` (the supervisor's convention), `tzdata` included; Python 3.11+ |
@@ -34,18 +36,38 @@ implementing a feature, and keep the plan and this file up to date as the code l
 
 ## Commands
 
-The project is not scaffolded yet. The intended commands mirror the supervisor's (Windows paths):
+Windows paths; there is no linter (as in the supervisor).
 
 ```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # includes requirements.txt
 .venv/Scripts/python.exe -m pytest -q
-.venv/Scripts/python.exe -m pytest tests/test_x.py::test_name -q
+.venv/Scripts/python.exe -m pytest tests/test_scheduler.py::test_a_repeating_action_moves_on -q
+.venv/Scripts/python.exe -m app                     # run the bot (validates .env, migrates, connects)
+.venv/Scripts/python.exe -m app check-config        # validate .env only
+.venv/Scripts/python.exe -m app new-migration "what changed"   # after editing app/db/models.py
+.venv/Scripts/python.exe -m tests.fake_supervisor 8099         # fake supervisor for a test instance
 ```
 
-Replace this section with the real commands (run, lint, single test, migrations) once they exist. Tests run
-against a fake supervisor (an aiohttp app) and never need a live Discord connection: services are tested
-directly, the Discord layer through fakes of `Interaction`, `Member` and `TextChannel`.
+Tests never need the network or a live Discord: services are tested directly, the Discord layer through the
+fakes in `tests/fakes.py` (`invoke()` runs a command's checks, callback and error handler like the tree), the
+supervisor through `tests/fake_supervisor.py`. Two tests guard the conventions: `tests/test_i18n.py` (every
+`t()` literal and command text has a Polish entry with the same fields; `t()` takes literals only) and
+`tests/test_db.py` (the models match the migrations). `tests/test_settings.py` checks that `.env.example` lists
+exactly the settings.
+
+## Code map
+
+- `app/__main__.py`: the CLI; `run` wires everything (settings store, logging, database, scheduler, services, bot).
+- `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
+- `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()`, the command error handler.
+- `app/settings.py`: `.env` model and `SettingsStore` (`/reload`; restart-only values keep their old value).
+- `app/permissions.py`: `Access` from role ids (no discord.py); per-event rights come later in the services.
+- `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
+- `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
+- `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue.
+- `app/supervisor_client/`, `app/heartbeat.py`: HTTP client, capabilities, heartbeat loop.
+- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts).
 
 ## Cross-cutting rules
 
