@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, TypeDecorator
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -51,6 +51,95 @@ class ScheduledAction(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     payload: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Event(Base):
+    """An event (docs/PLAN.md, *Data model*). Phase 3 keeps what sign-up needs; phase 4 adds the Discord side
+    (channel, messages, briefing, preset, approval)."""
+
+    __tablename__ = "event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))  # internal | guest | hosted | zeus
+    title: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | pending | published | ended | cancelled
+    assembly_at: Mapped[datetime]
+    start_at: Mapped[datetime]
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    signup_opens_at: Mapped[datetime | None]
+    signup_limit: Mapped[int | None] = mapped_column(Integer)  # Zeus: the most who may be Coming
+    required_dlc: Mapped[list[str]] = mapped_column(JSON, default=list)  # Creator DLC keys of the preset (gm, vn ...)
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Squad(Base):
+    __tablename__ = "squad"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(100))
+
+
+class Slot(Base):
+    """One place in the ORBAT. An organiser's assignment is a holder plus ``locked``; a slot locked closed (``!``)
+    is ``locked`` without one. One slot per member per event: the partial unique index."""
+
+    __tablename__ = "slot"
+    __table_args__ = (Index("ux_slot_holder", "event_id", "holder_id", unique=True,
+                            sqlite_where=text("holder_id IS NOT NULL")),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    squad_id: Mapped[int] = mapped_column(ForeignKey("squad.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(100))
+    required_role_id: Mapped[int | None] = mapped_column(BigInteger)
+    holder_id: Mapped[int | None] = mapped_column(BigInteger)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    flagged: Mapped[bool] = mapped_column(Boolean, default=False)  # ⚠: the holder lost the required role
+
+
+class Signup(Base):
+    """A member's answer other than a slot: ``maybe``, ``cant``, ``reserve`` (with its place in the queue), or in
+    a Zeus event ``coming``."""
+
+    __tablename__ = "signup"
+    __table_args__ = (UniqueConstraint("event_id", "member_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    member_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(10))
+    reserve_position: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class Offer(Base):
+    """A freed slot offered to the reserve list: to one member, or (``member_id`` null) to all of it at once."""
+
+    __tablename__ = "offer"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("slot.id", ondelete="CASCADE"), index=True)
+    member_id: Mapped[int | None] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(10), default="open")  # open | taken | declined | expired | withdrawn
+    expires_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class OrbatTemplate(Base):
+    """A shared ORBAT template: every creator uses them; the owner and *manage any event* change them."""
+
+    __tablename__ = "orbat_template"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger)
+    text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class HostReservation(Base):

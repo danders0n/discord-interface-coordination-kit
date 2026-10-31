@@ -14,9 +14,10 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1 and 2 are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–3 are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
-supervisor client, host reservations as a service (`app/reservations/`), and `/server`. The
+supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
+templates and sign-up logic as services (`app/orbat/`, `app/signup/`), not yet wired to Discord (phase 4). The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -78,6 +79,12 @@ exactly the settings.
   `failed` + staff note. State in `host_reservation`.
 - Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts), `app/servers/` (`/server`
   with confirmation and override buttons).
+- `app/orbat/parser.py`: the ORBAT text format (`parse` names every problem's line; `render` writes it back with
+  `xN`; `!` only for slots locked closed, never for assignments). `app/orbat/templates.py`: shared templates.
+- `app/signup/service.py`: `SignupService`, the sign-up rules (see its docstring): atomic claims, the partial
+  unique index, offers with expiry actions, Zeus's limit in one statement, `set_orbat` matching after sign-ups,
+  role changes. It talks to Discord only through the `Notifier` protocol and `roles_of`; refusals are `Refusal`
+  codes for the Discord layer to word. Only one instance per scheduler (it registers the offer-expiry handler).
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

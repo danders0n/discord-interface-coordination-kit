@@ -56,5 +56,15 @@
   "Restarting {server}.": "Restartuję {server}.",
   "Message sent to {server}.": "Wiadomość wysłana na {server}.",
   "Nothing was done.": "Nic nie zostało zrobione.",
-  "The supervisor refused: {reason}": "Supervisor odmówił: {reason}"
+  "The supervisor refused: {reason}": "Supervisor odmówił: {reason}",
+  "The ORBAT is {length} characters long; at most {limit} fit.": "ORBAT ma {length} znaków; mieści się najwyżej {limit}.",
+  "The ORBAT is empty.": "ORBAT jest pusty.",
+  "The ORBAT has {count} slots; at most {limit} fit.": "ORBAT ma {count} slotów; mieści się najwyżej {limit}.",
+  "Line {line}: a slot before the first squad (start one with #).": "Linia {line}: slot przed pierwszym squadem (squad zaczyna się od #).",
+  "Line {line}: a slot needs a name.": "Linia {line}: slot musi mieć nazwę.",
+  "Line {line}: repeat a slot 1 to {limit} times.": "Linia {line}: slot można powtórzyć od 1 do {limit} razy.",
+  "The squad {squad} has no slots.": "Squad {squad} nie ma slotów.",
+  "Line {line}: a squad needs a name.": "Linia {line}: squad musi mieć nazwę.",
+  "Line {line}: there is no role called {role}.": "Linia {line}: nie ma roli {role}.",
+  "Line {line}: more than one role is called {role}; use its id.": "Linia {line}: kilka ról nazywa się {role}; podaj jej ID."
 }

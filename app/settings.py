@@ -72,10 +72,29 @@ class Permissions(BaseModel):
     bot_admin: list[Ref] = Field(default_factory=list)
 
 
+class DlcRoles(BaseModel):
+    """Creator DLC (the keys of the preset parser's table) -> the Discord role members who own it take."""
+
+    gm: Ref | None = Field(None, description="Global Mobilization")
+    vn: Ref | None = Field(None, description="S.O.G. Prairie Fire")
+    csla: Ref | None = Field(None, description="CSLA Iron Curtain")
+    ws: Ref | None = Field(None, description="Western Sahara")
+    spe: Ref | None = Field(None, description="Spearhead 1944")
+    rf: Ref | None = Field(None, description="Reaction Forces")
+    ef: Ref | None = Field(None, description="Expeditionary Forces")
+
+
 class Supervisor(BaseModel):
     url: str = "http://localhost:8000"
     token: SecretStr | None = None
     event_server: str | None = Field(None, description="Slug of the default event server")
+
+
+class Times(BaseModel):
+    """Durations of the event rules (docs/PLAN.md, *Config contents*, times); more join them phase by phase."""
+
+    offer_timeout_minutes: int = Field(30, ge=1, description="How long a member has to take an offered slot")
+    offer_to_all_minutes: int = Field(60, ge=0, description="Before the assembly: a freed slot goes to the whole reserve list at once")
 
 
 class Backup(BaseModel):
@@ -101,6 +120,8 @@ class Settings(BaseSettings):
     channels: Channels
     roles: Roles
     permissions: Permissions = Field(default_factory=Permissions)
+    dlc_roles: DlcRoles = Field(default_factory=DlcRoles)
+    times: Times = Field(default_factory=Times)
     supervisor: Supervisor = Field(default_factory=Supervisor)
     backup: Backup = Field(default_factory=Backup)
     logs: Logs = Field(default_factory=Logs)
