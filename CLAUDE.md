@@ -1,0 +1,107 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A Discord bot for one Arma 3 group's Discord server. Other groups have their own infrastructure and appear in the
+bot only by name. Events are *internal* (ours, on our server), *guest* (another group hosts; we get some of its
+slots), *hosted* (ours, on our server, with invited groups) or *Zeus* (ours, on our server, no ORBAT, just
+*Coming* / *Not coming*). Members' events, except Zeus events, need a moderator's approval before they are
+published. It runs events (missions) with ORBAT slot sign-ups, reserves the game host
+for them on **arma-server-supervisor** and builds each event's server profile there (mods from the preset, the
+mission), reports attendance from the supervisor's player stats, and generates the
+group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
+read its `CLAUDE.md` and `README.md` before touching the integration.
+
+Status: **nothing is built yet.** The full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the
+assumptions made while planning, a draft data model, and the build phases. Read the relevant section before
+implementing a feature, and keep the plan and this file up to date as the code lands.
+
+## Stack
+
+| Topic | Decision |
+|---|---|
+| Discord | discord.py: `app_commands` slash commands, buttons / selects / modals, persistent views and `DynamicItem` |
+| Storage | SQLite through SQLAlchemy 2.0 async + aiosqlite (never block the event loop); Alembic migrations applied at startup; a daily online backup |
+| Supervisor client | HTTP over `aiohttp` (already a discord.py dependency). Never import the supervisor's code or open its database; code worth reusing, such as the preset parser in `app/steam/presets.py`, is ported |
+| Config | Everything in `.env` (channels and roles by id, the role → permission mapping, times, secrets), read with pydantic-settings like the supervisor: one prefix, `__` for nesting, lists as JSON or `;`-separated. `/reload` re-reads it |
+| Install | `pip` + pinned `requirements.txt` (the supervisor's convention), `tzdata` included; Python 3.11+ |
+| Layout | `app/` by domain (events, orbat, signup, approval, attendance, …), each a `service.py` without discord.py plus a thin `cog.py` / `views.py`; run with `python -m app`. Details in the plan, *Code and tooling* |
+| Logs and service | Rotated `data/logs/bot.log` (ERRORs also to the staff log); runs under NSSM like the supervisor |
+| Language | Polish and English. Private replies follow the member's Discord locale; public messages use the config language. Every string goes through `t()` with the English text as the key and `app/i18n/pl.json` (a test enforces coverage); slash commands use `app_commands.Translator` |
+| Deployment | One guild (commands synced to it only), on the same host as the supervisor |
+
+## Commands
+
+The project is not scaffolded yet. The intended commands mirror the supervisor's (Windows paths):
+
+```bash
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # includes requirements.txt
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe -m pytest tests/test_x.py::test_name -q
+```
+
+Replace this section with the real commands (run, lint, single test, migrations) once they exist. Tests run
+against a fake supervisor (an aiohttp app) and never need a live Discord connection: services are tested
+directly, the Discord layer through fakes of `Interaction`, `Member` and `TextChannel`.
+
+## Cross-cutting rules
+
+These rules span many features; read them before writing any handler.
+
+- **Nothing timed lives in memory.** Sign-up opening, reminders, reserve offers, stale drafts, reservation
+  retries, attendance and archiving are rows in a `scheduled_action` table, run by one loop. After downtime,
+  actions that change state run late, and pings run only while still useful (*Scheduled actions and downtime* in
+  the plan).
+- **Every button survives a restart:** the header's *Create event*, the event messages' buttons, offers and
+  reminders use persistent views / `DynamicItem` with ids in `custom_id`.
+- **The event channel is a set of bot-owned messages** (info embed, briefing, ORBAT plus continuation messages,
+  preset), kept in order and edited in place by stored message ids. Edits are batched to stay within rate
+  limits. Members talk in the thread, and **every ping goes to the thread** too, so nothing lands between the
+  bot's messages; the channel is read-only for members.
+- **Reservations under way are frozen:** from the quiet period on, the supervisor ignores new times and refuses
+  `DELETE` (409). Lock the times in the panel then, and end by id before deleting.
+- **Slot claims are atomic** ("take it if still free" in one update), because sign-up opening causes a rush.
+- **Events store config items by value** (mission type, climate), so `/reload` can remove an item without
+  breaking existing events. Other groups are database rows that are renamed, never deleted.
+- **Guest events never touch the supervisor:** no reservation, no profile, attendance by hand.
+- **Permissions:** the config's role mapping, plus each event's creator and co-organisers. Every Discord user acts
+  on the supervisor through the bot's one supervisor account, so the bot's checks are the only per-member limit.
+- **Times** are typed in the config time zone, stored as UTC, shown as Discord timestamps, and sent to the
+  supervisor zone-aware (it reads naive times as its own local time).
+- **Naming:** in this bot an *event* is a community mission. The supervisor calls its host bookings
+  *reservations* and uses "event" for log and notifier events. Keep the words apart.
+
+## Integrating with arma-server-supervisor
+
+The routes, payloads and permissions the bot relies on are listed in the plan, under *What the supervisor offers*
+(checked 2026-10-14 and again 2026-10-31, after the reservation work was committed). In short:
+
+- **Auth:** `Authorization: Bearer <personal API token>` for the bot's own supervisor user. That user needs
+  `server.control`, `server.protected`, `server.message`, `players.view`, `reservations.edit`,
+  `reservations.override`, and for event profiles also `profiles.edit`, `mods.manage`, `steam.manage`,
+  `missions.manage` and `jobs.view`.
+- **Event profiles:** the bot clones a base profile, imports the launcher preset (`download=missing`, a
+  supervisor job it follows), sets the mission cycle, then assigns the profile to the event server just before
+  the reservation and restores the previous one afterwards. Only change a server's assignment back if it still
+  holds the event profile.
+- **Errors:** services return JSON errors with HTTP status codes (409 for conflicts, including a refused start
+  during a reservation). Show the supervisor's message to the Discord user rather than a generic failure.
+- **Reservations:** `/api/reservations`, one per event, from assembly − lead time to start + duration + buffer.
+  `PUT` replaces the whole reservation, so send every field. End it early with `POST /api/reservations/{id}/end`; only without that capability, `POST /current/end`
+  after checking that `GET /current` is this event's `reservation_id`.
+- **Attendance:** read from mission plays (`GET /api/stats/missions?server=<numeric id>&all=true`, then
+  `GET /api/stats/missions/{id}` for players with seconds and Steam IDs). The stats routes don't take a slug,
+  and the plays list has no time filter, so the bot resolves the id via `GET /api/servers` and filters the
+  window itself. Only a `finished` play, with no new play
+  during the settle delay, ends an event; crashes and restarts don't.
+- The supervisor already posts server status and alerts to Discord through a **webhook**. Don't duplicate them.
+- **Supervisor changes planned for the bot** are in the supervisor's `docs/PLAN-integration.md`: reservation
+  `profile_id`, `managed_by` / `external_ref` / `link`, end by id, `/api/events/stream`,
+  `/api/stats/attendance`, `?uid=` lookup, the `integration` role, and `GET /api/system/info`. As of
+  2026-10-31 its phases 1–4 are committed and phase 5 (attendance, `?uid=`) is in progress; its *As built*
+  notes give the exact payloads. Build against the new routes, with the fallbacks behind the capability checks. Gate every use on
+  the capabilities from `/api/system/info`, and keep the fallbacks listed in the plan, because the two projects
+  are deployed separately.
