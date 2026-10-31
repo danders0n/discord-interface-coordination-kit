@@ -95,6 +95,21 @@ class Times(BaseModel):
 
     offer_timeout_minutes: int = Field(30, ge=1, description="How long a member has to take an offered slot")
     offer_to_all_minutes: int = Field(60, ge=0, description="Before the assembly: a freed slot goes to the whole reserve list at once")
+    default_duration_minutes: int = Field(180, ge=15, le=24 * 60, description="Pre-filled in the wizard")
+    max_days_ahead: int = Field(120, ge=1, description="A date further ahead is refused as a likely typo")
+    lead_minutes: int = Field(45, ge=0, description="The reservation starts this long before the assembly")
+    buffer_minutes: int = Field(30, ge=0, description="The reservation ends this long after start + duration")
+    stale_ping_hours: int = Field(48, ge=1, description="Still a draft (or waiting) this long before the assembly: ping")
+    stale_cancel_hours: int = Field(24, ge=0, description="Still not published this long before the assembly: cancelled")
+    reminder_minutes: list[int] = Field(default_factory=lambda: [24 * 60, 60],
+                                        description="Reminder pings, this long before the assembly")
+
+
+class Events(BaseModel):
+    """What the wizard offers (docs/PLAN.md, *Creating an event*)."""
+
+    mission_types: list[str] = Field(default_factory=lambda: ["Coop", "TvT", "Zeus", "Training"], min_length=1)
+    climate_roles: list[Ref] = Field(default_factory=list, description="Interest roles such as @WW2 and @Modern")
 
 
 class Backup(BaseModel):
@@ -121,6 +136,7 @@ class Settings(BaseSettings):
     roles: Roles
     permissions: Permissions = Field(default_factory=Permissions)
     dlc_roles: DlcRoles = Field(default_factory=DlcRoles)
+    events: Events = Field(default_factory=Events)
     times: Times = Field(default_factory=Times)
     supervisor: Supervisor = Field(default_factory=Supervisor)
     backup: Backup = Field(default_factory=Backup)

@@ -14,10 +14,11 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–3 are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–3 and 4a are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
 supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
-templates and sign-up logic as services (`app/orbat/`, `app/signup/`), not yet wired to Discord (phase 4). The
+templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
+(`app/events/`, phase 4a); none of these is wired to Discord yet (phases 4b-4d). The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -85,6 +86,10 @@ exactly the settings.
   unique index, offers with expiry actions, Zeus's limit in one statement, `set_orbat` matching after sign-ups,
   role changes. It talks to Discord only through the `Notifier` protocol and `roles_of`; refusals are `Refusal`
   codes for the Discord layer to word. Only one instance per scheduler (it registers the offer-expiry handler).
+- `app/events/`: `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next
+  day, aware UTC out), `groups.py` (other groups), `service.py` (`EventService`: create, update with proposals
+  for members' new times, publish or send for approval, approve / reject / withdraw, cancel, end, and the timed
+  actions; refusals are `Problem` codes; the Discord side listens through `EventNotifier`).
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

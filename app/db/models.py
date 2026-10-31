@@ -71,6 +71,64 @@ class Event(Base):
     required_dlc: Mapped[list[str]] = mapped_column(JSON, default=list)  # Creator DLC keys of the preset (gm, vn ...)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Phase 4a: by value, so /reload can drop a mission type or climate without breaking the event.
+    mission_type: Mapped[str] = mapped_column(String(50), default="")
+    climate: Mapped[str] = mapped_column(String(100), default="")
+    climate_role_id: Mapped[int | None] = mapped_column(BigInteger)
+    author_id: Mapped[int | None] = mapped_column(BigInteger)
+    host_group_id: Mapped[int | None] = mapped_column(ForeignKey("other_group.id"))  # a guest event's host
+    how_to_join: Mapped[str] = mapped_column(Text, default="")  # a guest event: server, password, contacts
+    briefing_situation: Mapped[str] = mapped_column(Text, default="")
+    briefing_mission: Mapped[str] = mapped_column(Text, default="")
+    briefing_notes: Mapped[str] = mapped_column(Text, default="")
+    dont_end_automatically: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class OtherGroup(Base):
+    """Another group (docs/PLAN.md, *Event kinds*): a guest event's host or a hosted event's guest. Corrected,
+    never deleted, because events refer to it."""
+
+    __tablename__ = "other_group"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    acronym: Mapped[str] = mapped_column(String(10), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    added_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class EventOrganiser(Base):
+    __tablename__ = "event_organiser"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
+    member_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+
+
+class EventGuestGroup(Base):
+    __tablename__ = "event_guest_group"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("other_group.id"), primary_key=True)
+
+
+class ApprovalRequest(Base):
+    """A request for the moderators (docs/PLAN.md, *Approval*): publishing a member's event, the host reservation
+    of a member's Zeus event, or new times for an approved member's event (``proposed``)."""
+
+    __tablename__ = "approval_request"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # publish | server | times
+    state: Mapped[str] = mapped_column(String(20), default="pending")  # pending | approved | rejected | withdrawn
+    proposed: Mapped[dict[str, Any]] = mapped_column(default=dict)  # times: assembly_at, start_at, duration_minutes
+    requested_by: Mapped[int] = mapped_column(BigInteger)
+    decided_by: Mapped[int | None] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(Text)
+    message_id: Mapped[int | None] = mapped_column(BigInteger)  # the request in the moderation thread
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    decided_at: Mapped[datetime | None]
 
 
 class Squad(Base):

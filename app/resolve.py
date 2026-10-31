@@ -36,6 +36,7 @@ class Ids:
     signup: frozenset[int] = frozenset()
     permissions: Mapping[str, frozenset[int]] = field(default_factory=dict)
     dlc: Mapping[str, int] = field(default_factory=dict)  # Creator DLC key -> role
+    climates: Mapping[int, str] = field(default_factory=dict)  # climate role -> its name, in config order
 
 
 def _variable(path: str) -> str:
@@ -108,5 +109,7 @@ def resolve(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
                      for name, refs in settings.permissions.model_dump().items()},
         dlc={key: role for key, ref in settings.dlc_roles.model_dump().items()
              if (role := r.role(ref, f"dlc_roles.{key}")) is not None},
+        climates={role: guild.get_role(role).name for ref in settings.events.climate_roles
+                  if (role := r.role(ref, "events.climate_roles")) is not None},
     )
     return ids, r.problems
