@@ -53,6 +53,10 @@ class FakeMember:
     def mention(self) -> str:
         return f"<@{self.id}>"
 
+    @property
+    def display_name(self) -> str:
+        return self.name
+
 
 @dataclass
 class Sent:

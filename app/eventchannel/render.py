@@ -53,6 +53,7 @@ class Context:
     server_confirmed: bool = True  # a member's Zeus event before its reservation is approved
     attendance: list = field(default_factory=list)  # the report's lines (AttendanceEntry)
     min_minutes: int = 0  # mission time that counts as attended
+    rating: tuple[float | None, int] = (None, 0)  # the mission's average rating and how many (not a guest event's)
 
 
 def ts(value: datetime, style: str) -> str:
@@ -260,6 +261,11 @@ def report(event: Event, ctx: Context) -> Message:
                                                             count=event.attendance_guests), inline=False)
     if not embed.fields and not embed.description:
         embed.description = t("Nobody played.", language)
+    average, count = ctx.rating
+    if event.kind != "guest" and count:
+        embed.add_field(name=t("Rating", language), value=t(("{average} ★ ({count} rating)", "{average} ★ ({count} "
+                                                             "ratings)"), language, average=f"{average:.1f}",
+                                                            count=count), inline=False)
     if event.kind != "guest" and event.attendance_state == "reported":
         embed.set_footer(text=t("Attended: at least {minutes} min of mission time.", language, minutes=ctx.min_minutes))
     return Message(embeds=[embed])

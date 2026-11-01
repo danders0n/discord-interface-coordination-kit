@@ -326,7 +326,7 @@ class CreateEvent(discord.ui.DynamicItem[discord.ui.Button], template=r"event:cr
 # ---------------------------------------------------------------------------- the organiser panel
 
 ACTIONS = ("details", "choices", "briefing", "orbat", "join", "signup", "limit", "organisers", "publish", "withdraw",
-           "server", "retry", "endres", "autoend", "cancel", "end")
+           "server", "retry", "endres", "autoend", "ratings", "cancel", "end")
 
 
 class PanelButton(discord.ui.DynamicItem[discord.ui.Button], template=r"event:panel:(?P<event>\d+)"):
@@ -391,6 +391,8 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
         shown.append("endres")
     if event.kind in ("internal", "hosted") and event.status in ("draft", "pending", "published"):
         shown.append("autoend")  # an evening of several missions: a finished one doesn't end it
+    if event.attendance_state is not None and (event.kind != "guest" or access.is_administration):
+        shown.append("ratings")  # a guest event's cooperation ratings are for staff only
     if event.status in ("draft", "pending", "published"):
         shown.append("end" if s.events.clock() >= event.start_at else "cancel")
     publish_label = t("Publish", locale) if access.publishes_without_approval or event.kind == "zeus" else t("Send for approval", locale)
@@ -399,6 +401,7 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
               "limit": t("Sign-up limit", locale), "organisers": t("Co-organisers", locale), "publish": publish_label,
               "withdraw": t("Withdraw request", locale), "server": t("Request the server", locale),
               "retry": t("Retry reservation", locale), "endres": t("End reservation", locale),
+              "ratings": t("Ratings", locale),
               "autoend": t("Don't end automatically: on", locale) if event.dont_end_automatically else
               t("Don't end automatically: off", locale),
               "cancel": t("Cancel event", locale), "end": t("End event", locale)}
@@ -535,6 +538,23 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("A finished mission no longer ends this event; the reservation's end or End "
                                        "event does.", interaction.locale) if value else
                         t("A finished mission ends this event again.", interaction.locale))
+
+    async def _ratings(self, interaction, event, member) -> None:
+        s, locale = services(interaction), interaction.locale
+        if event.kind == "guest" and not s.events.access(member).is_administration:
+            await reply(interaction, t("You don't have the permission for this.", locale))
+            return
+        ratings = await s.feedback.ratings(event.id)
+        if not ratings:
+            await reply(interaction, t("No ratings yet.", locale))
+            return
+        average = sum(r.stars for r in ratings) / len(ratings)
+        lines = [f"{'★' * r.stars}{'☆' * (5 - r.stars)} <@{r.member_id}>" + (f": {r.comment}" if r.comment else "")
+                 for r in ratings]
+        embed = discord.Embed(title=t(("{average} ★ ({count} rating)", "{average} ★ ({count} ratings)"), locale,
+                                      average=f"{average:.1f}", count=len(ratings)),
+                              description="\n".join(lines)[:4096])
+        await reply(interaction, embed=embed)
 
     async def _cancel(self, interaction, event, member) -> None:
         await interaction.response.send_modal(TextModal(

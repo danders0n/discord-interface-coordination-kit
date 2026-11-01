@@ -38,6 +38,7 @@ from app.settings import SettingsStore
 
 ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, with the sign-up buttons off
+RATING_CLOSE_KIND = "rating_close"  # the end of the rating window: drawn again, without Rate
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 log = logging.getLogger(__name__)
@@ -113,11 +114,13 @@ class EventChannels:
         self.staff: Any = None  # StaffLog
         self.threads: Any = None  # StaffThreads: the moderation thread
         self.services: Any = None  # for the approval messages
+        self.feedback: Any = None  # FeedbackService: the report's average and its Rate button
         self.roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
         self.redrawer = Redrawer(self.redraw_now, interval)
         self._renames: dict[int, asyncio.Task] = {}
         scheduler.register(ARCHIVE_KIND, self._archive_action)
         scheduler.register(CLOSE_KIND, self._close_action)
+        scheduler.register(RATING_CLOSE_KIND, self._rating_close_action)
 
     # ---------------------------------------------------------------- helpers
 
@@ -161,8 +164,10 @@ class EventChannels:
             async with self.db.session() as session:
                 entries = list((await session.execute(select(AttendanceEntry).where(
                     AttendanceEntry.event_id == event.id).order_by(AttendanceEntry.id))).scalars())
+        rating = await self.feedback.summary(event.id) if self.feedback is not None and entries else (None, 0)
         return render.Context(self.language, self.clock(), host, guests, coming, server_confirmed=confirmed,
-                              attendance=entries, min_minutes=self.store.current.attendance.min_minutes)
+                              attendance=entries, min_minutes=self.store.current.attendance.min_minutes,
+                              rating=rating)
 
     def _organiser_overwrites(self, guild: Any, event: Event, organisers: set[int]) -> dict:
         overwrites: dict = {guild.me: BOT}
@@ -258,7 +263,13 @@ class EventChannels:
                     full=event.kind == "zeus" and bool(event.signup_limit) and ctx.coming >= event.signup_limit)
             if "report" in messages:
                 from app.attendance.ui import report_buttons
-                messages["report"].view = report_buttons(event_id, self.language)
+                rate = None
+                if self.feedback is not None and self.feedback.is_open(event):
+                    if event.kind == "guest" and ctx.host is not None:
+                        rate = t("Rate the cooperation with {group}", self.language, group=ctx.host.acronym)
+                    else:
+                        rate = t("Rate the mission", self.language)
+                messages["report"].view = report_buttons(event_id, self.language, rate)
         attached = dict(event.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
@@ -396,6 +407,9 @@ class EventChannels:
 
     async def _archive_action(self, action: Action, now: datetime) -> None:
         await self.archive(action.event_id)  # type: ignore[arg-type]
+
+    async def _rating_close_action(self, action: Action, now: datetime) -> None:
+        self.redrawer.request(action.event_id)  # type: ignore[arg-type]
 
     async def _close_action(self, action: Action, now: datetime) -> None:
         self.redrawer.request(action.event_id)  # type: ignore[arg-type]
@@ -609,6 +623,9 @@ class EventChannels:
                      attended=count["attended"], no_show=count["no_show"], unlinked=count["not_linked"],
                      walk_ins=count["walk_in"], guests=event.attendance_guests)
         self._staff(text)
+        if self.feedback is not None and (closes := self.feedback.closes_at(event)) is not None:
+            await self.scheduler.schedule(RATING_CLOSE_KIND, closes, key=f"{RATING_CLOSE_KIND}:{event_id}",
+                                          event_id=event_id)
         if event.archived_at is None:
             await self.scheduler.schedule(ARCHIVE_KIND, self.clock() + timedelta(
                 hours=self.store.current.times.archive_hours), key=f"{ARCHIVE_KIND}:{event_id}", event_id=event_id)

@@ -260,6 +260,23 @@ class HostReservation(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
+class MissionRating(Base):
+    """A member's rating of an event (docs/PLAN.md, *Supervisor: attendance*, *Mission feedback*): of the mission,
+    or in a guest event of the cooperation with the host group. One per member and event, changeable while the
+    window is open."""
+
+    __tablename__ = "mission_rating"
+    __table_args__ = (UniqueConstraint("event_id", "member_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    member_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    stars: Mapped[int] = mapped_column(Integer)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
 class SteamLink(Base):
     """A member's Steam account (docs/PLAN.md, *Steam link and squad.xml*): their squad.xml entry, and from phase 6
     how attendance knows them. One Steam ID belongs to one member. ``rank_lost_at``: without a rank role, or off

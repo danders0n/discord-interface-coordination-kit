@@ -18,6 +18,7 @@ from app.events.header import Header
 from app.events.service import Draft, EventService
 from app.events.times import Times
 from app.events.ui import PanelAction
+from app.feedback.service import FeedbackService
 from app.links.service import LinkService
 from app.orbat.parser import parse
 from app.signup.service import Member, SignupService
@@ -47,6 +48,7 @@ async def stack(services, fake, guild, clock):
     attendance = AttendanceService(services.db, services.store, services.scheduler, services.reservations,
                                    StatsReader(services.supervisor), links, events, channels, names)
     events.attendance = attendance
+    services.feedback = channels.feedback = attendance.feedback = FeedbackService(services.db, services.store, clock)
     services.events, services.signups, services.channels, services.attendance = events, signups, channels, attendance
     services.links = links
     services.squadxml = SquadXml(links, services.store, lambda: services.ids, lambda: None, delay=0)
@@ -189,7 +191,7 @@ async def test_a_finished_mission_ends_the_event_and_the_report_follows(stack, g
     report = channel.messages[-1]
     fields = {f.name: f.value for f in report.kwargs["embeds"][0].fields}
     assert fields["Obecni (1)"] == "<@1>" and "prawdopodobnie m2" in fields["Bez linku Steam (1)"]
-    assert report.kwargs["view"].children[0].custom_id == f"attendance:{event.id}:edit"
+    assert report.kwargs["view"].children[-1].custom_id == f"attendance:{event.id}:edit"
     assert any("obecni 1, nieobecni 0, bez linku 1, bez slotu 2" in n for n in await notes(stack))
     assert await stack.scheduler.exists(f"{ARCHIVE_KIND}:{event.id}")
 

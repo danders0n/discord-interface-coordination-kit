@@ -19,10 +19,12 @@ from app.privacy.cog import PrivacyCog
 from app.servers.cog import ServerCog
 from app.eventchannel.service import EventChannels
 from app.events.cog import EventCog
+from app.feedback.service import FeedbackService
 from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
 from app.approval.ui import ApprovalAction
+from app.attendance.cog import AttendanceCog
 from app.attendance.service import AttendanceService
 from app.attendance.stats import StatsReader
 from app.attendance.ui import ReportAction
@@ -84,6 +86,7 @@ class EventBot(commands.Bot):
         channels.staff, channels.threads, channels.services, channels.roles_of = s.staff, s.threads, s, self.roles_of
         events.attendance = AttendanceService(s.db, s.store, s.scheduler, s.reservations, StatsReader(s.supervisor),
                                               s.links, events, channels, self.names_of)
+        s.feedback = channels.feedback = events.attendance.feedback = FeedbackService(s.db, s.store, s.scheduler.clock)
         s.channels, s.events, s.signups, s.attendance = channels, events, signups, events.attendance
 
     def names_of(self, member_id: int) -> list[str]:
@@ -133,7 +136,7 @@ class EventBot(commands.Bot):
                                ApprovalAction, LinkNow, ReportAction)
         self.tree.on_error = on_app_command_error
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
-                    LinkCog(self.services)):
+                    LinkCog(self.services), AttendanceCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         self._tasks = [

@@ -90,7 +90,8 @@ async def test_setup_registers_the_guild_commands_and_starts_the_tasks(services,
     monkeypatch.setattr(bot.tree, "sync", sync)
     await bot.setup_hook()
     names = {c.name for c in bot.tree.get_commands(guild=bot.guild_object)}
-    assert names == {"reload", "privacy", "server", "event", "slot", "events", "link", "unlink", "links"} and bot.tree.get_commands() == []
+    assert names == {"reload", "privacy", "server", "event", "slot", "events", "link", "unlink", "links",
+                     "attendance", "attendance-report", "profile", "mission-maker", "group"} and bot.tree.get_commands() == []
     assert synced == [services.settings.guild_id]
     translated = await bot.tree.translator.translate(app_commands.locale_str("privacy"), Locale.polish,
                                                      app_commands.TranslationContext(

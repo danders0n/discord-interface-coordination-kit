@@ -3,7 +3,10 @@
 *Edit attendance* (organisers only; it carries the event id, so it works after a restart) opens a private editor:
 pick a status (attended, no-show, excused), then the members (a member picker, so the 25-option limit of a list
 doesn't matter, and someone missing from the report can be added). When the report offers *probably <member>*
-matches, *Confirm links* turns the chosen ones into Steam links and counts their time."""
+matches, *Confirm links* turns the chosen ones into Steam links and counts their time.
+
+*Rate the mission* (or in a guest event *Rate the cooperation*) opens a modal with the stars and a comment, filled
+with the member's rating so far; it is on the report while the rating window is open."""
 
 from __future__ import annotations
 
@@ -14,15 +17,29 @@ import discord
 from app.discord_util import reply, services
 from app.events.ui import guarded, member_of
 from app.i18n import t
+from app.feedback.service import MAX_COMMENT, FeedbackError, Problem as FeedbackProblem
 from app.links.ui import has_rank, problem as link_problem
 
 TIMEOUT = 15 * 60
 
 
-def report_buttons(event_id: int, language: str) -> discord.ui.View:
+def report_buttons(event_id: int, language: str, rate: str | None = None) -> discord.ui.View:
+    """``rate``: the rating button's label, while ratings are open."""
     view = discord.ui.View(timeout=None)
+    if rate:
+        view.add_item(ReportAction(event_id, "rate", rate, discord.ButtonStyle.primary, "⭐"))
     view.add_item(ReportAction(event_id, "edit", t("Edit attendance", language)))
     return view
+
+
+def feedback_problem(code: FeedbackProblem, locale: Any) -> str:
+    return {
+        FeedbackProblem.NOT_OPEN: t("Ratings open with the attendance report.", locale),
+        FeedbackProblem.CLOSED: t("Ratings for this event have closed.", locale),
+        FeedbackProblem.NOT_ATTENDED: t("Only those who attended rate the mission.", locale),
+        FeedbackProblem.BAD_STARS: t("Give 1 to 5 stars.", locale),
+        FeedbackProblem.TOO_LONG: t("That is too long.", locale),
+    }[code]
 
 
 def status_names(locale: Any) -> dict[str, str]:
@@ -30,8 +47,9 @@ def status_names(locale: Any) -> dict[str, str]:
 
 
 class ReportAction(discord.ui.DynamicItem[discord.ui.Button], template=r"attendance:(?P<event>\d+):(?P<action>[a-z]+)"):
-    def __init__(self, event_id: int, action: str, label: str = "") -> None:
-        super().__init__(discord.ui.Button(label=label or action, style=discord.ButtonStyle.secondary, emoji="📋",
+    def __init__(self, event_id: int, action: str, label: str = "",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary, emoji: str = "📋") -> None:
+        super().__init__(discord.ui.Button(label=label or action, style=style, emoji=emoji,
                                            custom_id=f"attendance:{event_id}:{action}"))
         self.event_id, self.action = event_id, action
 
@@ -44,12 +62,46 @@ class ReportAction(discord.ui.DynamicItem[discord.ui.Button], template=r"attenda
         event = await guarded(interaction, lambda: s.events.get(self.event_id))
         if event is None:
             return
+        if self.action == "rate":
+            problem = await s.feedback.may_rate(event, interaction.user.id)
+            if problem is not None:
+                await reply(interaction, feedback_problem(problem, locale))
+                return
+            await interaction.response.send_modal(RateModal(interaction, event, await s.feedback.mine(
+                event.id, interaction.user.id)))
+            return
         if not await s.events.can_organise(event, member_of(interaction)):
             await reply(interaction, t("Only the event's organisers edit the attendance.", locale))
             return
         probable = await s.attendance.probable(self.event_id)
         await reply(interaction, t("Pick the status, then the members.", locale),
                     view=Editor(interaction, self.event_id, probable))
+
+
+class RateModal(discord.ui.Modal):
+    def __init__(self, interaction: discord.Interaction, event: Any, current: Any = None) -> None:
+        locale = interaction.locale
+        title = t("Rate the cooperation", locale) if event.kind == "guest" else t("Rate the mission", locale)
+        super().__init__(title=title[:45], timeout=TIMEOUT)
+        self.event = event
+        self.stars = discord.ui.TextInput(label=t("Stars (1 to 5)", locale), max_length=2,
+                                          default=str(current.stars) if current else None)
+        self.comment = discord.ui.TextInput(label=t("Comment (optional)", locale), style=discord.TextStyle.paragraph,
+                                            required=False, max_length=MAX_COMMENT,
+                                            default=current.comment if current and current.comment else None)
+        self.add_item(self.stars)
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        s, locale = services(interaction), interaction.locale
+        try:
+            await s.feedback.rate(self.event, interaction.user.id, self.stars.value, self.comment.value)
+        except FeedbackError as exc:
+            await reply(interaction, feedback_problem(exc.problem, locale))
+            return
+        if self.event.kind != "guest":  # the report shows the average (a guest event's ratings are for staff)
+            s.channels.redrawer.request(self.event.id)
+        await reply(interaction, t("Thank you: your rating is saved. You can change it until the ratings close.", locale))
 
 
 class Editor(discord.ui.View):

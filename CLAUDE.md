@@ -21,7 +21,8 @@ templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the e
 (`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
 organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
 messages, `/slot` and `/events` (4d), the Steam link and squad.xml (phase 5), and the attendance trigger,
-report and corrections (6a); `/attendance`, `/profile` and the ratings (6b) and `/privacy erase` (6c) come next. The
+report and corrections (6a), and the ratings with `/attendance`, `/profile`, `/mission-maker` and `/group` (6b);
+`/privacy erase` (6c) comes next. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -129,7 +130,11 @@ exactly the settings.
   `finished_at` and `compute` as pure rules, `attendance_read` with retries until the deadline, guest events'
   *to confirm* with the 24 h ping and the N-day auto-confirm, `correct` and `confirm_probable`; `EventService.
   attendance` calls it on publish, move, cancel, *End event* and a guest event's end), `ui.py` (*Edit attendance*
-  `attendance:<id>:edit` and its editor). The report is the `report` message, last in the channel.
+  `attendance:<id>:edit` and its editor, *Rate* `attendance:<id>:rate` and its modal), `history.py` (`History`:
+  a member's record, totals for a period, a maker's missions, a group's events), `cog.py` (`/attendance`,
+  `/attendance-report`, `/profile`, `/mission-maker`, `/group`, with *Who sees what*). The report is the `report`
+  message, last in the channel. `app/feedback/service.py`: `FeedbackService` (who may rate, the window,
+  averages; a correction taking *attended* away calls `forget`); the window's end is the `rating_close` action.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

@@ -132,6 +132,7 @@ class Attendance(BaseModel):
     deadline_hours: int = Field(24, ge=1, description="Retry reading the stats this long, then report them unavailable")
     guest_confirm_days: int = Field(3, ge=1, description="A guest event's attendance still to confirm counts as "
                                                          "attended after this many days")
+    rating_days: int = Field(3, ge=1, description="After the report, members rate the mission for this many days")
 
 
 class SquadXml(BaseModel):
