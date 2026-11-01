@@ -4,7 +4,7 @@ A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservation
 [arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
 squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: phases 1–5.** The bot starts, checks its configuration on the server, keeps its database, backups,
+**Status: phases 1–5 and 6a.** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
 (drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
@@ -14,7 +14,10 @@ edits it, publishes or sends it for approval; moderators decide in the moderatio
 `/event image` attach the launcher preset and the briefing image. Members sign up with the buttons under the
 ORBAT or `/slot take | leave`, freed slots are offered to the reserve list, and `/events` lists what is coming.
 Members link their Steam account with `/link` (or *Link now* in a reminder), `/unlink` removes it, staff use
-`/links set | remove`, and the bot keeps squad.xml in step with the rank and remark roles. Attendance comes next.
+`/links set | remove`, and the bot keeps squad.xml in step with the rank and remark roles. After a mission the
+bot ends the event (a finished mission, the reservation's end, or *End event*), reads who played from the
+supervisor and posts the attendance report in the event channel, where the organisers correct it with *Edit
+attendance*. `/attendance`, `/profile` and mission ratings come next.
 
 ## Install
 

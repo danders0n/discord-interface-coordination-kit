@@ -384,5 +384,50 @@
   },
   "You have a rank in {group} but no Steam link yet. Link your Steam account so you are in our squad.xml and attendance counts you: press Link now, or use /link.": "Masz rangę w {group}, ale jeszcze nie połączyłeś/połączyłaś konta Steam. Połącz je, żeby trafić do naszego squad.xml i żeby liczyła się Twoja obecność: naciśnij Połącz teraz albo użyj /link.",
   "Steam link of {member} deleted after {days} days without a rank: {steam} ({nick}).": "Link Steam {member} usunięty po {days} dniach bez rangi: {steam} ({nick}).",
-  "Link your Steam account so attendance counts you: press Link now, or use /link.": "Połącz konto Steam, żeby liczyła się Twoja obecność: naciśnij Połącz teraz albo użyj /link."
+  "Link your Steam account so attendance counts you: press Link now, or use /link.": "Połącz konto Steam, żeby liczyła się Twoja obecność: naciśnij Połącz teraz albo użyj /link.",
+  "Attended": "Obecni",
+  "No-show": "Nieobecni",
+  "Excused": "Usprawiedliwieni",
+  "Edit attendance": "Popraw obecność",
+  "Pick the status, then the members.": "Wybierz status, potem osoby.",
+  "Status": "Status",
+  "Members": "Osoby",
+  "Only the event's organisers edit the attendance.": "Obecność poprawiają tylko organizatorzy eventu.",
+  "Confirm links": "Potwierdź linki",
+  "Pick the status first.": "Najpierw wybierz status.",
+  "{count} member is now {status}.": {
+    "one": "{count} osoba ma teraz status: {status}.",
+    "few": "{count} osoby mają teraz status: {status}.",
+    "many": "{count} osób ma teraz status: {status}."
+  },
+  "Linked: <@{member}> is {name}.": "Połączono: <@{member}> to {name}.",
+  "Nothing to confirm.": "Nie ma czego potwierdzać.",
+  "{name} is {member}": "{name} to {member}",
+  "The server's statistics couldn't be read; the organisers can fill the attendance in with Edit attendance.": "Nie udało się odczytać statystyk serwera; organizatorzy mogą uzupełnić obecność przez Popraw obecność.",
+  "Nobody played.": "Nikt nie grał.",
+  "Attendance": "Obecność",
+  "To confirm": "Do potwierdzenia",
+  "Guests": "Goście",
+  "{count} player": {
+    "one": "{count} gracz",
+    "few": "{count} graczy",
+    "many": "{count} graczy"
+  },
+  "Attended: at least {minutes} min of mission time.": "Obecny: co najmniej {minutes} min w misji.",
+  "Not linked": "Bez linku Steam",
+  "Played without a slot": "Grali bez slotu",
+  "probably {name}": "prawdopodobnie {name}",
+  "Attendance of {title} ({channel}): the server's statistics couldn't be read.": "Obecność na {title} ({channel}): nie udało się odczytać statystyk serwera.",
+  "Attendance of {title}: {count} member still to confirm now counts as attended.": {
+    "one": "Obecność na {title}: {count} osoba do potwierdzenia liczy się teraz jako obecna.",
+    "few": "Obecność na {title}: {count} osoby do potwierdzenia liczą się teraz jako obecne.",
+    "many": "Obecność na {title}: {count} osób do potwierdzenia liczy się teraz jako obecne."
+  },
+  "Attendance of {title} ({channel}): {count} to confirm by the organisers.": "Obecność na {title} ({channel}): {count} do potwierdzenia przez organizatorów.",
+  "Attendance of {title} ({channel}): {attended} attended, {no_show} no-show, {unlinked} not linked, {walk_ins} without a slot, {guests} guests.": "Obecność na {title} ({channel}): obecni {attended}, nieobecni {no_show}, bez linku {unlinked}, bez slotu {walk_ins}, goście {guests}.",
+  "The attendance of {title} still needs confirming: Edit attendance under the report.": "Obecność na {title} czeka na potwierdzenie: Popraw obecność pod raportem.",
+  "Don't end automatically: on": "Nie kończ automatycznie: wł.",
+  "Don't end automatically: off": "Nie kończ automatycznie: wył.",
+  "A finished mission no longer ends this event; the reservation's end or End event does.": "Ukończona misja nie kończy już tego eventu; kończy go koniec rezerwacji albo Zakończ event.",
+  "A finished mission ends this event again.": "Ukończona misja znów kończy ten event."
 }

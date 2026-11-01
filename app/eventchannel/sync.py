@@ -18,12 +18,15 @@ import discord
 from app.eventchannel.render import Message
 
 FIXED = {"info": 0, "briefing": 1, "preset": 2}
+LAST = {"report": 10_000}  # the attendance report: after the ORBAT, which no longer changes by then
 log = logging.getLogger(__name__)
 
 
 def order(key: str) -> int:
     if key in FIXED:
         return FIXED[key]
+    if key in LAST:
+        return LAST[key]
     kind, _, number = key.partition(":")
     assert kind == "orbat", key
     return len(FIXED) + int(number)

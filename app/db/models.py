@@ -96,6 +96,35 @@ class Event(Base):
     preset_file: Mapped[str | None] = mapped_column(String(300))
     briefing_image: Mapped[str | None] = mapped_column(String(300))
     attached: Mapped[dict[str, Any]] = mapped_column(default=dict)  # message key -> the files' tag last sent
+    # Phase 6a: attendance. state: waiting (triggered, stats not read yet) | reported | unavailable.
+    attendance_state: Mapped[str | None] = mapped_column(String(20))
+    attendance_trigger: Mapped[str | None] = mapped_column(String(20))  # finished | reservation | manual | fallback | guest
+    attendance_from: Mapped[datetime | None]  # the window read from the stats
+    attendance_to: Mapped[datetime | None]
+    attendance_guests: Mapped[int] = mapped_column(Integer, default=0)  # a hosted event's players we don't know
+    reported_at: Mapped[datetime | None]
+
+
+class AttendanceEntry(Base):
+    """One line of an event's attendance report (docs/PLAN.md, *Supervisor: attendance*): a slot holder (or someone
+    *Coming*) or someone who played without a slot, a member or only a Steam ID and in-game name. An unlinked
+    holder may carry a *probable* Steam ID whose in-game name matched theirs, for the organisers to confirm."""
+
+    __tablename__ = "attendance"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    member_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    steam_id: Mapped[str | None] = mapped_column(String(17))
+    name: Mapped[str] = mapped_column(String(100), default="")  # in-game name
+    seconds: Mapped[int] = mapped_column(Integer, default=0)  # mission time in the window
+    holder: Mapped[bool] = mapped_column(Boolean, default=False)  # held a slot (or was Coming)
+    # to_confirm | attended | no_show | excused | not_linked | walk_in
+    status: Mapped[str] = mapped_column(String(12))
+    probable_steam_id: Mapped[str | None] = mapped_column(String(17))
+    probable_name: Mapped[str | None] = mapped_column(String(100))
+    corrected_by: Mapped[int | None] = mapped_column(BigInteger)
+    corrected_at: Mapped[datetime | None]
 
 
 class OtherGroup(Base):

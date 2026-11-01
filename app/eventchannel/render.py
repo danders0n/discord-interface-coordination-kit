@@ -51,6 +51,8 @@ class Context:
     guests: list[OtherGroup] = field(default_factory=list)
     coming: int = 0  # Zeus: how many are Coming
     server_confirmed: bool = True  # a member's Zeus event before its reservation is approved
+    attendance: list = field(default_factory=list)  # the report's lines (AttendanceEntry)
+    min_minutes: int = 0  # mission time that counts as attended
 
 
 def ts(value: datetime, style: str) -> str:
@@ -209,7 +211,58 @@ def messages(event: Event, board: Board, ctx: Context) -> dict[str, Message]:
                                            name=event.preset_name or preset.name), files=[preset])
     pages = zeus_list(board, event, ctx.language) if event.kind == "zeus" else orbat(board, ctx.language)
     found |= {f"orbat:{i}": page for i, page in enumerate(pages)}
+    if event.attendance_state in ("reported", "unavailable"):
+        found["report"] = report(event, ctx)
     return found
+
+
+def _items(items: list[str], language: str, limit: int = 1000) -> str:
+    """Lines that fit ``limit`` characters, then "and N more"."""
+    out, used = [], 0
+    for index, item in enumerate(items):
+        if used + len(item) + 2 > limit:
+            return ", ".join(out) + " " + t("and {count} more", language, count=len(items) - index)
+        out.append(item)
+        used += len(item) + 2
+    return ", ".join(out) or "—"
+
+
+def _who(entry) -> str:
+    if entry.member_id is not None:
+        return f"<@{entry.member_id}>"
+    return discord.utils.escape_markdown(entry.name or entry.steam_id or "?")
+
+
+def report(event: Event, ctx: Context) -> Message:
+    """The attendance report (docs/PLAN.md, *Supervisor: attendance*, *Report*)."""
+    language, entries = ctx.language, ctx.attendance
+    embed = discord.Embed(title=t("Attendance", language), colour=COLOURS["ended"])
+    if event.attendance_state == "unavailable":
+        embed.description = t("The server's statistics couldn't be read; the organisers can fill the attendance in "
+                              "with Edit attendance.", language)
+    for status, name in (("attended", t("Attended", language)), ("no_show", t("No-show", language)),
+                         ("excused", t("Excused", language)), ("to_confirm", t("To confirm", language))):
+        found = [_who(e) for e in entries if e.status == status]
+        if found:
+            embed.add_field(name=f"{name} ({len(found)})", value=_items(found, language), inline=False)
+    unlinked = [e for e in entries if e.status == "not_linked"]
+    if unlinked:
+        lines = [_who(e) + (" (" + t("probably {name}", language, name=discord.utils.escape_markdown(
+            e.probable_name or "")) + ")" if e.probable_steam_id else "") for e in unlinked]
+        embed.add_field(name=f"{t('Not linked', language)} ({len(unlinked)})", value=_items(lines, language),
+                        inline=False)
+    walk_ins = [e for e in entries if e.status == "walk_in"]
+    if walk_ins:
+        embed.add_field(name=f"{t('Played without a slot', language)} ({len(walk_ins)})",
+                        value=_items([_who(e) for e in walk_ins], language), inline=False)
+    if event.attendance_guests:
+        embed.add_field(name=t("Guests", language), value=t(("{count} player", "{count} players"), language,
+                                                            count=event.attendance_guests), inline=False)
+    if not embed.fields and not embed.description:
+        embed.description = t("Nobody played.", language)
+    if event.kind != "guest" and event.attendance_state == "reported":
+        embed.set_footer(text=t("Attended: at least {minutes} min of mission time.", language, minutes=ctx.min_minutes))
+    return Message(embeds=[embed])
 
 
 def announcement(event: Event, ctx: Context, channel_id: int | None) -> Message:

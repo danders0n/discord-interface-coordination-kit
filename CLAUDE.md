@@ -20,8 +20,8 @@ supervisor client, host reservations as a service (`app/reservations/`), `/serve
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
 (`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
 organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
-messages, `/slot` and `/events` (4d), and the Steam link and squad.xml (phase 5); attendance (phase 6) comes
-next. The
+messages, `/slot` and `/events` (4d), the Steam link and squad.xml (phase 5), and the attendance trigger,
+report and corrections (6a); `/attendance`, `/profile` and the ratings (6b) and `/privacy erase` (6c) come next. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -124,6 +124,12 @@ exactly the settings.
   the hourly `link_reminders` action with DMs or a reminder-channel ping, the first-run announcement).
   `app/squadxml/service.py`: `render` (the old bot's layout) and `SquadXml` (debounced atomic writes, only when
   changed, never while `roster()` is None). Both get the server's members through `EventBot.roster`.
+- `app/attendance/`: `stats.py` (`StatsReader`: plays and mission time from `/api/stats/attendance`, or the plays
+  fallback), `service.py` (`AttendanceService`: the `attendance_watch` action every minute from the assembly,
+  `finished_at` and `compute` as pure rules, `attendance_read` with retries until the deadline, guest events'
+  *to confirm* with the 24 h ping and the N-day auto-confirm, `correct` and `confirm_probable`; `EventService.
+  attendance` calls it on publish, move, cancel, *End event* and a guest event's end), `ui.py` (*Edit attendance*
+  `attendance:<id>:edit` and its editor). The report is the `report` message, last in the channel.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 
@@ -181,7 +187,7 @@ The routes, payloads and permissions the bot relies on are listed in the plan, u
 - **Supervisor changes planned for the bot** are in the supervisor's `docs/PLAN-integration.md`: reservation
   `profile_id`, `managed_by` / `external_ref` / `link`, end by id, `/api/events/stream`,
   `/api/stats/attendance`, `?uid=` lookup, the `integration` role, and `GET /api/system/info`. As of
-  2026-10-31 its phases 1–4 are committed and phase 5 (attendance, `?uid=`) is in progress; its *As built*
-  notes give the exact payloads. Build against the new routes, with the fallbacks behind the capability checks. Gate every use on
+  2026-11-01 its phases 1–7 are committed (attendance window, `?uid=`, notifier, heartbeat, docs); its *As
+  built* notes give the exact payloads. Build against the new routes, with the fallbacks behind the capability checks. Gate every use on
   the capabilities from `/api/system/info`, and keep the fallbacks listed in the plan, because the two projects
   are deployed separately.

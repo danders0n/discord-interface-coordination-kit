@@ -2,8 +2,9 @@
 
 Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
 event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
-buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, and phase 5 (Steam link and
-squad.xml) the same day; phases 6–8 are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, phase 5 (Steam link and
+squad.xml) and 6a (the attendance trigger, reading the plays, the report, corrections) the same day; the rest of
+phase 6 and phases 7–8 are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 
@@ -87,7 +88,7 @@ name or acronym; a group is never deleted, because events refer to it.
 | Order kept | The bot stores every message id and edits the messages in place. The ORBAT is **last** (decided 2026-10-31), so a new continuation message is simply posted at the end and nothing is deleted; a continuation no longer needed is deleted from the end. A preset added later than the ORBAT is the one exception: the preset message is posted then, and the ORBAT messages are re-posted after it. |
 | Discussion | A **public thread** in the channel ("Dyskusja"), created **with the channel** (a draft's thread is as hidden as its channel). **Every ping goes to the thread** (decided 2026-10-31): sign-up opening, reminders, offers when DMs are closed, approval results, stale-draft warnings, cancelling. The main channel holds only the bot's own messages, so their order never breaks; the attendance report is the one message added there later, after the ORBAT has stopped changing. |
 | Native Discord Scheduled Event | **None.** |
-| Archive | Until phase 6 makes the report: `archive_hours` (config; 48) after the end. Then: a configured delay after the attendance report (see *Supervisor: attendance*), the channel moves to the archive category of the event date's **quarter**, e.g. `Archiwum Q1 2026` (the name pattern is in config). The bot creates the category when missing. The channel and its thread become read-only and locked. If a quarter reaches Discord's 50-channel limit, an overflow category `Archiwum Q1 2026 (2)` is created (assumed). |
+| Archive | `archive_hours` (config; 48) after the attendance report (see *Supervisor: attendance*), and at the latest that long after the end (start + duration); the channel moves to the archive category of the event date's **quarter**, e.g. `Archiwum Q1 2026` (the name pattern is in config). The bot creates the category when missing. The channel and its thread become read-only and locked. If a quarter reaches Discord's 50-channel limit, an overflow category `Archiwum Q1 2026 (2)` is created (assumed). |
 | Retention | Discord allows 500 channels per server, categories included, so only the **current quarter and the 3 before it** stay as channels (the number is in config). When a new quarter begins, the oldest kept quarter is moved into the database (see *Long-term archive*), its channels are deleted, and so are its now empty categories. |
 
 ### Long-term archive
@@ -329,7 +330,7 @@ event server for the reservation. It is optional: an event without one runs on t
 | Identity | The member's linked **Steam64 ID** (see *Steam link and squad.xml*). The bot asks for it on a member's first sign-up if it is missing, but signing up does not require it. |
 | Window | From the reservation's start (without a reservation: assembly − lead time) to the trigger. |
 | Plays | With `attendance_window`: one `GET /api/stats/attendance?server=<slug>&from=&to=` gives the plays and every player's `mission_s` in the window. Fallback: the **mission plays** overlapping the window from `GET /api/stats/missions?server=<id>&all=true` (numeric id only, looked up in `GET /api/servers`; no time filter, newest first, 100 per page, so the bot pages until it is past the window and filters the plays itself). |
-| Trigger | **Whichever comes first:** (a) a play in the window ends `finished`, and **no new play starts** on the event server within the settle delay; (b) the reservation ends, at its end time, through *End now*, or through *End reservation*. A play that ends `crashed`, `server_stopped`, `lost` or `next_mission` does **not** trigger (a), so a crash with a restart or a lobby mission doesn't end the event. With neither (no reservation, and the mission never started), the **fallback** is start + duration + buffer. A **Zeus** event ignores (a): only the reservation's end (or the fallback) triggers it. For an evening with several missions (decided 2026-10-31): (a) counts only after start + a share of the duration (config; e.g. 60 %), and the panel has *Don't end automatically*, which turns (a) off for that event. A `finished` play **before** that point is remembered: when the point passes with no new play since, and the settle delay is over, the event ends then; a new play in between forgets it (decided 2026-10-31). |
+| Trigger | Built in phase 6a. The bot checks every minute from the assembly, in both modes, reading the plays again each time, so nothing about an early `finished` is stored and a restart loses nothing (decided 2026-11-01; the events stream would only make it quicker). **Whichever comes first:** (a) a play in the window ends `finished`, and **no new play starts** on the event server within the settle delay; (b) the reservation ends, at its end time, through *End now*, or through *End reservation*. A play that ends `crashed`, `server_stopped`, `lost` or `next_mission` does **not** trigger (a), so a crash with a restart or a lobby mission doesn't end the event. With neither (no reservation, and the mission never started), the **fallback** is start + duration + buffer. A **Zeus** event ignores (a): only the reservation's end (or the fallback) triggers it. For an evening with several missions (decided 2026-10-31): (a) counts only after start + a share of the duration (config; e.g. 60 %), and the panel has *Don't end automatically*, which turns (a) off for that event. A `finished` play **before** that point is remembered: when the point passes with no new play since, and the settle delay is over, the event ends then; a new play in between forgets it (decided 2026-10-31). |
 | Stats ready | There is **one settle delay** (config; assumed 10 min), used once (decided 2026-10-31). Arma on Windows writes its console log late, so the supervisor can record the last sessions after the end. For trigger (a) the wait for a new play is that delay, so the bot ends the reservation and reads the stats straight after it. For trigger (b) and the fallback, the bot waits the settle delay after the end, then reads the stats. If the supervisor is unreachable, it retries until a **deadline** (config; assumed 24 h after the trigger), then reports "stats unavailable". |
 | Counted | A player's **mission time** in the window: `mission_s` from the attendance window, or, in the fallback, the sum of `seconds` from `GET /api/stats/missions/{id}` over the plays (both need `players.view` for Steam IDs). At least **N minutes** (config) counts as attended. |
 | Report | For slot holders: **attended**, **no-show**, **not linked**. Then **played without a slot**: linked members by Discord name, and unknown Steam IDs by in-game name, except in a **hosted** event, where they are the invited groups' players and the report only says *guests: N players*. Before that, an unknown Steam ID whose in-game name matches the nick or Discord name of an **unlinked** slot holder is listed as *probably \<member\>*, with a *Link* button for the organisers that creates the Steam link and counts the time (decided 2026-10-31). Posted in the event channel and the staff log. |
@@ -471,7 +472,7 @@ Config contents (all in `.env`):
 | `orbat_template` | Name, owner, text |
 | `steam_link` | Built in phase 5. Member, Steam64 ID (unique), nick, linked by, times; since when the member has had no rank (for the deletion after N days) |
 | `link_reminder` | Built in phase 5. A member without a link: when last reminded, how often, and whether their first sign-up asked |
-| `attendance` | Event, member or Steam ID, seconds, status (`to_confirm` / `attended` / `no_show` / `excused` / `not_linked` / `walk_in`), corrected by; the guest count of a hosted event |
+| `attendance` | Built in phase 6a. Event, member or Steam ID and in-game name, seconds, whether a slot holder, status (`to_confirm` / `attended` / `no_show` / `excused` / `not_linked` / `walk_in`), a probable Steam ID for an unlinked holder, corrected by and when; the event keeps the state (`waiting` / `reported` / `unavailable`), the trigger, the window and the guest count of a hosted event |
 | `scheduled_action` | Kind, event, due time, done time, attempts, last error |
 | `mission_rating` | Event, member, stars (1–5), comment, times (in a guest event, the rating of the cooperation with the host group) |
 | `archived_message` | Event, channel or thread, Discord message id, author id and name, times (created, edited), content, reply-to, attachments (file name, path on disk, size); the event gets the time its channel was moved |
@@ -496,8 +497,9 @@ speaking the routes this plan uses), with no live Discord.
    quarter. It uses phases 2 and 3 as they are, so nothing is stubbed.
 5. **Steam link and squad.xml** (built 2026-11-01): `/link`, `/unlink`, `/links`, the import of the old bot's
    links, reminders and rollout, and squad.xml generation. The switch-over day can follow this phase.
-6. **Attendance:** the trigger, reading the plays, the report, corrections, `/attendance`, `/profile`, the
-   mission feedback with `/mission-maker` and `/group`, and `/privacy erase`.
+6. **Attendance:** (6a, built 2026-11-01) the trigger, reading the plays, the report, corrections, *Don't end
+   automatically*; (6b) `/attendance`, `/profile`, the mission feedback with `/mission-maker` and `/group`; (6c)
+   `/privacy erase`.
 7. **Event profile:** mission upload and pick, the mission report and warnings, cloning the base, the preset
    import job, the swap onto the event server and back, and cleanup.
 8. **Long-term archive:** moving the oldest quarter into the database (transcripts, attachments), deleting its
@@ -506,15 +508,15 @@ speaking the routes this plan uses), with no live Discord.
 The supervisor's integration phases 1–4 already exist (see *Supervisor changes this plan uses*), so phase 2 uses
 system info, managed objects, ending by id and the events stream, and phase 7 puts the event profile onto the
 reservation; the polling and the profile swap are built as fallbacks only, behind the capability checks. Phase 6
-needs the supervisor's phase 5 (attendance window), or uses its fallback until it lands.
+uses the supervisor's phase 5 (attendance window, committed 2026-11-01), with the plays as the fallback.
 
 ## Supervisor changes this plan uses
 
-Planned in the supervisor repo: `docs/PLAN-integration.md` (2026-10-16, revised 2026-10-31). **Being built:**
-as of 2026-10-31 its phases 1–4 are committed (`83253d6` system info, integration role and `create-user` /
+Planned in the supervisor repo: `docs/PLAN-integration.md` (2026-10-16, revised 2026-10-31). **Built:** as of
+2026-11-01 all its phases are committed (`83253d6` system info, integration role and `create-user` /
 `create-token`; `c32d0a1` managed objects and ending by id; `166a7ed` the reservation's own profile; `4f3874e`
-the live-events stream), phase 5 (`/api/stats/attendance`, `?uid=`) is in progress, and phases 6 (notifier) and 7
-(docs) are still to come. Its *As built* notes give the exact payloads (e.g. the stream's `<boot>:<seq>` ids and
+the live-events stream; `b6b1114` `/api/stats/attendance` and `?uid=`; `401f9db` and `7a24570` the notifier and the
+bot heartbeat; `7d23222` docs). Its *As built* notes give the exact payloads (e.g. the stream's `<boot>:<seq>` ids and
 `hello` message, per-play seconds and `counted` in the attendance window) and win over the summary below. So the
 bot is written against the new routes from the start; the fallbacks stay for a supervisor without them. The bot reads
 `GET /api/system/info` at startup and after reconnecting; a 404 means no capability is there. For each capability

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -139,6 +140,22 @@ class SupervisorClient:
         body = await self.request("GET", "/api/stats/players", params=params)
         players = body.get("players", []) if isinstance(body, dict) else []
         return next((p for p in players if p.get("uid") == uid), None)
+
+    async def attendance(self, server: str, start: datetime, end: datetime) -> dict[str, Any]:
+        """``attendance_window``: who was on ``server`` (id or slug) between the times (at most 24 h): ``players``
+        with ``uid``, ``name``, ``mission_s`` ..., and the ``plays`` overlapping the window."""
+        return await self.request("GET", "/api/stats/attendance", params={
+            "server": server, "from": start.isoformat(), "to": end.isoformat()})
+
+    async def mission_plays(self, server_id: int, offset: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        """Mission plays on the server (numeric id), newest first, every one (``all``): the fallback."""
+        body = await self.request("GET", "/api/stats/missions", params={
+            "server": str(server_id), "all": "true", "limit": str(limit), "offset": str(offset)})
+        return body.get("missions", []) if isinstance(body, dict) else []
+
+    async def mission_play(self, play_id: int) -> dict[str, Any]:
+        """One play with its ``players`` (``uid``, ``name``, ``seconds``)."""
+        return await self.request("GET", f"/api/stats/missions/{play_id}")
 
     # ---------------------------------------------------------------- reservations
 

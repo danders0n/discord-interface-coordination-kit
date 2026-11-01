@@ -9,12 +9,13 @@
   threads), keeps the organisers' right to post, and posts the announcement, which later edits keep in step.
 - Cancelling marks the messages, pings the members signed up in the thread, edits the announcement and archives
   at once; a draft's channel is deleted instead. A published event is drawn again at its start (sign-up closes)
-  and archived ``archive_hours`` after its end; both follow the event when its times move.
+  and archived ``archive_hours`` after its attendance report (at the latest after its end); both follow the event
+  when its times move.
 - The archive is a category per quarter of the event date (``archive_pattern``), made when missing, with an
   overflow ``(2)`` once one holds 50 channels; the channel is read-only there and its thread locked.
 
-It is both notifiers: :class:`~app.events.service.EventNotifier` and :class:`~app.signup.service.Notifier`.
-Pings for sign-up opening, reminders, stale drafts, offers and approval requests come in phase 4d."""
+It is every notifier: :class:`~app.events.service.EventNotifier`, :class:`~app.signup.service.Notifier` and
+:class:`~app.attendance.service.AttendanceNotifier`."""
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ import discord
 from sqlalchemy import select
 
 from app.db import Database
-from app.db.models import Event, Signup, Slot
+from app.db.models import AttendanceEntry, Event, Signup, Slot
 from app.eventchannel import render, sync
 from app.i18n import t
 from app.resolve import Ids
@@ -155,7 +156,13 @@ class EventChannels:
         confirmed = booked is not None and booked.state == "booked"
         if confirmed and event.kind == "zeus":  # a member's request holds the host, but a moderator confirms it
             confirmed = not await self.events.server_pending(event.id)
-        return render.Context(self.language, self.clock(), host, guests, coming, server_confirmed=confirmed)
+        entries = []
+        if event.attendance_state is not None:
+            async with self.db.session() as session:
+                entries = list((await session.execute(select(AttendanceEntry).where(
+                    AttendanceEntry.event_id == event.id).order_by(AttendanceEntry.id))).scalars())
+        return render.Context(self.language, self.clock(), host, guests, coming, server_confirmed=confirmed,
+                              attendance=entries, min_minutes=self.store.current.attendance.min_minutes)
 
     def _organiser_overwrites(self, guild: Any, event: Event, organisers: set[int]) -> dict:
         overwrites: dict = {guild.me: BOT}
@@ -249,6 +256,9 @@ class EventChannels:
                     event_id, event.kind == "zeus", self.language, closed=now >= event.start_at,
                     not_open=event.signup_opens_at is not None and now < event.signup_opens_at,
                     full=event.kind == "zeus" and bool(event.signup_limit) and ctx.coming >= event.signup_limit)
+            if "report" in messages:
+                from app.attendance.ui import report_buttons
+                messages["report"].view = report_buttons(event_id, self.language)
         attached = dict(event.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
@@ -577,6 +587,43 @@ class EventChannels:
         """The reservation changed in the background: the info embed and the requests waiting on it."""
         self.redrawer.request(event_id)
         await self.refresh_requests(event_id)
+
+    async def attendance_reported(self, event_id: int) -> None:
+        """The report is out: staff hear the totals, and the channel is archived the configured delay later."""
+        event = await self._event(event_id)
+        async with self.db.session() as session:
+            entries = list((await session.execute(select(AttendanceEntry).where(
+                AttendanceEntry.event_id == event_id))).scalars())
+        count = {status: sum(e.status == status for e in entries)
+                 for status in ("attended", "no_show", "not_linked", "walk_in", "to_confirm")}
+        channel = f"<#{event.channel_id}>" if event.channel_id else "—"
+        if event.attendance_state == "unavailable":
+            text = t("Attendance of {title} ({channel}): the server's statistics couldn't be read.", self.language,
+                     title=event.title, channel=channel)
+        elif event.kind == "guest":
+            text = t("Attendance of {title} ({channel}): {count} to confirm by the organisers.", self.language,
+                     title=event.title, channel=channel, count=count["to_confirm"])
+        else:
+            text = t("Attendance of {title} ({channel}): {attended} attended, {no_show} no-show, {unlinked} not linked, "
+                     "{walk_ins} without a slot, {guests} guests.", self.language, title=event.title, channel=channel,
+                     attended=count["attended"], no_show=count["no_show"], unlinked=count["not_linked"],
+                     walk_ins=count["walk_in"], guests=event.attendance_guests)
+        self._staff(text)
+        if event.archived_at is None:
+            await self.scheduler.schedule(ARCHIVE_KIND, self.clock() + timedelta(
+                hours=self.store.current.times.archive_hours), key=f"{ARCHIVE_KIND}:{event_id}", event_id=event_id)
+
+    async def attendance_unconfirmed(self, event_id: int) -> None:
+        event = await self._event(event_id)
+        organisers = [event.created_by, *sorted(await self.events.organisers(event_id))]
+        await self._ping(event, t("The attendance of {title} still needs confirming: Edit attendance under the "
+                                  "report.", self.language, title=event.title), organisers)
+
+    async def attendance_confirmed(self, event_id: int, count: int) -> None:
+        event = await self._event(event_id)
+        self._staff(t(("Attendance of {title}: {count} member still to confirm now counts as attended.",
+                       "Attendance of {title}: {count} members still to confirm now count as attended."),
+                      self.language, title=event.title, count=count))
 
     async def lost_slot(self, event_id: int, member_ids: list[int]) -> None:
         event = await self._event(event_id)

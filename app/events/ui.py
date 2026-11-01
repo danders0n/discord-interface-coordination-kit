@@ -326,7 +326,7 @@ class CreateEvent(discord.ui.DynamicItem[discord.ui.Button], template=r"event:cr
 # ---------------------------------------------------------------------------- the organiser panel
 
 ACTIONS = ("details", "choices", "briefing", "orbat", "join", "signup", "limit", "organisers", "publish", "withdraw",
-           "server", "retry", "endres", "cancel", "end")
+           "server", "retry", "endres", "autoend", "cancel", "end")
 
 
 class PanelButton(discord.ui.DynamicItem[discord.ui.Button], template=r"event:panel:(?P<event>\d+)"):
@@ -389,13 +389,18 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
         shown.append("retry")
     if booked is not None and booked.state == "booked" and s.events.clock() >= event.assembly_at:
         shown.append("endres")
-    shown.append("end" if s.events.clock() >= event.start_at else "cancel")
+    if event.kind in ("internal", "hosted") and event.status in ("draft", "pending", "published"):
+        shown.append("autoend")  # an evening of several missions: a finished one doesn't end it
+    if event.status in ("draft", "pending", "published"):
+        shown.append("end" if s.events.clock() >= event.start_at else "cancel")
     publish_label = t("Publish", locale) if access.publishes_without_approval or event.kind == "zeus" else t("Send for approval", locale)
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "briefing": t("Briefing", locale),
               "orbat": t("ORBAT", locale), "join": t("How to join", locale), "signup": t("Sign-up start", locale),
               "limit": t("Sign-up limit", locale), "organisers": t("Co-organisers", locale), "publish": publish_label,
               "withdraw": t("Withdraw request", locale), "server": t("Request the server", locale),
               "retry": t("Retry reservation", locale), "endres": t("End reservation", locale),
+              "autoend": t("Don't end automatically: on", locale) if event.dont_end_automatically else
+              t("Don't end automatically: off", locale),
               "cancel": t("Cancel event", locale), "end": t("End event", locale)}
     for action in shown:
         style = discord.ButtonStyle.danger if action in ("cancel", "end", "endres") else \
@@ -522,6 +527,14 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
         if ended:
             s.staff.post(t("{member} ended the reservation of {title}.", s.settings.language,
                            member=interaction.user.mention, title=event.title))
+
+    async def _autoend(self, interaction, event, member) -> None:
+        value = not event.dont_end_automatically
+        if await guarded(interaction, lambda: services(interaction).events.set_dont_end_automatically(
+                event.id, member, value)) is None and not interaction.response.is_done():
+            await reply(interaction, t("A finished mission no longer ends this event; the reservation's end or End "
+                                       "event does.", interaction.locale) if value else
+                        t("A finished mission ends this event again.", interaction.locale))
 
     async def _cancel(self, interaction, event, member) -> None:
         await interaction.response.send_modal(TextModal(

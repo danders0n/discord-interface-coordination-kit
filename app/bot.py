@@ -23,6 +23,9 @@ from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
 from app.approval.ui import ApprovalAction
+from app.attendance.service import AttendanceService
+from app.attendance.stats import StatsReader
+from app.attendance.ui import ReportAction
 from app.links.cog import LinkCog
 from app.links.service import LinkService
 from app.links.ui import LinkNow
@@ -53,8 +56,8 @@ class EventBot(commands.Bot):
         self._tasks: list[asyncio.Task] = []
         self._started = False
         services.roles_of = self.roles_of
-        self.build_events()
         self.build_links()
+        self.build_events()
 
     @property
     def guild_object(self) -> discord.Object:
@@ -79,7 +82,17 @@ class EventBot(commands.Bot):
         channels.events, channels.signups = events, signups
         channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
         channels.staff, channels.threads, channels.services, channels.roles_of = s.staff, s.threads, s, self.roles_of
-        s.channels, s.events, s.signups = channels, events, signups
+        events.attendance = AttendanceService(s.db, s.store, s.scheduler, s.reservations, StatsReader(s.supervisor),
+                                              s.links, events, channels, self.names_of)
+        s.channels, s.events, s.signups, s.attendance = channels, events, signups, events.attendance
+
+    def names_of(self, member_id: int) -> list[str]:
+        """A member's names on the server (nick, display name, username), for matching an in-game name."""
+        guild = self.guild()
+        member = guild.get_member(member_id) if guild is not None else None
+        if member is None:
+            return []
+        return [n for n in (member.nick, member.global_name, member.display_name, member.name) if n]
 
     def roster(self) -> dict[int, Person] | None:
         """The server's members now, for squad.xml and the link reminders; None until the member list is loaded."""
@@ -117,7 +130,7 @@ class EventBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, OfferAction,  # outlive a restart
-                               ApprovalAction, LinkNow)
+                               ApprovalAction, LinkNow, ReportAction)
         self.tree.on_error = on_app_command_error
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
                     LinkCog(self.services)):

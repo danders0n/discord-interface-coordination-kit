@@ -9,7 +9,7 @@
 - **Publish**: refused until the checklist is complete. The roles of whoever presses decide: a mission maker,
   moderator or *manage any event* publishes, a member sends it for approval (a Zeus event is always published).
 - **Approve / reject** a request; approving is refused while its reservation failed.
-- **Cancel** before the start (a draft is deleted), **end** after it.
+- **Cancel** before the start (a draft is deleted), **end** after it (the attendance service takes over).
 - **Timed actions**: sign-up opening, reminders, stale-draft ping and cancel, a guest event's end. After downtime
   state changes run late; the sign-up ping is dropped when more than an hour late, a reminder when a later one or
   the assembly has passed.
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy import delete, select, update
 
@@ -119,6 +119,7 @@ class EventService:
         self.db, self.store, self.ids = db, store, ids
         self.scheduler, self.reservations, self.notifier, self.link = scheduler, reservations, notifier, link
         self.clock = clock or scheduler.clock
+        self.attendance: Any = None  # app.attendance.service.AttendanceService, set by whoever wires both
         reservations.listener = notifier.reservation_changed
         for kind, handler in ((self.SIGNUP_OPEN, self._signup_open), (self.REMINDER, self._reminder),
                               (self.STALE_PING, self._stale_ping), (self.STALE_CANCEL, self._stale_cancel),
@@ -554,6 +555,8 @@ class EventService:
             await self.scheduler.schedule(self.GUEST_END, row.start_at + timedelta(
                 minutes=row.duration_minutes + self.store.current.times.buffer_minutes),
                 key=f"{self.GUEST_END}:{row.id}", event_id=row.id)
+        if self.attendance is not None:
+            await self.attendance.published(row)
         await self.notifier.published(event.id, by)
 
     # ---------------------------------------------------------------- reservations
@@ -618,18 +621,24 @@ class EventService:
         for kind in (self.SIGNUP_OPEN, self.STALE_PING, self.STALE_CANCEL, self.GUEST_END):
             await self.scheduler.cancel(f"{kind}:{event_id}")
         await self.scheduler.cancel_all(self.REMINDER, event_id)  # (whatever the offsets were when they were made)
+        if self.attendance is not None:
+            await self.attendance.forget(event_id)
         if was in ("draft", "pending"):
             await self.notifier.deleted(event_id)
         else:
             await self.notifier.cancelled(event_id)
 
     async def end(self, event_id: int, member: Member) -> None:
-        """*End event*, after the start: the reservation ends, and the event is over (attendance: phase 6)."""
+        """*End event*, after the start: the reservation ends, and the event is over; the attendance service reads
+        the stats after the settle delay."""
         event = await self._organiser(event_id, member)
         if event.status != "published":
             raise EventError(Problem.NOT_DRAFT)
         if self.clock() < event.start_at:
             raise EventError(Problem.NOT_STARTED)
+        if self.attendance is not None:
+            await self.attendance.end_now(event_id)
+            return
         await self.reservations.end(event_id)
         async with self.db.session() as session, session.begin():
             (await session.get(Event, event_id)).status = "ended"
@@ -675,6 +684,8 @@ class EventService:
         elif event.status == "published":
             await self._schedule_signup_open(event)
             await self._schedule_reminders(event)
+            if self.attendance is not None:
+                await self.attendance.published(event)
             await self.notifier.moved(event.id)  # the channel's own actions: closing sign-up, the archive
 
     async def _live(self, action: Action, *statuses: str) -> Event | None:
@@ -705,6 +716,9 @@ class EventService:
 
     async def _guest_end(self, action: Action, now: datetime) -> None:
         if (event := await self._live(action, "published")) is not None:
+            if self.attendance is not None:  # every slot holder to confirm
+                await self.attendance.guest_ended(event.id)
+                return
             async with self.db.session() as session, session.begin():
                 (await session.get(Event, event.id)).status = "ended"
             await self.notifier.changed(event.id)

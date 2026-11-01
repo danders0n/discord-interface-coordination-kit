@@ -109,7 +109,8 @@ class Times(BaseModel):
     stale_cancel_hours: int = Field(24, ge=0, description="Still not published this long before the assembly: cancelled")
     reminder_minutes: list[int] = Field(default_factory=lambda: [24 * 60, 60],
                                         description="Reminder pings, this long before the assembly")
-    archive_hours: int = Field(48, ge=0, description="After the end (start + duration), the channel moves to the archive")
+    archive_hours: int = Field(48, ge=0, description="After the attendance report (at the latest start + duration + "
+                                                     "this), the channel moves to the archive")
     calendar_days: int = Field(14, ge=1, le=60, description="The header's calendar shows the events of this many days")
 
 
@@ -118,6 +119,19 @@ class Events(BaseModel):
 
     mission_types: list[str] = Field(default_factory=lambda: ["Coop", "TvT", "Zeus", "Training"], min_length=1)
     climate_roles: list[Ref] = Field(default_factory=list, description="Interest roles such as @WW2 and @Modern")
+
+
+class Attendance(BaseModel):
+    """Attendance from the supervisor's player stats (docs/PLAN.md, *Supervisor: attendance*)."""
+
+    min_minutes: int = Field(30, ge=0, description="Mission time that counts as attended")
+    settle_minutes: int = Field(10, ge=0, description="After the end, wait this long for the stats; a new mission in "
+                                                      "that time means the evening goes on")
+    finish_share_percent: int = Field(60, ge=0, le=100, description="A finished mission ends the event only after "
+                                                                    "start + this share of the duration")
+    deadline_hours: int = Field(24, ge=1, description="Retry reading the stats this long, then report them unavailable")
+    guest_confirm_days: int = Field(3, ge=1, description="A guest event's attendance still to confirm counts as "
+                                                         "attended after this many days")
 
 
 class SquadXml(BaseModel):
@@ -168,6 +182,7 @@ class Settings(BaseSettings):
     events: Events = Field(default_factory=Events)
     times: Times = Field(default_factory=Times)
     supervisor: Supervisor = Field(default_factory=Supervisor)
+    attendance: Attendance = Field(default_factory=Attendance)
     squad_xml: SquadXml = Field(default_factory=SquadXml)
     links: Links = Field(default_factory=Links)
     backup: Backup = Field(default_factory=Backup)

@@ -36,6 +36,9 @@ class State:
     servers: list[dict[str, Any]] = field(default_factory=lambda: [_server(1, "server-1"), _server(2, "event")])
     reservations: dict[int, dict[str, Any]] = field(default_factory=dict)
     players: list[dict[str, Any]] = field(default_factory=list)  # player stats: uid, name, last_seen
+    # Mission plays: id, server_id, started_at, ended_at (aware datetimes; None: running), end, and their players
+    # (uid, name, seconds), for the attendance window and the plays fallback.
+    plays: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, str]] = field(default_factory=list)
     next_id: int = 1
 
@@ -241,6 +244,42 @@ def make_app(state: State | None = None) -> web.Application:
             found = [p for p in state.players if q.casefold() in p["name"].casefold() or q in p["uid"]]
         return web.json_response({"total": len(found), "players": found})
 
+    def _play_out(play: dict[str, Any]) -> dict[str, Any]:
+        return {"id": play["id"], "server_id": play["server_id"], "started_at": play["started_at"].isoformat(),
+                "ended_at": play["ended_at"].isoformat() if play["ended_at"] else None, "end": play["end"],
+                "running": play["ended_at"] is None, "counted": True}
+
+    def _server_id(value: str) -> int | None:
+        found = state.server(value)
+        return found["server"]["id"] if found else None
+
+    async def attendance(request: web.Request) -> web.Response:
+        """Mission time per player in the plays overlapping the window (not cut to it: the tests keep plays inside)."""
+        start, end = _time(request.query["from"]), _time(request.query["to"])
+        if end <= start or end - start > timedelta(hours=24):
+            return _error(422, "The window ends after its start and is at most 24 hours long")
+        server = _server_id(request.query.get("server", ""))
+        plays = [p for p in state.plays if p["server_id"] == server and p["started_at"] <= end
+                 and (p["ended_at"] is None or p["ended_at"] >= start)]
+        players: dict[str, dict[str, Any]] = {}
+        for play in plays:
+            for p in play["players"]:
+                row = players.setdefault(p["uid"] or f"name:{p['name']}", {"uid": p["uid"], "name": p["name"], "mission_s": 0})
+                row["mission_s"] += p["seconds"]
+        return web.json_response({"players": list(players.values()), "plays": [_play_out(p) for p in plays]})
+
+    async def missions(request: web.Request) -> web.Response:
+        server, offset = int(request.query["server"]), int(request.query.get("offset", 0))
+        limit = int(request.query.get("limit", 100))
+        rows = sorted((p for p in state.plays if p["server_id"] == server), key=lambda p: p["started_at"], reverse=True)
+        return web.json_response({"total": len(rows), "missions": [_play_out(p) for p in rows[offset:offset + limit]]})
+
+    async def mission(request: web.Request) -> web.Response:
+        play = next((p for p in state.plays if p["id"] == int(request.match_info["id"])), None)
+        if play is None:
+            return _error(404, "Mission session not found")
+        return web.json_response(_play_out(play) | {"players": play["players"]})
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
     app.router.add_get("/api/system/info", system_info)
@@ -259,6 +298,9 @@ def make_app(state: State | None = None) -> web.Application:
     app.router.add_delete("/api/reservations/{id:\\d+}", delete)
     app.router.add_post("/api/reservations/{id:\\d+}/end", end_by_id)
     app.router.add_get("/api/stats/players", players)
+    app.router.add_get("/api/stats/attendance", attendance)
+    app.router.add_get("/api/stats/missions", missions)
+    app.router.add_get("/api/stats/missions/{id:\d+}", mission)
     return app
 
 
