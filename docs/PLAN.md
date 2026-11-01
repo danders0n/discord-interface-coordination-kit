@@ -3,8 +3,8 @@
 Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
 event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
 buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, phase 5 (Steam link and
-squad.xml), 6a (the attendance trigger, reading the plays, the report, corrections) and 6b (ratings,
-`/attendance`, `/profile`, `/mission-maker`, `/group`) the same day; 6c (`/privacy erase`) and phases 7–8 are
+squad.xml), 6a (the attendance trigger, reading the plays, the report, corrections) 6b (ratings,
+`/attendance`, `/profile`, `/mission-maker`, `/group`) and 6c (`/privacy-erase`) the same day; phases 7–8 are
 planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
@@ -240,7 +240,7 @@ Decided 2026-10-31. A Zeus event has no ORBAT, only a list of who is coming.
 | Roles with *server control* / *server message* (config) | The `/server` commands. |
 | Roles with *server override* (config) | *Start anyway?* during a reservation. |
 | Roles with *manage links* (config) | Set, change or remove anyone's Steam link and nick. |
-| Roles with *bot admin* (config) | `/reload`, `/attendance report`, `/privacy erase`. |
+| Roles with *bot admin* (config) | `/reload`, `/attendance-report`, `/privacy-erase`. |
 | Everyone with a sign-up role | Sign up; `/events`, `/link`, `/unlink`, `/privacy`, `/archive event` (their own events); `/attendance`, `/profile`, `/mission-maker` and `/group` with the limits in *Who sees what*. |
 
 The role → permission mapping lives in `.env`, as lists of role ids or names. Every Discord user acts on the supervisor through the bot's
@@ -391,7 +391,7 @@ config**. Slash command names and descriptions are localized through `app_comman
 | `/reload` | Only the **bot admin** role. The bot reads `.env` again and **validates it first**: on error nothing changes, and the errors are shown. An item removed from the config that existing events still use (a mission type, climate role, or role) stays readable on those events, because events store it **by value**, but it can't be picked for new ones. The reply lists the affected events. The token and the supervisor URL need a restart. |
 | Secrets | The Discord bot token and the supervisor API token, in the same `.env`. |
 | Check at startup | The bot checks that every configured channel and role exists, and that it has the Discord permissions it needs (View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage Channels, Manage Roles for channel overwrites, and *Mention @everyone, @here and All Roles* unless the announcement and climate roles are mentionable). What is missing is logged and posted to the staff log (assumed). |
-| Command visibility | Decided 2026-10-31. The staff commands (`/reload`, `/server`, `/links set` / `remove`, `/attendance-report`, `/privacy erase`) carry `default_permissions` (Manage Server), so only admins see them at first; the server owner shows them to the roles from `.env` in *Server Settings → Integrations* (a setup step in the README). Members' commands are visible to all. The bot checks its own permissions on every use either way. |
+| Command visibility | Decided 2026-10-31. The staff commands (`/reload`, `/server`, `/links set` / `remove`, `/attendance-report`, `/privacy-erase`) carry `default_permissions` (Manage Server), so only admins see them at first; the server owner shows them to the roles from `.env` in *Server Settings → Integrations* (a setup step in the README). Members' commands are visible to all. The bot checks its own permissions on every use either way. |
 | What the bot sets up itself | The event channels with their permission overwrites, the archive categories, and the *Create event* message in the header channel (posted at startup when missing, then edited in place; its id is stored). The events category's own permissions (members read, don't write) are set by hand once (assumed). |
 | Host | The same machine as the supervisor (`http://localhost:8000`). |
 | Guild | **One** Discord server. Slash commands are synced to that guild only. |
@@ -404,7 +404,7 @@ Decided 2026-10-31.
 | Topic | Decision |
 |---|---|
 | Retention | Nothing is deleted on a timer: events, sign-ups, attendance, ratings and archived transcripts are kept **without limit**. The exceptions already decided stay: application logs (14 days) and a Steam link N days after its member lost the rank. |
-| Erasure | On request, a *bot admin* runs `/privacy erase @member` (or with a user id, for someone who has left). The Steam link is deleted and the member drops out of squad.xml. Their Discord id **and Steam ID** are replaced by one fixed pseudonym `former:<n>` in **every** table (slots, sign-ups, attendance, ratings, whose comments are emptied, organisers, creator and author fields, approval decisions, archived messages), so past events still add up but nothing points back to the person; in archived transcripts their messages keep their place with the author "deleted" and empty content, and their attachments are deleted from disk. Database backups are not rewritten; they age out with the backup rotation, and `/privacy` says so (decided 2026-10-31). The staff log records that an erasure ran, without the person's data. |
+| Erasure | Built in phase 6c. On request, a *bot admin* runs `/privacy-erase @member` (or with a user id, for someone who has left), and confirms with a button; it is its own command because Discord gives a command group one visibility (decided 2026-11-01). In events not started yet the member's places are freed instead (decided 2026-11-01). Discord ids are numbers, so the pseudonym is stored there as `-n` and shown as `former:<n>`. The Steam link is deleted and the member drops out of squad.xml. Their Discord id **and Steam ID** are replaced by one fixed pseudonym `former:<n>` in **every** table (slots, sign-ups, attendance, ratings, whose comments are emptied, organisers, creator and author fields, approval decisions, archived messages), so past events still add up but nothing points back to the person; in archived transcripts their messages keep their place with the author "deleted" and empty content, and their attachments are deleted from disk. Database backups are not rewritten; they age out with the backup rotation, and `/privacy` says so (decided 2026-10-31). The staff log records that an erasure ran, without the person's data. |
 | Information | `/privacy` explains privately what the bot stores (Steam ID, sign-ups, attendance, ratings, messages in event channels once archived), what it publishes (squad.xml), that it keeps it without limit, and how to ask for erasure. The text is a file staff can edit (Polish and English). `/link` and the header message point to it. |
 
 ### Moving over from the old bot
@@ -500,7 +500,7 @@ speaking the routes this plan uses), with no live Discord.
    links, reminders and rollout, and squad.xml generation. The switch-over day can follow this phase.
 6. **Attendance:** (6a, built 2026-11-01) the trigger, reading the plays, the report, corrections, *Don't end
    automatically*; (6b, built 2026-11-01) `/attendance`, `/attendance-report`, `/profile`, the mission feedback
-   with `/mission-maker` and `/group`; (6c) `/privacy erase`.
+   with `/mission-maker` and `/group`; (6c, built 2026-11-01) `/privacy-erase`.
 7. **Event profile:** mission upload and pick, the mission report and warnings, cloning the base, the preset
    import job, the swap onto the event server and back, and cleanup.
 8. **Long-term archive:** moving the oldest quarter into the database (transcripts, attachments), deleting its

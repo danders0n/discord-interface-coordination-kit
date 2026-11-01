@@ -549,7 +549,9 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("No ratings yet.", locale))
             return
         average = sum(r.stars for r in ratings) / len(ratings)
-        lines = [f"{'★' * r.stars}{'☆' * (5 - r.stars)} <@{r.member_id}>" + (f": {r.comment}" if r.comment else "")
+        from app.eventchannel.render import mention
+
+        lines = [f"{'★' * r.stars}{'☆' * (5 - r.stars)} {mention(r.member_id)}" + (f": {r.comment}" if r.comment else "")
                  for r in ratings]
         embed = discord.Embed(title=t(("{average} ★ ({count} rating)", "{average} ★ ({count} ratings)"), locale,
                                       average=f"{average:.1f}", count=len(ratings)),

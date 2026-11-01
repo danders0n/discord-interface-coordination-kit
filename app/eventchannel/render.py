@@ -56,6 +56,11 @@ class Context:
     rating: tuple[float | None, int] = (None, 0)  # the mission's average rating and how many (not a guest event's)
 
 
+def mention(member_id: int) -> str:
+    """A member's mention, or the pseudonym of an erased one (``former:<n>``, stored as ``-n``)."""
+    return f"<@{member_id}>" if member_id > 0 else f"former:{-member_id}"
+
+
 def ts(value: datetime, style: str) -> str:
     return discord.utils.format_dt(value, style)  # type: ignore[arg-type]
 
@@ -103,7 +108,7 @@ def info(event: Event, ctx: Context) -> Message:
     if ctx.guests:
         embed.add_field(name=t("Invited", language), value=", ".join(g.acronym for g in ctx.guests))
     if event.author_id:
-        embed.add_field(name=t("Author", language), value=f"<@{event.author_id}>")
+        embed.add_field(name=t("Author", language), value=mention(event.author_id))
     embed.add_field(name=t("Date", language), value=ts(event.assembly_at, "D"), inline=False)
     embed.add_field(name=t("Assembly", language), value=f"{ts(event.assembly_at, 't')} ({ts(event.assembly_at, 'R')})")
     embed.add_field(name=t("Start", language), value=ts(event.start_at, "t"))
@@ -142,18 +147,18 @@ def _people(ids: list[int], language: str, limit: int = 1000) -> str:
     """Mentions that fit ``limit`` characters, then "and N more"."""
     out, used = [], 0
     for index, member_id in enumerate(ids):
-        mention = f"<@{member_id}>"
-        if used + len(mention) + 2 > limit:
+        text = mention(member_id)
+        if used + len(text) + 2 > limit:
             return ", ".join(out) + " " + t("and {count} more", language, count=len(ids) - index)
-        out.append(mention)
-        used += len(mention) + 2
+        out.append(text)
+        used += len(text) + 2
     return ", ".join(out) or "—"
 
 
 def _slot_line(slot, offered: bool, language: str) -> str:
     role = f" <@&{slot.required_role_id}>" if slot.required_role_id else ""
     if slot.holder_id is not None:
-        holder = f"<@{slot.holder_id}>" + (" 🔒" if slot.locked else "")
+        holder = mention(slot.holder_id) + (" 🔒" if slot.locked else "")
     elif slot.locked:
         holder = "🔒 " + t("closed", language)
     elif offered:
@@ -230,7 +235,7 @@ def _items(items: list[str], language: str, limit: int = 1000) -> str:
 
 def _who(entry) -> str:
     if entry.member_id is not None:
-        return f"<@{entry.member_id}>"
+        return mention(entry.member_id)
     return discord.utils.escape_markdown(entry.name or entry.steam_id or "?")
 
 

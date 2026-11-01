@@ -487,5 +487,11 @@
   "Last 30 days": "Ostatnie 30 dni",
   "Last 90 days": "Ostatnie 90 dni",
   "Last 365 days": "Ostatnie 365 dni",
-  "All": "Wszystkie"
+  "All": "Wszystkie",
+  "privacy-erase": "usuń-dane",
+  "Erase a member's data: Steam link, ids in every table": "Usuń dane członka: link Steam, identyfikatory we wszystkich tabelach",
+  "Erase the data of {member}? Their Steam link is deleted and their ids are replaced by a pseudonym everywhere. This can't be undone.": "Usunąć dane {member}? Link Steam zostanie usunięty, a identyfikatory wszędzie zastąpione pseudonimem. Tego nie da się cofnąć.",
+  "Erase": "Usuń",
+  "{admin} ran a data erasure; the member is now former:{number}.": "{admin} usunął/usunęła dane członka; teraz to former:{number}.",
+  "Erased: the member is now former:{number}.": "Usunięto: członek to teraz former:{number}."
 }

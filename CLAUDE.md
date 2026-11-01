@@ -14,15 +14,15 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–4 are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–6 are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
 supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
 (`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
 organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
 messages, `/slot` and `/events` (4d), the Steam link and squad.xml (phase 5), and the attendance trigger,
-report and corrections (6a), and the ratings with `/attendance`, `/profile`, `/mission-maker` and `/group` (6b);
-`/privacy erase` (6c) comes next. The
+report and corrections (6a), the ratings with `/attendance`, `/profile`, `/mission-maker` and `/group` (6b), and
+`/privacy-erase` (6c); the event profile (phase 7) comes next. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -83,8 +83,9 @@ exactly the settings.
   period), `retry`, `end`, `cancel` (ends one under way first); unreachable → scheduled retries, refused →
   `failed` + staff note. State in `host_reservation`. Its `listener` (set by `EventService` to the notifier's
   `reservation_changed`) hears changes made in the background, so the info embed and approval requests redraw.
-- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts), `app/servers/` (`/server`
-  with confirmation and override buttons).
+- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a
+  confirmation, `erase.py` replacing the member by `former:<n>` everywhere, stored as `-n` in id columns and shown
+  by `render.mention()`), `app/servers/` (`/server` with confirmation and override buttons).
 - `app/orbat/parser.py`: the ORBAT text format (`parse` names every problem's line; `render` writes it back with
   `xN`; `!` only for slots locked closed, never for assignments). `app/orbat/templates.py`: shared templates.
 - `app/signup/service.py`: `SignupService`, the sign-up rules (see its docstring): atomic claims, the partial

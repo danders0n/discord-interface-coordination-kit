@@ -26,7 +26,7 @@ from discord.ext import commands
 
 from app.attendance.history import History, Rated, Record, average
 from app.discord_util import NotAllowed, access, reply, require
-from app.eventchannel.render import ts
+from app.eventchannel.render import mention, ts
 from app.events.groups import Groups
 from app.i18n import t
 from app.permissions import Perm
@@ -117,7 +117,7 @@ class AttendanceCog(commands.Cog):
         since = self.services.scheduler.clock() - timedelta(days=days) if days else None
         totals = await self.history.totals(since)
         rows = sorted(totals.items(), key=lambda item: (-item[1].attended, item[1].no_show, item[0]))
-        lines = [f"<@{member_id}>: {r.attended} · {r.no_show} · {r.excused} · {percent(r.rate)}" for member_id, r in rows]
+        lines = [f"{mention(member_id)}: {r.attended} · {r.no_show} · {r.excused} · {percent(r.rate)}" for member_id, r in rows]
         title = t("Attendance in the last {days} days", locale, days=days) if days else t("Attendance, all events", locale)
         embed = discord.Embed(title=title, description="\n".join(lines)[:4000] if lines else t("Nobody yet.", locale))
         embed.set_footer(text=t("attended · no-show · excused · rate", locale))
