@@ -4,12 +4,13 @@ A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservation
 [arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
 squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: phases 1–3, 4a and 4b.** The bot starts, checks its configuration on the server, keeps its database, backups,
+**Status: phases 1–3, 4a, 4b and 4c-1.** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
 (drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
 draft, then published with an announcement, its messages kept in order and redrawn as sign-ups change, archived
-by quarter. The wizard, the panel and the sign-up buttons come in phases 4c-4d.
+by quarter. *Create event* in the header channel starts a wizard; *Organiser panel* under an event's info
+edits it, publishes or sends it for approval. Images, presets and the sign-up buttons come next.
 
 ## Install
 

@@ -106,6 +106,7 @@ class Times(BaseModel):
     reminder_minutes: list[int] = Field(default_factory=lambda: [24 * 60, 60],
                                         description="Reminder pings, this long before the assembly")
     archive_hours: int = Field(48, ge=0, description="After the end (start + duration), the channel moves to the archive")
+    calendar_days: int = Field(14, ge=1, le=60, description="The header's calendar shows the events of this many days")
 
 
 class Events(BaseModel):

@@ -18,7 +18,9 @@ from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
 from app.servers.cog import ServerCog
 from app.eventchannel.service import EventChannels
+from app.events.header import Header
 from app.events.service import EventService
+from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
 from app.services import Services
 from app.signup.service import Member, SignupService
 from app.staff_threads import KINDS
@@ -65,11 +67,15 @@ class EventBot(commands.Bot):
         events = EventService(s.db, s.store, lambda: s.ids, s.scheduler, s.reservations, channels, link=channels.link)
         signups = SignupService(s.db, s.store, lambda: s.ids, s.scheduler, channels, self.roles_of)
         channels.events, channels.signups = events, signups
+        channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
         s.channels, s.events, s.signups = channels, events, signups
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if before.guild.id == self.services.settings.guild_id and before.roles != after.roles:
             await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)))
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        await expired(interaction)  # a wizard from before a restart
 
     async def on_member_remove(self, member: discord.Member) -> None:
         if member.guild.id == self.services.settings.guild_id:
@@ -77,6 +83,7 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
+        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction)  # buttons that outlive a restart
         self.tree.on_error = on_app_command_error
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
@@ -125,6 +132,7 @@ class EventBot(commands.Bot):
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
         await self.services.channels.refresh_all()  # whatever changed while the bot was down
+        self.services.channels.header.request()
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

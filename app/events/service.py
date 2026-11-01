@@ -62,6 +62,7 @@ class Problem(StrEnum):
     NO_RESERVATION = "no_reservation"
     TOO_LONG = "too_long"
     NOT_ZEUS = "not_zeus"
+    NOT_A_NUMBER = "not_a_number"
 
 
 class EventError(Exception):

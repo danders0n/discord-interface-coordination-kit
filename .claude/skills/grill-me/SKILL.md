@@ -1,21 +1,28 @@
 ---
 name: grill-me
 description: Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions "grill me".
+model: sonnet
 ---
 
-Interview the user relentlessly about every aspect of their plan until you reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one.
+Interview the user about their plan until the decisions that matter are settled.
 
-## How to ask questions
+## How to ask
 
-Use the **AskUserQuestion tool** for every question you ask. Never pose questions as plain text in your response — always use the multiple-choice popup so the user can quickly select an answer or type a custom one.
+- Use the **AskUserQuestion tool**, never plain-text questions.
+- Ask **up to 4 independent questions in one call** (the tool takes up to 4). Ask one alone only when its answer
+  changes what you would ask next.
+- Give each question 2–4 concrete options, the one you recommend first with "(Recommended)". The user always has
+  "Other".
+- Don't ask what the code or files answer: check them yourself, briefly.
 
-Ask **one question at a time**. Wait for the user's answer before moving to the next question. This keeps the conversation focused and prevents overwhelm.
+## Scope
 
-For each question, provide 2–4 concrete multiple-choice options representing the most likely answers or directions. Think about what the user would realistically choose — generic options like "Yes" / "No" aren't helpful unless the question is genuinely binary. The user always has the "Other" field available to write something custom.
+- Work through the open decisions most consequential first.
+- A decision with an obvious default is not a question: take the default and list it as assumed in the summary.
+- Stop after about 12 questions, or sooner when what is left is minor, and offer to go on.
 
 ## Flow
 
-1. After receiving an answer, briefly acknowledge the decision (1–2 sentences max), then immediately ask the next question via AskUserQuestion.
-2. If a question can be answered by exploring the codebase or files, explore them yourself instead of asking the user.
-3. Continue until all branches of the design tree are resolved.
-4. When finished, provide a concise summary of all decisions made.
+1. After each batch of answers, write the decisions down (plan or file) in one editing pass, not one per answer.
+2. Acknowledge in one line, then ask the next batch.
+3. Finish with a short summary: the decisions, and the defaults you assumed.

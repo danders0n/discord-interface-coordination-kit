@@ -122,6 +122,10 @@ class FakeChannel:
     def permissions_for(self, _member: Any) -> discord.Permissions:
         return self.permissions
 
+    @property
+    def mention(self) -> str:
+        return f"<#{self.id}>"
+
     async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
         message = Sent(content, kwargs)
         self.sent.append(message)
@@ -264,6 +268,8 @@ class FakeInteraction:
         self.guild = guild
         self.response = FakeResponse()
         self.followup = FakeFollowup()
+        self.type = discord.InteractionType.component
+        self.data: dict[str, Any] = {}
 
     @property
     def replies(self) -> list[Sent]:

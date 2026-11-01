@@ -14,12 +14,12 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–3, 4a and 4b are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–3, 4a, 4b and 4c-1 are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
 supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
-(`app/events/`, phase 4a), and the event channel (`app/eventchannel/`, phase 4b); the wizard, panel and
-sign-up buttons come in phases 4c-4d. The
+(`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
+organiser panel (phase 4c-1); `/event image` and `/event preset` (4c-2) and the sign-up buttons (4d) come next. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -97,6 +97,10 @@ exactly the settings.
   thread, batched redraws via `Redrawer`, background renames, publish + announcement, cancel + thread ping, archive
   by quarter with overflow categories; it is the notifier of `EventService` and `SignupService`). `EventBot.
   build_events` wires the three together; `refresh_all` redraws after a restart.
+- `app/events/ui.py`: the wizard (`Choices` + `DetailsModal`, in memory; `expired()` answers its buttons after a
+  restart), the persistent `CreateEvent`, `PanelButton` and `PanelAction` (`event:act:<id>:<action>`, one
+  `_<action>` method each), and the panel's modals and tools. `guarded()` turns service refusals into words
+  (`app/events/words.py`). `app/events/header.py`: the header message and its calendar.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

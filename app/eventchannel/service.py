@@ -105,6 +105,7 @@ class EventChannels:
         self.clock = clock or scheduler.clock
         self.events: Any = None
         self.signups: Any = None
+        self.header: Any = None  # app.events.header.Header: the calendar follows every change
         self.redrawer = Redrawer(self.redraw_now, interval)
         self._renames: dict[int, asyncio.Task] = {}
         scheduler.register(ARCHIVE_KIND, self._archive_action)
@@ -193,8 +194,13 @@ class EventChannels:
             return
         board = await self.signups.board(event_id)
         ctx = await self._context(event)
-        stored = await sync.apply(channel, {k: int(v) for k, v in (event.messages or {}).items()},
-                                  render.messages(event, board, ctx))
+        messages = render.messages(event, board, ctx)
+        if event.status != "cancelled":
+            from app.events.ui import PanelButton  # (the UI imports this module)
+            view = discord.ui.View(timeout=None)
+            view.add_item(PanelButton(event_id, t("Organiser panel", self.language)))
+            messages["info"].view = view
+        stored = await sync.apply(channel, {k: int(v) for k, v in (event.messages or {}).items()}, messages)
         await self._save(event_id, messages=stored)
         await self._announcement(event, ctx)
         if event.archived_at is None and event.status != "cancelled":
@@ -328,17 +334,25 @@ class EventChannels:
 
     # ---------------------------------------------------------------- the notifiers
 
+    def _calendar(self) -> None:
+        if self.header is not None:
+            self.header.request()
+
     async def changed(self, event_id: int) -> None:
         self.redrawer.request(event_id)
+        self._calendar()
 
     async def published(self, event_id: int) -> None:
         await self.publish(event_id)
+        self._calendar()
 
     async def deleted(self, event_id: int) -> None:
         await self.delete(event_id)
+        self._calendar()
 
     async def cancelled(self, event_id: int) -> None:
         await self.cancel(event_id)
+        self._calendar()
 
     async def signup_opened(self, event_id: int, ping: bool) -> None:
         self.redrawer.request(event_id)  # the ping: phase 4d

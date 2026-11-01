@@ -29,6 +29,10 @@ def order(key: str) -> int:
     return len(FIXED) + int(number)
 
 
+def _view(message: Message) -> dict[str, Any]:
+    return {"view": message.view} if message.view is not None else {}  # (discord.py takes no view=None)
+
+
 @dataclass(frozen=True)
 class Op:
     action: str  # edit | send | delete
@@ -65,14 +69,14 @@ async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Mes
                 message = messages[op.key]
                 try:
                     await channel.get_partial_message(stored[op.key]).edit(content=message.content,
-                                                                           embeds=message.embeds)
+                                                                           embeds=message.embeds, **_view(message))
                 except discord.NotFound:  # deleted by hand: post it and what follows again
                     missing = op.key
                     break
             else:
                 message = messages[op.key]
                 sent = await channel.send(content=message.content, embeds=message.embeds,
-                                          allowed_mentions=discord.AllowedMentions.none())
+                                          allowed_mentions=discord.AllowedMentions.none(), **_view(message))
                 stored[op.key] = sent.id
         if missing is None:
             return stored

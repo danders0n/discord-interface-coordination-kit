@@ -26,6 +26,7 @@ COLOURS = {"draft": 0x95A5A6, "pending": 0xF1C40F, "published": 0x2ECC71, "ended
 class Message:
     content: str | None = None
     embeds: list[discord.Embed] = field(default_factory=list)
+    view: discord.ui.View | None = None  # buttons, attached by the Discord side (a View needs a running loop)
 
     def size(self) -> int:
         return sum(len(e) for e in self.embeds)
