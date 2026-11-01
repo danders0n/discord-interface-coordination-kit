@@ -4,7 +4,7 @@ A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservation
 [arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
 squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: phases 1–6.** The bot starts, checks its configuration on the server, keeps its database, backups,
+**Status: phases 1–7.** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
 (drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
@@ -18,8 +18,10 @@ Members link their Steam account with `/link` (or *Link now* in a reminder), `/u
 bot ends the event (a finished mission, the reservation's end, or *End event*), reads who played from the
 supervisor and posts the attendance report in the event channel, where the organisers correct it with *Edit
 attendance*. Attendees rate the mission under the report; `/attendance`, `/profile`, `/mission-maker` and
-`/group` show the totals, and bot admins get `/attendance-report` with a CSV and `/privacy-erase`. The event
-profile on the server (phase 7) comes next.
+`/group` show the totals, and bot admins get `/attendance-report` with a CSV and `/privacy-erase`. Mission
+makers set the mission with `/event mission` and build the event's server profile in the panel (*Server profile*):
+the bot clones `BOT_SUPERVISOR__BASE_PROFILE`, imports the preset, sets the mission, puts the profile on the event
+server for the reservation and deletes it some days later. Only the long-term archive (phase 8) is left.
 
 ## Install
 

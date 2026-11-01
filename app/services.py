@@ -33,6 +33,7 @@ class Services:
     channels: Any = None
     attendance: Any = None  # phase 6: app.attendance.service.AttendanceService
     feedback: Any = None  # phase 6: app.feedback.service.FeedbackService
+    profiles: Any = None  # phase 7: app.profiles.service.ProfileService
     # Steam links and squad.xml (phase 5), also built by the bot: app.bot.EventBot.build_links.
     links: Any = None
     squadxml: Any = None

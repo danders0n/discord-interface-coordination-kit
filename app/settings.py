@@ -94,6 +94,11 @@ class Supervisor(BaseModel):
     url: str = "http://localhost:8000"
     token: SecretStr | None = None
     event_server: str | None = Field(None, description="Slug of the default event server")
+    base_profile: str | None = Field(None, description="Event profiles are cloned from this profile (name or id)")
+    profile_swap_minutes: int = Field(5, ge=1, le=25, description="Without the supervisor's reservation_profile: the "
+                                                                  "event profile goes onto the server this long "
+                                                                  "before the reservation")
+    profile_keep_days: int = Field(14, ge=0, description="An event profile is deleted this long after the event")
 
 
 class Times(BaseModel):

@@ -10,10 +10,12 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=600)  # a mission of a few hundred MB, on the same machine
 
 
 class SupervisorError(Exception):
@@ -156,6 +158,58 @@ class SupervisorClient:
     async def mission_play(self, play_id: int) -> dict[str, Any]:
         """One play with its ``players`` (``uid``, ``name``, ``seconds``)."""
         return await self.request("GET", f"/api/stats/missions/{play_id}")
+
+    # ---------------------------------------------------------------- event profiles (phase 7)
+
+    async def profiles(self) -> list[dict[str, Any]]:
+        return await self.request("GET", "/api/profiles")
+
+    async def profile(self, profile_id: int) -> dict[str, Any]:
+        return await self.request("GET", f"/api/profiles/{profile_id}")
+
+    async def clone_profile(self, profile_id: int, body: dict[str, Any]) -> dict[str, Any]:
+        """``name``, and with ``managed_refs`` ``managed_by`` / ``external_ref`` (a known pair: that profile)."""
+        return await self.request("POST", f"/api/profiles/{profile_id}/clone", json=body)
+
+    async def patch_profile_config(self, profile_id: int, kind: str, changes: dict[str, Any]) -> dict[str, Any]:
+        """Deep-merged into the stored config; lists are replaced (so ``missions`` becomes exactly these)."""
+        return await self.request("PATCH", f"/api/profiles/{profile_id}/config/{kind}", json=changes)
+
+    async def import_preset(self, profile_id: int, content: bytes, filename: str) -> dict[str, Any]:
+        """The launcher preset as the profile's mods (``replace`` keeps the server-side ones), downloading only
+        what is missing: a supervisor job (``job``)."""
+        form = aiohttp.FormData()
+        form.add_field("file", content, filename=filename, content_type="text/html")
+        for name, value in (("mode", "replace"), ("download", "missing"), ("include_cdlc", "true"),
+                            ("restart_server", "false"), ("include_dependencies", "true")):
+            form.add_field(name, value)
+        return await self.request("POST", f"/api/profiles/{profile_id}/mods/import-preset", data=form)
+
+    async def delete_profile(self, profile_id: int) -> None:
+        await self.request("DELETE", f"/api/profiles/{profile_id}")
+
+    async def job(self, job_id: int) -> dict[str, Any]:
+        """``status`` (queued, held, running, waiting_auth, succeeded, failed, cancelled), ``progress``, ``error``."""
+        return await self.request("GET", f"/api/jobs/{job_id}")
+
+    async def missions(self) -> list[dict[str, Any]]:
+        """The missions on the server: ``name``, ``template``, ``title``, ``players``, ``profiles`` using it ..."""
+        return await self.request("GET", "/api/missions")
+
+    async def mission_report(self, name: str) -> dict[str, Any]:
+        return await self.request("GET", f"/api/missions/{quote(name, safe='')}/report")
+
+    async def upload_mission(self, filename: str, content: bytes, overwrite: bool) -> dict[str, Any]:
+        """The saved mission with its inspection ``report``."""
+        form = aiohttp.FormData()
+        form.add_field("files", content, filename=filename, content_type="application/octet-stream")
+        saved = await self.request("POST", "/api/missions", data=form, params={"overwrite": str(overwrite).lower()},
+                                   timeout=UPLOAD_TIMEOUT)
+        return saved[0]
+
+    async def assign_profile(self, slug: str, profile_id: int | None) -> dict[str, Any]:
+        """The profile the server starts with (the swap fallback without ``reservation_profile``)."""
+        return await self.request("PATCH", f"/api/servers/{slug}", json={"profile_id": profile_id})
 
     # ---------------------------------------------------------------- reservations
 

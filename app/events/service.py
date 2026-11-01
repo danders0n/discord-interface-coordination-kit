@@ -120,6 +120,7 @@ class EventService:
         self.scheduler, self.reservations, self.notifier, self.link = scheduler, reservations, notifier, link
         self.clock = clock or scheduler.clock
         self.attendance: Any = None  # app.attendance.service.AttendanceService, set by whoever wires both
+        self.profiles: Any = None  # app.profiles.service.ProfileService, likewise
         reservations.listener = notifier.reservation_changed
         for kind, handler in ((self.SIGNUP_OPEN, self._signup_open), (self.REMINDER, self._reminder),
                               (self.STALE_PING, self._stale_ping), (self.STALE_CANCEL, self._stale_cancel),
@@ -353,6 +354,8 @@ class EventService:
         _write(path, content)
         await self._set(event_id, member, preset_name=preset.name, required_dlc=list(preset.cdlc),
                         preset_mods=[[m.workshop_id, m.name] for m in preset.mods], preset_file=str(path))
+        if self.profiles is not None:  # a built profile imports the new preset
+            await self.profiles.changed(event_id)
         return preset
 
     async def set_image(self, event_id: int, member: Member, content: bytes, suffix: str) -> None:
@@ -557,6 +560,8 @@ class EventService:
                 key=f"{self.GUEST_END}:{row.id}", event_id=row.id)
         if self.attendance is not None:
             await self.attendance.published(row)
+        if self.profiles is not None:
+            await self.profiles.published(row)
         await self.notifier.published(event.id, by)
 
     # ---------------------------------------------------------------- reservations
@@ -566,7 +571,8 @@ class EventService:
         return Window(f"{await self.channel_name(event)} {event.title}",
                       event.assembly_at - timedelta(minutes=times.lead_minutes),
                       event.start_at + timedelta(minutes=event.duration_minutes + times.buffer_minutes),
-                      link=self.link(event))
+                      link=self.link(event),
+                      profile_id=event.profile_id if event.profile_state == "built" else None)
 
     async def _book(self, event: Event) -> None:
         try:
@@ -587,7 +593,8 @@ class EventService:
     async def _move(self, event: Event, times: Times) -> None:
         """Approved new times: move the reservation first; if the supervisor refuses a booked one, nothing changes.
         One that isn't booked (failed, retrying) is asked for at the new times, so a later retry uses them."""
-        moved = Event(**{c: getattr(event, c) for c in ("id", "kind", "title", "host_group_id")},
+        moved = Event(**{c: getattr(event, c) for c in ("id", "kind", "title", "host_group_id", "profile_id",
+                                                         "profile_state")},
                       assembly_at=times.assembly_at, start_at=times.start_at, duration_minutes=times.duration_minutes)
         booked = await self.reservations.get(event.id)
         if booked is not None and booked.state not in ("cancelled", "cancelling", "ended"):
@@ -623,6 +630,8 @@ class EventService:
         await self.scheduler.cancel_all(self.REMINDER, event_id)  # (whatever the offsets were when they were made)
         if self.attendance is not None:
             await self.attendance.forget(event_id)
+        if self.profiles is not None:  # after the reservation: the supervisor won't delete a profile it still uses
+            await self.profiles.cancelled(event_id)
         if was in ("draft", "pending"):
             await self.notifier.deleted(event_id)
         else:
@@ -686,6 +695,8 @@ class EventService:
             await self._schedule_reminders(event)
             if self.attendance is not None:
                 await self.attendance.published(event)
+            if self.profiles is not None:
+                await self.profiles.published(event)
             await self.notifier.moved(event.id)  # the channel's own actions: closing sign-up, the archive
 
     async def _live(self, action: Action, *statuses: str) -> Event | None:

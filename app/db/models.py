@@ -103,6 +103,20 @@ class Event(Base):
     attendance_to: Mapped[datetime | None]
     attendance_guests: Mapped[int] = mapped_column(Integer, default=0)  # a hosted event's players we don't know
     reported_at: Mapped[datetime | None]
+    # Phase 7: the event profile on the supervisor (docs/PLAN.md, *Supervisor: event profile*).
+    mission_name: Mapped[str | None] = mapped_column(String(200))  # the .pbo on the supervisor
+    mission_report: Mapped[dict[str, Any]] = mapped_column(default=dict)  # its inspection, trimmed (profiles.service)
+    hostname: Mapped[str | None] = mapped_column(String(200))  # None: the default
+    max_players: Mapped[int | None] = mapped_column(Integer)  # None: the default
+    verify_signatures: Mapped[bool] = mapped_column(Boolean, default=True)
+    profile_id: Mapped[int | None] = mapped_column(Integer)
+    profile_state: Mapped[str | None] = mapped_column(String(20))  # building | built | failed
+    profile_job_id: Mapped[int | None] = mapped_column(Integer)  # the preset import the supervisor runs
+    profile_error: Mapped[str | None] = mapped_column(Text)
+    profile_progress: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    profile_keep: Mapped[bool] = mapped_column(Boolean, default=False)
+    previous_profile_id: Mapped[int | None] = mapped_column(Integer)  # the swap fallback: the server's own profile
+    profile_swapped: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AttendanceEntry(Base):

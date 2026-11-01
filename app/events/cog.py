@@ -1,6 +1,7 @@
 """Slash commands around events (docs/PLAN.md, *Organiser panel*, *ORBAT and slots*, *Calendar*):
 
-- `/event preset file` and `/event image file`, used in the event's channel or thread by its organisers;
+- `/event preset file`, `/event image file` and `/event mission file | on_server`, used in the event's channel or thread
+  by its organisers (the mission: those with the mission maker role);
 - `/slot take slot` (autocomplete: the free slots of this channel's event) and `/slot leave`;
 - `/events`: the coming events and the member's own sign-ups, privately."""
 
@@ -28,7 +29,7 @@ MAX_IMAGE = 8 * 1024 * 1024
 
 
 class EventCog(commands.Cog):
-    event = app_commands.Group(name="event", description="Files for an event: its modset preset and its image",
+    event = app_commands.Group(name="event", description="Files for an event: its preset, image and mission",
                                guild_only=True)
     slot = app_commands.Group(name="slot", description="Take or leave a slot in this channel's event", guild_only=True)
 
@@ -77,6 +78,53 @@ class EventCog(commands.Cog):
             await reply(interaction, event_problem(exc.problem, interaction.locale, exc.missing))
             return
         await reply(interaction, t("Saved.", interaction.locale))
+
+    @event.command(name="mission", description="Set the event's mission: upload a .pbo, or pick one on the server")
+    @app_commands.describe(file="The mission's .pbo (up to Discord's upload limit)",
+                           on_server="A mission already on the server (start typing)")
+    async def mission(self, interaction: discord.Interaction, file: discord.Attachment | None = None,
+                      on_server: str | None = None) -> None:
+        from app.profiles.service import MAX_MISSION, ProfileError
+        from app.profiles.words import problem, warning
+
+        event = await self._here(interaction)
+        if event is None:
+            return
+        locale, profiles = interaction.locale, self.services.profiles
+        if file is None and not on_server:
+            await reply(interaction, t("Attach the mission's .pbo, or pick a mission already on the server.", locale))
+            return
+        if file is not None and file.size > MAX_MISSION:
+            await reply(interaction, t("That is too long.", locale))
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)  # an upload takes a moment
+        member = member_of(interaction)
+        try:
+            if file is not None:
+                event = await profiles.upload_mission(event.id, member, file.filename, await file.read())
+            else:
+                event = await profiles.pick_mission(event.id, member, on_server)
+        except ProfileError as exc:
+            await reply(interaction, problem(exc.problem, locale, exc.message))
+            return
+        except EventError as exc:
+            await reply(interaction, event_problem(exc.problem, locale, exc.missing))
+            return
+        report = event.mission_report or {}
+        lines = [t("Mission set: {name} ({terrain}, {players} playable).", locale, name=event.mission_name,
+                   terrain=report.get("terrain") or "?", players=report.get("playable") or "?")]
+        lines += [warning(code, detail, locale) for code, detail in await profiles.warnings(event)]
+        await reply(interaction, "\n".join(lines)[:1900])
+
+    @mission.autocomplete("on_server")
+    async def mission_choices(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        try:
+            found = await self.services.profiles.missions()
+        except Exception:  # noqa: BLE001 - autocomplete stays quiet when the supervisor doesn't answer
+            return []
+        typed = current.casefold()
+        return [app_commands.Choice(name=(f"{m['name']} · {m['title']}" if m.get("title") else m["name"])[:100],
+                                    value=m["name"]) for m in found if typed in m["name"].casefold()][:25]
 
     @slot.command(name="take", description="Take a free slot in this channel's event")
     @app_commands.describe(slot="The slot (start typing its name or squad)")

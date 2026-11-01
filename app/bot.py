@@ -20,6 +20,7 @@ from app.servers.cog import ServerCog
 from app.eventchannel.service import EventChannels
 from app.events.cog import EventCog
 from app.feedback.service import FeedbackService
+from app.profiles.service import ProfileService
 from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
@@ -87,6 +88,7 @@ class EventBot(commands.Bot):
         events.attendance = AttendanceService(s.db, s.store, s.scheduler, s.reservations, StatsReader(s.supervisor),
                                               s.links, events, channels, self.names_of)
         s.feedback = channels.feedback = events.attendance.feedback = FeedbackService(s.db, s.store, s.scheduler.clock)
+        s.profiles = events.profiles = ProfileService(s.db, s.store, s.scheduler, s.supervisor, events, channels)
         s.channels, s.events, s.signups, s.attendance = channels, events, signups, events.attendance
 
     def names_of(self, member_id: int) -> list[str]:

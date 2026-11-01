@@ -326,7 +326,7 @@ class CreateEvent(discord.ui.DynamicItem[discord.ui.Button], template=r"event:cr
 # ---------------------------------------------------------------------------- the organiser panel
 
 ACTIONS = ("details", "choices", "briefing", "orbat", "join", "signup", "limit", "organisers", "publish", "withdraw",
-           "server", "retry", "endres", "autoend", "ratings", "cancel", "end")
+           "server", "retry", "endres", "autoend", "profile", "ratings", "cancel", "end")
 
 
 class PanelButton(discord.ui.DynamicItem[discord.ui.Button], template=r"event:panel:(?P<event>\d+)"):
@@ -389,6 +389,8 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
         shown.append("retry")
     if booked is not None and booked.state == "booked" and s.events.clock() >= event.assembly_at:
         shown.append("endres")
+    if event.kind != "guest" and s.profiles is not None and s.profiles.may_manage(member):
+        shown.append("profile")  # the server profile: mission makers and manage any event
     if event.kind in ("internal", "hosted") and event.status in ("draft", "pending", "published"):
         shown.append("autoend")  # an evening of several missions: a finished one doesn't end it
     if event.attendance_state is not None and (event.kind != "guest" or access.is_administration):
@@ -401,7 +403,7 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
               "limit": t("Sign-up limit", locale), "organisers": t("Co-organisers", locale), "publish": publish_label,
               "withdraw": t("Withdraw request", locale), "server": t("Request the server", locale),
               "retry": t("Retry reservation", locale), "endres": t("End reservation", locale),
-              "ratings": t("Ratings", locale),
+              "ratings": t("Ratings", locale), "profile": t("Server profile", locale),
               "autoend": t("Don't end automatically: on", locale) if event.dont_end_automatically else
               t("Don't end automatically: off", locale),
               "cancel": t("Cancel event", locale), "end": t("End event", locale)}
@@ -538,6 +540,10 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("A finished mission no longer ends this event; the reservation's end or End "
                                        "event does.", interaction.locale) if value else
                         t("A finished mission ends this event again.", interaction.locale))
+
+    async def _profile(self, interaction, event, member) -> None:
+        content, view = await profile_panel(interaction, event)
+        await reply(interaction, content, view=view)
 
     async def _ratings(self, interaction, event, member) -> None:
         s, locale = services(interaction), interaction.locale
@@ -871,3 +877,112 @@ class SlotTools(discord.ui.View):
 
         if await guarded(interaction, save):
             await reply(interaction, t("Saved.", interaction.locale))
+
+
+# ---------------------------------------------------------------------------- the server profile
+
+async def profile_panel(interaction: discord.Interaction, event: Any) -> tuple[str, discord.ui.View]:
+    """The mission, its report and warnings, the settings and the build state (docs/PLAN.md, *Supervisor: event
+    profile*); *Settings*, *Build profile*, *Keep*."""
+    from app.profiles.words import state, warning
+
+    s, locale = services(interaction), interaction.locale
+    profiles = s.profiles
+    report = event.mission_report or {}
+    lines = [f"**{t('Server profile', locale)}** · {event.title}"]
+    if event.mission_name:
+        lines.append(t("Mission: {name} · {title} by {author}, {terrain}, {players} playable, status {status}.", locale,
+                       name=event.mission_name, title=report.get("title") or "?", author=report.get("author") or "?",
+                       terrain=report.get("terrain") or "?", players=report.get("playable") or "?",
+                       status=report.get("status") or "?"))
+    else:
+        lines.append(t("No mission yet: upload it with /event mission file, or pick one with /event mission on_server.",
+                       locale))
+    hostname, players = await profiles.effective(event)
+    lines.append(t("Hostname: {hostname} · max players: {players} · signatures: {signatures}", locale,
+                   hostname=hostname, players=players or "?",
+                   signatures=t("on", locale) if event.verify_signatures else t("off", locale)))
+    lines.append(t("Profile: {state}", locale, state=state(event, locale)))
+    if event.profile_keep:
+        lines.append(t("Kept after the event.", locale))
+    lines += [warning(code, detail, locale) for code, detail in await profiles.warnings(event)]
+    return "\n".join(lines)[:1900], ProfileTools(interaction, event)
+
+
+class ProfileTools(discord.ui.View):
+    def __init__(self, interaction: discord.Interaction, event: Any) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.event, locale = event, interaction.locale
+        for action, label, style, disabled in (
+                ("settings", t("Settings", locale), discord.ButtonStyle.secondary, False),
+                ("build", t("Build profile", locale), discord.ButtonStyle.success, not event.mission_name),
+                ("keep", t("Keep after the event: on", locale) if event.profile_keep else
+                 t("Keep after the event: off", locale), discord.ButtonStyle.secondary, False)):
+            button = discord.ui.Button(label=label, style=style, disabled=disabled)
+            button.callback = lambda i, a=action: getattr(self, f"_{a}")(i)
+            self.add_item(button)
+
+    async def _settings(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ProfileSettings(interaction, self.event))
+
+    async def _build(self, interaction: discord.Interaction) -> None:
+        from app.profiles.service import ProfileError
+        from app.profiles.words import problem, state
+
+        s, locale = services(interaction), interaction.locale
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            event = await s.profiles.build(self.event.id, member_of(interaction))
+        except ProfileError as exc:
+            await reply(interaction, problem(exc.problem, locale, exc.message))
+            return
+        except EventError as exc:
+            await reply(interaction, event_problem(exc.problem, locale, exc.missing))
+            return
+        await reply(interaction, t("Profile: {state}", locale, state=state(event, locale)))
+
+    async def _keep(self, interaction: discord.Interaction) -> None:
+        from app.profiles.service import ProfileError
+        from app.profiles.words import problem
+
+        s, locale = services(interaction), interaction.locale
+        keep = not self.event.profile_keep
+        try:
+            await s.profiles.set_keep(self.event.id, member_of(interaction), keep)
+        except ProfileError as exc:
+            await reply(interaction, problem(exc.problem, locale, exc.message))
+            return
+        await reply(interaction, t("The profile is kept after the event.", locale) if keep else
+                    t("The profile is deleted some days after the event.", locale))
+
+
+class ProfileSettings(discord.ui.Modal):
+    def __init__(self, interaction: discord.Interaction, event: Any) -> None:
+        locale = interaction.locale
+        super().__init__(title=t("Server profile", locale)[:45], timeout=TIMEOUT)
+        self.event = event
+        self.hostname = discord.ui.TextInput(label=t("Hostname (empty: the default)", locale)[:45], required=False,
+                                             max_length=200, default=event.hostname)
+        self.players = discord.ui.TextInput(label=t("Max players (empty: the default)", locale)[:45], required=False,
+                                            max_length=3, default=str(event.max_players) if event.max_players else None)
+        self.signatures = discord.ui.TextInput(label=t("Signatures (on / off)", locale)[:45], max_length=5,
+                                               default=t("on", locale) if event.verify_signatures else t("off", locale))
+        for item in (self.hostname, self.players, self.signatures):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        from app.profiles.service import ProfileError
+        from app.profiles.words import problem
+
+        s, locale = services(interaction), interaction.locale
+        off = self.signatures.value.strip().casefold() in ("off", "no", "0", t("off", locale).casefold())
+        try:
+            await s.profiles.set_settings(self.event.id, member_of(interaction), self.hostname.value,
+                                          self.players.value, not off)
+        except ProfileError as exc:
+            await reply(interaction, problem(exc.problem, locale, exc.message))
+            return
+        except EventError as exc:
+            await reply(interaction, event_problem(exc.problem, locale, exc.missing))
+            return
+        await reply(interaction, t("Saved.", locale))

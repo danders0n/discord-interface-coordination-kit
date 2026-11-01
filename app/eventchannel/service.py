@@ -642,6 +642,30 @@ class EventChannels:
                        "Attendance of {title}: {count} members still to confirm now count as attended."),
                       self.language, title=event.title, count=count))
 
+    async def profile_failed(self, event_id: int, reason: str) -> None:
+        """The event profile couldn't be built: the organisers in the thread, and staff."""
+        event = await self._event(event_id)
+        organisers = [event.created_by, *sorted(await self.events.organisers(event_id))]
+        await self._ping(event, t("The server profile of {title} failed: {reason}", self.language, title=event.title,
+                                  reason=reason), organisers)
+        self._staff(t("The server profile of {title} failed: {reason}", self.language, title=event.title, reason=reason))
+
+    async def profile_warnings(self, event_id: int, warnings: list[tuple[str, str]]) -> None:
+        from app.profiles.words import warning
+
+        event = await self._event(event_id)
+        self._staff(t("Mission of {title} ({mission}):", self.language, title=event.title, mission=event.mission_name)
+                    + "\n" + "\n".join(warning(code, detail, self.language) for code, detail in warnings))
+
+    async def profile_note(self, event_id: int, code: str) -> None:
+        event = await self._event(event_id)
+        if code == "not_built":
+            self._staff(t("{title}: no server profile is built, so the event server runs its own profile.",
+                          self.language, title=event.title))
+        else:
+            self._staff(t("{title}: the supervisor has refused to delete the event profile 7 days in a row (still "
+                          "running?); the bot keeps trying daily.", self.language, title=event.title))
+
     async def lost_slot(self, event_id: int, member_ids: list[int]) -> None:
         event = await self._event(event_id)
         await self._ping(event, t("The ORBAT of {title} changed and your slot is gone: you are at the top of the "

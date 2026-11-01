@@ -23,7 +23,8 @@ ALL = ["reservations", "integration_role", "managed_refs", "reservation_end_by_i
 
 
 def _server(number: int, slug: str, state: str = "stopped", players: int = 0) -> dict[str, Any]:
-    return {"server": {"id": number, "slug": slug, "name": slug.title(), "protected": False}, "state": state,
+    return {"server": {"id": number, "slug": slug, "name": slug.title(), "protected": False, "assigned_profile": None},
+            "state": state,
             "players_online": [{"name": f"player{i}"} for i in range(players)]}
 
 
@@ -41,6 +42,23 @@ class State:
     plays: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, str]] = field(default_factory=list)
     next_id: int = 1
+    # Phase 7: profiles (id -> name, managed_by, external_ref, config, presets imported), jobs (id -> status,
+    # progress, error), missions (name -> report), and the profiles servers run now (refused deletes).
+    profiles: dict[int, dict[str, Any]] = field(default_factory=lambda: {
+        1: {"id": 1, "name": "IBC base", "managed_by": None, "external_ref": None, "config": {}, "presets": []}})
+    jobs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    missions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    running_profiles: set[int] = field(default_factory=set)
+
+    def mission_report(self, name: str, playable: int = 10) -> dict[str, Any]:
+        """What the supervisor's inspection returns, with nothing wrong."""
+        return {"name": name, "template": name[:-4], "terrain": name.split(".")[-2] if name.count(".") >= 2 else "",
+                "status": "ok", "meta": {"briefingName": name.split(".")[0], "author": "Anna"}, "playable": playable,
+                "requirements": [], "issues": [], "index": {"built": True, "built_at": None, "job_id": None}}
+
+    def using(self, template: str) -> list[str]:
+        return [p["name"] for p in self.profiles.values()
+                if any(m.get("template") == template for m in p["config"].get("server", {}).get("missions", []))]
 
     def server(self, ref: Any) -> dict[str, Any] | None:
         return next((s for s in self.servers if ref in (s["server"]["id"], s["server"]["slug"], str(s["server"]["id"]))), None)
@@ -280,6 +298,91 @@ def make_app(state: State | None = None) -> web.Application:
             return _error(404, "Mission session not found")
         return web.json_response(_play_out(play) | {"players": play["players"]})
 
+    # ------------------------------------------------------------ profiles, jobs, missions (phase 7)
+
+    def _profile_out(profile: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in profile.items() if k not in ("config", "presets")}
+
+    async def list_profiles(_request: web.Request) -> web.Response:
+        return web.json_response([_profile_out(p) for p in state.profiles.values()])
+
+    async def get_profile(request: web.Request) -> web.Response:
+        profile = state.profiles.get(int(request.match_info["id"]))
+        return web.json_response(_profile_out(profile)) if profile else _error(404, "Profile not found")
+
+    async def clone_profile(request: web.Request) -> web.Response:
+        base = state.profiles.get(int(request.match_info["id"]))
+        if base is None:
+            return _error(404, "Profile not found")
+        body = await request.json()
+        found = next((p for p in state.profiles.values() if body.get("external_ref") and
+                      (p["managed_by"], p["external_ref"]) == (body.get("managed_by"), body["external_ref"])), None)
+        if found is not None:
+            return web.json_response(_profile_out(found))
+        new_id = max(state.profiles) + 1
+        state.profiles[new_id] = {"id": new_id, "name": body["name"], "managed_by": body.get("managed_by"),
+                                  "external_ref": body.get("external_ref"),
+                                  "config": {k: dict(v) for k, v in base["config"].items()}, "presets": []}
+        return web.json_response(_profile_out(state.profiles[new_id]), status=201)
+
+    async def patch_config(request: web.Request) -> web.Response:
+        profile = state.profiles.get(int(request.match_info["id"]))
+        if profile is None:
+            return _error(404, "Profile not found")
+        profile["config"].setdefault(request.match_info["kind"], {}).update(await request.json())
+        return web.json_response(profile["config"][request.match_info["kind"]])
+
+    async def import_preset(request: web.Request) -> web.Response:
+        profile = state.profiles.get(int(request.match_info["id"]))
+        if profile is None:
+            return _error(404, "Profile not found")
+        form = await request.post()
+        profile["presets"].append({"mode": form["mode"], "download": form["download"], "file": form["file"].filename})
+        job_id = len(state.jobs) + 1
+        state.jobs[job_id] = {"id": job_id, "kind": "preset_import", "status": "queued", "progress": {}, "error": None}
+        return web.json_response({"job": state.jobs[job_id], "restart_needed": False}, status=202)
+
+    async def delete_profile(request: web.Request) -> web.Response:
+        profile_id = int(request.match_info["id"])
+        if profile_id not in state.profiles:
+            return _error(404, "Profile not found")
+        if profile_id in state.running_profiles:
+            return _error(409, "The profile is running on a server")
+        del state.profiles[profile_id]
+        return web.Response(status=204)
+
+    async def get_job(request: web.Request) -> web.Response:
+        job = state.jobs.get(int(request.match_info["id"]))
+        return web.json_response(job) if job else _error(404, "Job not found")
+
+    async def list_missions(_request: web.Request) -> web.Response:
+        return web.json_response([{"name": name, "template": name[:-4], "title": m["report"]["meta"].get("briefingName"),
+                                   "players": m["report"]["playable"], "profiles": state.using(name[:-4])}
+                                  for name, m in sorted(state.missions.items())])
+
+    async def upload_mission(request: web.Request) -> web.Response:
+        form = await request.post()
+        upload = form["files"]
+        if upload.filename in state.missions and request.query.get("overwrite") != "true":
+            return _error(409, f"'{upload.filename}' already exists (use overwrite=true)")
+        report = state.mission_report(upload.filename)
+        state.missions[upload.filename] = {"report": report, "size": len(upload.file.read())}
+        return web.json_response([{"name": upload.filename, "template": upload.filename[:-4], "report": report}],
+                                 status=201)
+
+    async def mission_report(request: web.Request) -> web.Response:
+        mission = state.missions.get(request.match_info["name"])
+        return web.json_response(mission["report"]) if mission else _error(404, "Mission not found")
+
+    async def patch_server(request: web.Request) -> web.Response:
+        found = state.server(request.match_info["slug"])
+        if found is None:
+            return _error(404, "Server not found")
+        profile_id = (await request.json()).get("profile_id")
+        found["server"]["assigned_profile"] = {"id": profile_id, "name": state.profiles[profile_id]["name"]} \
+            if profile_id else None
+        return web.json_response(found)
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
     app.router.add_get("/api/system/info", system_info)
@@ -298,6 +401,17 @@ def make_app(state: State | None = None) -> web.Application:
     app.router.add_delete("/api/reservations/{id:\\d+}", delete)
     app.router.add_post("/api/reservations/{id:\\d+}/end", end_by_id)
     app.router.add_get("/api/stats/players", players)
+    app.router.add_get("/api/profiles", list_profiles)
+    app.router.add_get("/api/profiles/{id:\\d+}", get_profile)
+    app.router.add_post("/api/profiles/{id:\\d+}/clone", clone_profile)
+    app.router.add_patch("/api/profiles/{id:\\d+}/config/{kind}", patch_config)
+    app.router.add_post("/api/profiles/{id:\\d+}/mods/import-preset", import_preset)
+    app.router.add_delete("/api/profiles/{id:\\d+}", delete_profile)
+    app.router.add_get("/api/jobs/{id:\\d+}", get_job)
+    app.router.add_get("/api/missions", list_missions)
+    app.router.add_post("/api/missions", upload_mission)
+    app.router.add_get("/api/missions/{name}/report", mission_report)
+    app.router.add_patch("/api/servers/{slug}", patch_server)
     app.router.add_get("/api/stats/attendance", attendance)
     app.router.add_get("/api/stats/missions", missions)
     app.router.add_get("/api/stats/missions/{id:\d+}", mission)
