@@ -274,6 +274,25 @@ class HostReservation(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
+class ArchivedMessage(Base):
+    """A member's message in an event's channel or thread, copied before the channel is deleted (docs/PLAN.md,
+    *Long-term archive*). ``attachments``: ``[{name, path, size}]``, the files downloaded to the archive folder."""
+
+    __tablename__ = "archived_message"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger)  # the channel or its thread
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    author_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    author_name: Mapped[str] = mapped_column(String(100))  # as it was then
+    created_at: Mapped[datetime]
+    edited_at: Mapped[datetime | None]
+    content: Mapped[str] = mapped_column(Text, default="")
+    reply_to: Mapped[int | None] = mapped_column(BigInteger)
+    attachments: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
+
 class MissionRating(Base):
     """A member's rating of an event (docs/PLAN.md, *Supervisor: attendance*, *Mission feedback*): of the mission,
     or in a guest event of the cooperation with the host group. One per member and event, changeable while the

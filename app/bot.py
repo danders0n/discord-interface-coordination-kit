@@ -25,6 +25,9 @@ from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
 from app.approval.ui import ApprovalAction
+from app.archive.cog import ArchiveCog
+from app.archive.export import Exporter
+from app.archive.service import ArchiveService
 from app.attendance.cog import AttendanceCog
 from app.attendance.service import AttendanceService
 from app.attendance.stats import StatsReader
@@ -61,6 +64,8 @@ class EventBot(commands.Bot):
         services.roles_of = self.roles_of
         self.build_links()
         self.build_events()
+        services.archive = ArchiveService(services.db, services.store, services.scheduler.clock)
+        services.exporter = Exporter(services, self.guild)
 
     @property
     def guild_object(self) -> discord.Object:
@@ -138,7 +143,7 @@ class EventBot(commands.Bot):
                                ApprovalAction, LinkNow, ReportAction)
         self.tree.on_error = on_app_command_error
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
-                    LinkCog(self.services), AttendanceCog(self.services)):
+                    LinkCog(self.services), AttendanceCog(self.services), ArchiveCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         self._tasks = [
@@ -190,6 +195,7 @@ class EventBot(commands.Bot):
             await self.services.link_watch.start()  # ranks lost meanwhile, the rollout, squad.xml rebuilt
         except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
             log.exception("Starting the Steam links failed")
+        await self.services.exporter.start()  # the daily move of the oldest quarter into the database
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

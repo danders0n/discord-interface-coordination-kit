@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +15,7 @@ from discord import app_commands
 from app.discord_util import NotAllowed, on_app_command_error
 
 _ids = itertools.count(900_000)
+BOT_ID = 9_999  # FakeGuild's default ``me``
 
 
 @dataclass(eq=False)
@@ -71,6 +73,29 @@ class Sent:
         return (self.edits[-1] if self.edits else self.kwargs).get("embeds", [])
 
 
+@dataclass
+class FakeMessage:
+    """A message someone posted, as ``history()`` returns it."""
+
+    author: Any
+    content: str = ""
+    attachments: list[Any] = field(default_factory=list)
+    reference: Any = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    edited_at: datetime | None = None
+    id: int = field(default_factory=lambda: next(_ids))
+
+
+async def _history(messages: list[Any], oldest_first: bool):
+    for message in sorted(messages, key=lambda m: m.id, reverse=not oldest_first):
+        yield message
+
+
+def _bot_messages(sent: list[Sent]) -> list[FakeMessage]:
+    return [FakeMessage(SimpleNamespace(id=BOT_ID, name="bot", display_name="bot"), m.content or "", id=m.id)
+            for m in sent if not m.deleted]
+
+
 def _not_found(what: str) -> discord.NotFound:
     return discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), f"Unknown {what}")
 
@@ -105,6 +130,10 @@ class FakeThread:
     locked: bool = False
     sent: list[Sent] = field(default_factory=list)
     edits: list[dict[str, Any]] = field(default_factory=list)
+    posts: list[FakeMessage] = field(default_factory=list)  # what members wrote
+
+    def history(self, limit: int | None = None, oldest_first: bool = False):
+        return _history(_bot_messages(self.sent) + self.posts, oldest_first)
 
     async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
         if self.archived:
@@ -134,6 +163,10 @@ class FakeChannel:
     category_id: int | None = None
     overwrites: dict[Any, Any] = field(default_factory=dict)
     topic: str | None = None
+    posts: list[FakeMessage] = field(default_factory=list)  # what members wrote
+
+    def history(self, limit: int | None = None, oldest_first: bool = False):
+        return _history(_bot_messages(self.sent) + self.posts, oldest_first)
 
     def permissions_for(self, _member: Any) -> discord.Permissions:
         return self.permissions
@@ -190,7 +223,7 @@ class FakeGuild:
         self.role_map = {r.id: r for r in roles}
         self.threads: dict[int, FakeThread] = {}
         self.members: dict[int, FakeMember] = {}
-        self.me = me or FakeMember(1, "bot")
+        self.me = me or FakeMember(BOT_ID, "bot")
         self.default_role = FakeRole(id, "@everyone")
         for channel in channels:
             channel.guild = self

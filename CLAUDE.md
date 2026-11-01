@@ -14,7 +14,7 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–7 are built**: settings, database and migrations, backups, i18n, permissions, the
+Status: **phases 1–8 are built**: settings, database and migrations, backups, i18n, permissions, the
 scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
 supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
@@ -22,8 +22,8 @@ templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the e
 organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
 messages, `/slot` and `/events` (4d), the Steam link and squad.xml (phase 5), and the attendance trigger,
 report and corrections (6a), the ratings with `/attendance`, `/profile`, `/mission-maker` and `/group` (6b), and
-`/privacy-erase` (6c), and the event profile on the supervisor (phase 7); the long-term archive (phase 8) is
-the last. The
+`/privacy-erase` (6c), the event profile on the supervisor (phase 7) and the long-term archive (phase 8):
+every phase of the plan is built. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -144,6 +144,11 @@ exactly the settings.
   the `profile_swap` / `profile_restore` actions; `profile_cleanup` after the keep days, daily retries; a handler
   that reschedules its own key returns the new time, or the scheduler marks it done), `words.py`. The panel's
   *Server profile* is `events/ui.py`'s `profile_panel`; `/event mission` is in `events/cog.py`.
+- `app/archive/`: `service.py` (`ArchiveService`: quarters as numbers, which archived events leave
+  (`keep_quarters`), `save_transcript`, who may read: participants, organisers, *manage any event*, *bot admin*),
+  `export.py` (`Exporter`: the daily `archive_export` action copies members' messages and downloads attachments,
+  checks the copy, deletes the channel, then empty archive categories), `html.py` (the file: `inline`, `zip` or
+  `listed` attachments), `cog.py` (`/archive event`, picking the form that fits the upload limit).
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

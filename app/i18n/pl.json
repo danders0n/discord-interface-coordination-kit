@@ -541,5 +541,21 @@
   "⚠ The supervisor found errors in the mission: {errors}": "⚠ Supervisor znalazł błędy w misji: {errors}",
   "The supervisor is still indexing the addons: the mod warnings may be incomplete.": "Supervisor wciąż indeksuje addony: ostrzeżenia o modach mogą być niepełne.",
   "Waiting: the supervisor holds jobs during a reservation.": "Czeka: supervisor wstrzymuje zadania w trakcie rezerwacji.",
-  "Downloading mods: {done} of {total}.": "Pobieranie modów: {done} z {total}."
+  "Downloading mods: {done} of {total}.": "Pobieranie modów: {done} z {total}.",
+  "archive": "archiwum",
+  "Events moved into the database archive": "Eventy przeniesione do archiwum w bazie",
+  "An archived event as an HTML file: info, ORBAT, attendance, discussion": "Zarchiwizowany event jako plik HTML: informacje, ORBAT, obecność, dyskusja",
+  "The event (start typing its title or date)": "Event (zacznij pisać tytuł albo datę)",
+  "{title}, from the archive.": "{title}, z archiwum.",
+  "No archived event of yours by that name: pick one from the list.": "Nie ma Twojego zarchiwizowanego eventu o tej nazwie: wybierz z listy.",
+  "{count} event moved into the database archive.": {
+    "one": "{count} event przeniesiony do archiwum w bazie.",
+    "few": "{count} eventy przeniesione do archiwum w bazie.",
+    "many": "{count} eventów przeniesionych do archiwum w bazie."
+  },
+  "Moving {title} into the database archive failed: {reason}. The channel stays; the bot tries again tomorrow.": "Przeniesienie {title} do archiwum w bazie nie udało się: {reason}. Kanał zostaje; bot spróbuje jutro.",
+  "kept on the host": "zostaje na serwerze",
+  "deleted": "usunięto",
+  "Nobody wrote anything.": "Nikt nic nie napisał.",
+  "edited": "edytowano"
 }

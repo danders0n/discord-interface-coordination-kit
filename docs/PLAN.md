@@ -4,8 +4,8 @@ Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT a
 event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
 buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, phase 5 (Steam link and
 squad.xml), 6a (the attendance trigger, reading the plays, the report, corrections) 6b (ratings,
-`/attendance`, `/profile`, `/mission-maker`, `/group`), 6c (`/privacy-erase`) and phase 7 (the event profile)
-the same day; phase 8 (the long-term archive) is planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+`/attendance`, `/profile`, `/mission-maker`, `/group`), 6c (`/privacy-erase`), phase 7 (the event profile) and
+phase 8 (the long-term archive) the same day: every phase is built. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 
@@ -98,10 +98,10 @@ Decided 2026-10-31.
 
 | Topic | Decision |
 |---|---|
-| When | A scheduled action on the first day of each quarter, and again daily until every channel of the quarter that is leaving has been moved. |
+| When | Built in phase 8. A scheduled action every day at 05:00 (after the backup) moves whatever belongs to a leaving quarter, so the first day of a quarter and the retries are the same run (decided 2026-11-01). |
 | What is kept | The event's own data is already in the database (event, ORBAT, sign-ups, attendance). The bot adds the **transcript** of every message not posted by the bot, in the channel and in its thread: author id and name at the time, time, edit time, content, reply-to, and attachments. **Attachments are downloaded** into a folder from config (`<event id>/<message id>-<file name>`), because Discord's CDN links expire. |
 | Order | Copy first, check it (the message count matches, and every attachment is on disk), then delete the channel. A failure leaves the channel in place, is retried the next day, and goes to the staff log. |
-| Reading it | `/archive event` with autocomplete (date and title) replies privately with an **HTML file** made from the database: the info, briefing, final ORBAT or sign-up list, the attendance report, and the transcript. Images are inlined when the file fits the server's upload limit; otherwise the reply is a ZIP with the HTML and the attachments; if even that is too big, the HTML lists the attachments by name and says they are on the host (assumed). It is open to the event's **participants** (anyone who held a slot, was *Coming*, *Maybe*, *Can't come* or on the reserve list), its organisers, and *manage any event* and *bot admin* roles (decided 2026-10-31); autocomplete offers only those events. There is no way to bring the channel back. |
+| Reading it | `/archive event` with autocomplete (date and title; only events already moved into the database, as the others are still channels) replies privately with an **HTML file** made from the database: the info, briefing, final ORBAT or sign-up list, the attendance report, and the transcript. Images are inlined when the file fits the server's upload limit; otherwise the reply is a ZIP with the HTML and the attachments; if even that is too big, the HTML lists the attachments by name and says they are on the host (assumed). It is open to the event's **participants** (anyone who held a slot, was *Coming*, *Maybe*, *Can't come* or on the reserve list), its organisers, and *manage any event* and *bot admin* roles (decided 2026-10-31); autocomplete offers only those events. There is no way to bring the channel back. |
 | Backups | The daily backup covers the database only. The host's own backups must include the attachments folder, the briefing images folder and `.env` (deployment note in the README). |
 
 Reading members' messages for the transcript needs the privileged **Message Content** intent, as well as Server
@@ -476,7 +476,7 @@ Config contents (all in `.env`):
 | `attendance` | Built in phase 6a. Event, member or Steam ID and in-game name, seconds, whether a slot holder, status (`to_confirm` / `attended` / `no_show` / `excused` / `not_linked` / `walk_in`), a probable Steam ID for an unlinked holder, corrected by and when; the event keeps the state (`waiting` / `reported` / `unavailable`), the trigger, the window and the guest count of a hosted event |
 | `scheduled_action` | Kind, event, due time, done time, attempts, last error |
 | `mission_rating` | Built in phase 6b. Event, member, stars (1–5), comment, times (in a guest event, the rating of the cooperation with the host group) |
-| `archived_message` | Event, channel or thread, Discord message id, author id and name, times (created, edited), content, reply-to, attachments (file name, path on disk, size); the event gets the time its channel was moved |
+| `archived_message` | Built in phase 8. Event, channel or thread, Discord message id, author id and name, times (created, edited), content, reply-to, attachments (file name, path on disk, size); the event gets the time its channel was moved |
 
 ## Phases
 
@@ -503,7 +503,7 @@ speaking the routes this plan uses), with no live Discord.
    with `/mission-maker` and `/group`; (6c, built 2026-11-01) `/privacy-erase`.
 7. **Event profile** (built 2026-11-01): mission upload and pick, the mission report and warnings, cloning the base, the preset
    import job, the swap onto the event server and back, and cleanup.
-8. **Long-term archive:** moving the oldest quarter into the database (transcripts, attachments), deleting its
+8. **Long-term archive** (built 2026-11-01): moving the oldest quarter into the database (transcripts, attachments), deleting its
    channels, and `/archive event`. It is first needed a year after launch, when a fifth quarter begins.
 
 The supervisor's integration phases 1–4 already exist (see *Supervisor changes this plan uses*), so phase 2 uses

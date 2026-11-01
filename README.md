@@ -4,7 +4,7 @@ A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservation
 [arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
 squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: phases 1–7.** The bot starts, checks its configuration on the server, keeps its database, backups,
+**Status: all phases of the plan (1–8).** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
 (drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
@@ -21,7 +21,8 @@ attendance*. Attendees rate the mission under the report; `/attendance`, `/profi
 `/group` show the totals, and bot admins get `/attendance-report` with a CSV and `/privacy-erase`. Mission
 makers set the mission with `/event mission` and build the event's server profile in the panel (*Server profile*):
 the bot clones `BOT_SUPERVISOR__BASE_PROFILE`, imports the preset, sets the mission, puts the profile on the event
-server for the reservation and deletes it some days later. Only the long-term archive (phase 8) is left.
+server for the reservation and deletes it some days later. A year on, the oldest quarter's channels move into
+the database (transcripts and attachments) and are deleted; `/archive event` gives an event back as an HTML file.
 
 ## Install
 
@@ -118,8 +119,9 @@ Everything lives in `BOT_DATA_DIR` (`data` by default):
 | `logs/bot.log` | The application log, rotated daily, `BOT_LOGS__KEEP_DAYS` kept. Each error has an id, also posted to the staff log. |
 | `service.log` | What NSSM caught: failures before logging starts. |
 
-The nightly backup covers the database only. **The host's own backups must include the data folder** (later phases
-keep briefing images and archived attachments there) **and `.env`.**
+The nightly backup covers the database only. **The host's own backups must include the data folder** (presets,
+briefing images, and the archived events' attachments in `archive/` unless `BOT_ARCHIVE__ATTACHMENTS_DIR` puts them
+elsewhere) **and `.env`.**
 
 ## Update
 

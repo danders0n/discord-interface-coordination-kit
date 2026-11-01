@@ -6,7 +6,8 @@ are emptied), organisers, creator and author fields, approval decisions, templat
 Past events still add up, but nothing points back to the person. Discord ids are numbers, so in those columns the
 pseudonym is ``-n`` (:func:`pseudonym` turns it back into words); Steam ID columns hold ``former:<n>``.
 
-In events not started yet the member's places are simply freed (a pseudonym signed up for a coming event helps
+In archived transcripts their messages keep their place with the author "deleted" and no content, and their
+attachments are deleted from disk. In events not started yet the member's places are simply freed (a pseudonym signed up for a coming event helps
 nobody). Database backups are not rewritten; they age out with the rotation, as ``/privacy`` says."""
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import delete, select, update
 
 from app.db import Database, state
-from app.db.models import (ApprovalRequest, AttendanceEntry, Event, EventOrganiser, LinkReminder, MissionRating, Offer,
-                           OrbatTemplate, OtherGroup, Signup, Slot, SteamLink)
+from app.db.models import (ApprovalRequest, ArchivedMessage, AttendanceEntry, Event, EventOrganiser, LinkReminder,
+                           MissionRating, Offer, OrbatTemplate, OtherGroup, Signup, Slot, SteamLink)
 
 COUNTER_KEY = "erasures"
 
@@ -71,6 +73,11 @@ async def erase(db: Database, member_id: int, now: Callable[[], datetime]) -> Er
             await session.execute(update(model).where(column == member_id).values({column.key: former}))
         await session.execute(update(MissionRating).where(MissionRating.member_id == member_id)
                               .values(member_id=former, comment=""))
+        for message in (await session.execute(select(ArchivedMessage).where(
+                ArchivedMessage.author_id == member_id))).scalars():
+            for item in message.attachments or ():
+                Path(item["path"]).unlink(missing_ok=True)
+            message.author_id, message.author_name, message.content, message.attachments = former, "", "", []
         if steam_ids:
             await session.execute(update(AttendanceEntry).where(AttendanceEntry.steam_id.in_(steam_ids))
                                   .values(steam_id=former_steam, name=""))

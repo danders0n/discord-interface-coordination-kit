@@ -161,6 +161,14 @@ class Links(BaseModel):
     dms_per_hour: int = Field(20, ge=1, description="Reminder DMs sent per hour at most")
 
 
+class Archive(BaseModel):
+    """The long-term archive (docs/PLAN.md, *Long-term archive*)."""
+
+    keep_quarters: int = Field(4, ge=2, le=20, description="Quarters kept as channels (the current one included); "
+                                                            "older ones move into the database")
+    attachments_dir: Path | None = Field(None, description="Attachments of archived events; default: <data dir>/archive")
+
+
 class Backup(BaseModel):
     keep: int = Field(14, ge=1, description="How many daily database backups to keep")
 
@@ -191,6 +199,7 @@ class Settings(BaseSettings):
     attendance: Attendance = Field(default_factory=Attendance)
     squad_xml: SquadXml = Field(default_factory=SquadXml)
     links: Links = Field(default_factory=Links)
+    archive: Archive = Field(default_factory=Archive)
     backup: Backup = Field(default_factory=Backup)
     logs: Logs = Field(default_factory=Logs)
 
