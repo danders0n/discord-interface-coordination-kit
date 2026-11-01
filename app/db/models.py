@@ -90,6 +90,12 @@ class Event(Base):
     announcement_id: Mapped[int | None] = mapped_column(BigInteger)
     archived_at: Mapped[datetime | None]  # moved to an archive category
     exported_at: Mapped[datetime | None]  # moved into the database (phase 8)
+    # Phase 4c-2: the launcher preset and the briefing image, as files in the data folder.
+    preset_name: Mapped[str | None] = mapped_column(String(200))
+    preset_mods: Mapped[list[Any]] = mapped_column(JSON, default=list)  # [[workshop id, name], ...]
+    preset_file: Mapped[str | None] = mapped_column(String(300))
+    briefing_image: Mapped[str | None] = mapped_column(String(300))
+    attached: Mapped[dict[str, Any]] = mapped_column(default=dict)  # message key -> the files' tag last sent
 
 
 class OtherGroup(Base):

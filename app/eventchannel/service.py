@@ -106,6 +106,10 @@ class EventChannels:
         self.events: Any = None
         self.signups: Any = None
         self.header: Any = None  # app.events.header.Header: the calendar follows every change
+        self.staff: Any = None  # StaffLog
+        self.threads: Any = None  # StaffThreads: the moderation thread
+        self.services: Any = None  # for the approval messages
+        self.roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
         self.redrawer = Redrawer(self.redraw_now, interval)
         self._renames: dict[int, asyncio.Task] = {}
         scheduler.register(ARCHIVE_KIND, self._archive_action)
@@ -200,8 +204,15 @@ class EventChannels:
             view = discord.ui.View(timeout=None)
             view.add_item(PanelButton(event_id, t("Organiser panel", self.language)))
             messages["info"].view = view
+            if event.status == "published" and "orbat:0" in messages:
+                from app.signup.ui import buttons
+                messages["orbat:0"].view = buttons(event_id, event.kind == "zeus", self.language)
+        attached = dict(event.attached or {})
+        for key, message in messages.items():  # upload a file again only when it changed
+            message.replace_files = bool(message.files) and attached.get(key) != message.tag
         stored = await sync.apply(channel, {k: int(v) for k, v in (event.messages or {}).items()}, messages)
-        await self._save(event_id, messages=stored)
+        tags = {key: message.tag for key, message in messages.items() if message.files}
+        await self._save(event_id, messages=stored, attached=tags)
         await self._announcement(event, ctx)
         if event.archived_at is None and event.status != "cancelled":
             self._rename(event, channel, await self.events.channel_name(event), await self._topic(event))
@@ -355,22 +366,141 @@ class EventChannels:
         self._calendar()
 
     async def signup_opened(self, event_id: int, ping: bool) -> None:
-        self.redrawer.request(event_id)  # the ping: phase 4d
+        self.redrawer.request(event_id)
+        event = await self._event(event_id)
+        roles = [r for r in (self.ids().announcement, event.climate_role_id) if r]
+        if ping and roles:
+            text = " ".join(f"<@&{r}>" for r in roles) + " " + t("Sign-up for {title} is open!", self.language,
+                                                                  title=event.title)
+            await self._thread_send(event, text, discord.AllowedMentions(roles=[discord.Object(r) for r in roles],
+                                                                         users=False, everyone=False))
 
-    async def reminder(self, event_id: int) -> None:  # phase 4d
-        return None
+    async def reminder(self, event_id: int) -> None:
+        event = await self._event(event_id)
+        text = t("Reminder: {title}, assembly {when}.", self.language, title=event.title,
+                 when=render.ts(event.assembly_at, "R"))
+        await self._ping(event, text, await self._attending(event_id))
 
-    async def stale(self, event_id: int) -> None:  # phase 4d
-        return None
+    async def stale(self, event_id: int) -> None:
+        event = await self._event(event_id)
+        cancel_at = event.assembly_at - timedelta(hours=self.store.current.times.stale_cancel_hours)
+        text = t("{title} is still not published; it is cancelled {when} unless it is.", self.language,
+                 title=event.title, when=render.ts(cancel_at, "R"))
+        await self._ping(event, text, [event.created_by])
+        self._staff(t("Still a draft: {title} ({channel}).", self.language, title=event.title,
+                      channel=f"<#{event.channel_id}>" if event.channel_id else "—"))
 
-    async def approval_requested(self, request_id: int) -> None:  # phase 4d
-        return None
+    async def approval_requested(self, request_id: int) -> None:
+        from app.approval.ui import request_message
+        from app.db.models import ApprovalRequest
 
-    async def approval_decided(self, request_id: int) -> None:  # phase 4d
-        return None
+        if self.threads is None or self.services is None:
+            return
+        guild = self.guild()
+        staff = guild.get_channel(self.ids().staff) if guild and self.ids().staff else None
+        if staff is None:
+            return
+        async with self.db.session() as session:
+            request = await session.get(ApprovalRequest, request_id)
+        embed, view = await request_message(self.services, request)
+        sent = await self.threads.send(guild, staff, "moderation", embed=embed, **({"view": view} if view else {}))
+        async with self.db.session() as session, session.begin():
+            (await session.get(ApprovalRequest, request_id)).message_id = sent.id
 
-    async def offered(self, offer: Any, member_ids: list[int]) -> None:  # phase 4d
-        return None
+    async def refresh_requests(self, event_id: int) -> None:
+        """Draw the event's pending requests again (Approve is on once the reservation succeeded)."""
+        from app.db.models import ApprovalRequest
 
-    async def lost_slot(self, event_id: int, member_ids: list[int]) -> None:  # phase 4d
-        return None
+        async with self.db.session() as session:
+            ids = (await session.execute(select(ApprovalRequest.id).where(
+                ApprovalRequest.event_id == event_id, ApprovalRequest.state == "pending"))).scalars().all()
+        for request_id in ids:
+            await self._redraw_request(request_id)
+
+    async def _redraw_request(self, request_id: int) -> Any:
+        from app.approval.ui import request_message
+        from app.db.models import ApprovalRequest
+
+        async with self.db.session() as session:
+            request = await session.get(ApprovalRequest, request_id)
+        guild = self.guild()
+        staff = guild.get_channel(self.ids().staff) if guild and self.ids().staff else None
+        if request is None or request.message_id is None or staff is None or self.threads is None:
+            return request
+        thread = await self.threads.get(guild, staff, "moderation")
+        embed, view = await request_message(self.services, request)
+        try:
+            await thread.get_partial_message(request.message_id).edit(embed=embed, view=view)
+        except discord.NotFound:
+            pass
+        return request
+
+    async def approval_decided(self, request_id: int) -> None:
+        request = await self._redraw_request(request_id)
+        if request is None:
+            return
+        event = await self._event(request.event_id)
+        if request.state == "approved":
+            text = t("Approved: {title}.", self.language, title=event.title)
+        else:
+            text = t("Rejected: {title}. Reason: {reason}", self.language, title=event.title, reason=request.reason or "—")
+        await self._ping(event, text, [request.requested_by])
+        self._staff(f"{text} ({t('decided by {member}', self.language, member=f'<@{request.decided_by}>')})")
+        self.redrawer.request(event.id)
+
+    async def offered(self, offer: Any, member_ids: list[int]) -> None:
+        from app.signup.ui import offer_buttons
+
+        event = await self._event(offer.event_id)
+        until = render.ts(offer.expires_at, "R")
+        if offer.member_id is None:  # to the whole reserve list, in the thread
+            text = t("A slot in {title} is free: the first to take it has it (until {until}).", self.language,
+                     title=event.title, until=until)
+            await self._ping(event, text, member_ids, view=offer_buttons(offer.id, self.language, everyone=True))
+            return
+        member = self.guild().get_member(offer.member_id) if self.guild() else None
+        text = t("A slot in {title} is free for you. Take it before {until}?", self.language, title=event.title,
+                 until=until)
+        if member is not None:
+            try:
+                await member.send(text, view=offer_buttons(offer.id, self.language))
+                return
+            except discord.HTTPException:  # DMs closed: in the event's thread instead
+                pass
+        await self._ping(event, text, [offer.member_id], view=offer_buttons(offer.id, self.language))
+
+    async def lost_slot(self, event_id: int, member_ids: list[int]) -> None:
+        event = await self._event(event_id)
+        await self._ping(event, t("The ORBAT of {title} changed and your slot is gone: you are at the top of the "
+                                  "reserve list.", self.language, title=event.title), member_ids)
+
+    # ---------------------------------------------------------------- pings
+
+    async def _thread_send(self, event: Event, content: str, mentions: discord.AllowedMentions, **kwargs: Any) -> None:
+        guild = self.guild()
+        thread = guild.get_thread(event.thread_id) if guild is not None and event.thread_id else None
+        if thread is None and guild is not None and event.thread_id:
+            try:
+                thread = await guild.fetch_channel(event.thread_id)
+            except discord.NotFound:
+                return
+        if thread is not None:
+            await thread.send(content, allowed_mentions=mentions, **kwargs)
+
+    async def _ping(self, event: Event, text: str, member_ids: list[int], **kwargs: Any) -> None:
+        """In the event's thread, split before Discord's 2000 characters; buttons go on the first message."""
+        for index, content in enumerate(mention_chunks(text, member_ids)):
+            await self._thread_send(event, content, discord.AllowedMentions(users=True, roles=False, everyone=False),
+                                    **(kwargs if index == 0 else {}))
+
+    async def _attending(self, event_id: int) -> list[int]:
+        async with self.db.session() as session:
+            holders = (await session.execute(select(Slot.holder_id).where(
+                Slot.event_id == event_id, Slot.holder_id.is_not(None)))).scalars().all()
+            coming = (await session.execute(select(Signup.member_id).where(
+                Signup.event_id == event_id, Signup.status == "coming"))).scalars().all()
+        return list(dict.fromkeys([*holders, *coming]))
+
+    def _staff(self, text: str) -> None:
+        if self.staff is not None:
+            self.staff.post(text)

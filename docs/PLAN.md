@@ -1,8 +1,8 @@
 # Plan: community event bot
 
 Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
-event service), 4b (the event channel) and 4c-1 (header, wizard, panel) built by 2026-11-01; 4c-2, 4d and
-the later phases are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
+buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01; phases 5–8 are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 

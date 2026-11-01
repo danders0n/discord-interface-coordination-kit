@@ -19,10 +19,12 @@ The Discord side (channels, messages, pings) hears about all of it through :clas
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 
 from sqlalchemy import delete, select, update
@@ -31,6 +33,7 @@ from app.db import Database
 from app.db.models import ApprovalRequest, Event, EventGuestGroup, EventOrganiser, OtherGroup, Slot
 from app.events.times import Times
 from app.permissions import Access, Perm
+from app.presets import Preset, parse_preset_html
 from app.reservations.service import Frozen, ReservationService, Window
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
@@ -41,6 +44,7 @@ KINDS = ("internal", "guest", "hosted", "zeus")
 RESERVED = ("internal", "hosted", "zeus")  # on our server: they get a host reservation
 MAX_BRIEFING = 4000
 UNSET: object = object()  # update(): a detail not being changed
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 LATE_PING = timedelta(hours=1)
 log = logging.getLogger(__name__)
 
@@ -63,6 +67,7 @@ class Problem(StrEnum):
     TOO_LONG = "too_long"
     NOT_ZEUS = "not_zeus"
     NOT_A_NUMBER = "not_a_number"
+    NOT_AN_IMAGE = "not_an_image"
 
 
 class EventError(Exception):
@@ -127,6 +132,21 @@ class EventService:
         if event is None:
             raise EventError(Problem.NOT_FOUND)
         return event
+
+    async def by_channel(self, channel_id: int | None) -> Event | None:
+        """The event whose channel (or discussion thread) this is."""
+        if channel_id is None:
+            return None
+        async with self.db.session() as session:
+            return (await session.execute(select(Event).where(
+                (Event.channel_id == channel_id) | (Event.thread_id == channel_id)))).scalar_one_or_none()
+
+    async def upcoming(self, days: int) -> list[Event]:
+        now = self.clock()
+        async with self.db.session() as session:
+            return list((await session.execute(select(Event).where(
+                Event.status == "published", Event.start_at > now,
+                Event.assembly_at <= now + timedelta(days=days)).order_by(Event.assembly_at))).scalars())
 
     async def organisers(self, event_id: int) -> set[int]:
         async with self.db.session() as session:
@@ -292,6 +312,33 @@ class EventService:
             raise EventError(Problem.TOO_LONG)
         await self._set(event_id, member, briefing_situation=situation.strip(), briefing_mission=mission.strip(),
                         briefing_notes=notes.strip())
+
+    async def set_preset(self, event_id: int, member: Member, content: bytes) -> Preset:
+        """`/event preset`: parse an Arma 3 Launcher preset, keep the file, and take its Creator DLC as the DLC the
+        event needs. Raises ValueError for a file with no mods and no DLC."""
+        await self._organiser(event_id, member)
+        preset = parse_preset_html(content.decode("utf-8", errors="replace"))
+        path = self._file("presets", f"{event_id}.html")
+        _write(path, content)
+        await self._set(event_id, member, preset_name=preset.name, required_dlc=list(preset.cdlc),
+                        preset_mods=[[m.workshop_id, m.name] for m in preset.mods], preset_file=str(path))
+        return preset
+
+    async def set_image(self, event_id: int, member: Member, content: bytes, suffix: str) -> None:
+        """`/event image`: the briefing's banner or map, kept by the bot (so it outlives the organiser's message)."""
+        event = await self._organiser(event_id, member)
+        if suffix.lower() not in IMAGE_SUFFIXES:
+            raise EventError(Problem.NOT_AN_IMAGE)
+        path = self._file("images", f"{event_id}{suffix.lower()}")
+        _write(path, content)
+        if event.briefing_image and event.briefing_image != str(path):
+            Path(event.briefing_image).unlink(missing_ok=True)
+        await self._set(event_id, member, briefing_image=str(path))
+
+    def _file(self, folder: str, name: str) -> Path:
+        path = self.store.current.data_dir / folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
     async def set_how_to_join(self, event_id: int, member: Member, text: str) -> None:
         if len(text) > 1024:  # one embed field
@@ -624,3 +671,9 @@ class EventService:
                 (await session.get(Event, event.id)).status = "ended"
             await self.notifier.changed(event.id)
 
+
+def _write(path: Path, content: bytes) -> None:
+    """All or nothing: a half-written file never replaces a good one."""
+    temporary = path.with_suffix(path.suffix + ".part")
+    temporary.write_bytes(content)
+    os.replace(temporary, path)

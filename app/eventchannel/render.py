@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import discord
 
 from app.db.models import Event, OtherGroup
 from app.i18n import t
+from app.presets import CDLCS
 from app.signup.service import Board
 
 MAX_EMBEDS = 10
@@ -27,6 +29,13 @@ class Message:
     content: str | None = None
     embeds: list[discord.Embed] = field(default_factory=list)
     view: discord.ui.View | None = None  # buttons, attached by the Discord side (a View needs a running loop)
+    files: list[Path] = field(default_factory=list)  # attached on sending; on editing only when replace_files
+    replace_files: bool = False
+
+    @property
+    def tag(self) -> str:
+        """Changes when a file changes, so the Discord side knows to upload it again."""
+        return ";".join(f"{p.name}:{p.stat().st_mtime_ns}" for p in self.files if p.is_file())
 
     def size(self) -> int:
         return sum(len(e) for e in self.embeds)
@@ -102,6 +111,13 @@ def info(event: Event, ctx: Context) -> Message:
     embed.add_field(name=t("Sign-up", language), value=state, inline=False)
     if event.kind == "zeus" and not ctx.server_confirmed:
         embed.add_field(name=t("Server", language), value=t("Not confirmed yet", language), inline=False)
+    if event.preset_file:
+        dlc = ", ".join(CDLCS[k].name for k in event.required_dlc or () if k in CDLCS)
+        modset = t(("{name}: {count} mod", "{name}: {count} mods"), language, name=event.preset_name or t("Preset", language),
+                   count=len(event.preset_mods or ()))
+        if dlc:
+            modset += "\n" + t("Creator DLC: {dlc}", language, dlc=dlc)
+        embed.add_field(name=t("Modset", language), value=modset, inline=False)
     if event.kind == "guest" and event.how_to_join:
         embed.add_field(name=t("How to join", language), value=event.how_to_join[:1024], inline=False)
     return Message(embeds=[embed])
@@ -112,6 +128,10 @@ def briefing(event: Event, language: str) -> Message:
              (t("Notes", language), event.briefing_notes)]
     text = "\n\n".join(f"**{name}**\n{body}" for name, body in parts if body.strip())
     embed = discord.Embed(title=t("Briefing", language), description=(text or t("Not written yet.", language))[:MAX_DESCRIPTION])
+    image = Path(event.briefing_image) if event.briefing_image else None
+    if image is not None and image.is_file():
+        embed.set_image(url=f"attachment://{image.name}")
+        return Message(embeds=[embed], files=[image])
     return Message(embeds=[embed])
 
 
@@ -183,6 +203,10 @@ def zeus_list(board: Board, event: Event, language: str) -> list[Message]:
 def messages(event: Event, board: Board, ctx: Context) -> dict[str, Message]:
     """Every message of the channel, keyed in channel order."""
     found = {"info": info(event, ctx), "briefing": briefing(event, ctx.language)}
+    preset = Path(event.preset_file) if event.preset_file else None
+    if preset is not None and preset.is_file():
+        found["preset"] = Message(content=t("Modset for the Arma 3 Launcher: {name}", ctx.language,
+                                           name=event.preset_name or preset.name), files=[preset])
     pages = zeus_list(board, event, ctx.language) if event.kind == "zeus" else orbat(board, ctx.language)
     found |= {f"orbat:{i}": page for i, page in enumerate(pages)}
     return found

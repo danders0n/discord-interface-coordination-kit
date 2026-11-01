@@ -36,9 +36,18 @@ class FakeMember:
     name: str = "member"
     roles: list[FakeRole] = field(default_factory=list)
     guild_permissions: discord.Permissions = field(default_factory=discord.Permissions.none)
+    dms: list[Any] = field(default_factory=list)
+    dms_closed: bool = False
 
     def __hash__(self) -> int:
         return hash(self.id)
+
+    async def send(self, content: str | None = None, **kwargs: Any) -> Any:
+        if self.dms_closed:
+            raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Cannot send messages to this user")
+        message = Sent(content, kwargs)
+        self.dms.append(message)
+        return message
 
     @property
     def mention(self) -> str:
@@ -99,6 +108,9 @@ class FakeThread:
         message = Sent(content, kwargs)
         self.sent.append(message)
         return message
+
+    def get_partial_message(self, message_id: int) -> MessageRef:
+        return MessageRef(self, message_id)
 
     async def edit(self, **changes: Any) -> FakeThread:
         self.edits.append(changes)
@@ -173,6 +185,7 @@ class FakeGuild:
         self.channel_map = {c.id: c for c in channels}
         self.role_map = {r.id: r for r in roles}
         self.threads: dict[int, FakeThread] = {}
+        self.members: dict[int, FakeMember] = {}
         self.me = me or FakeMember(1, "bot")
         self.default_role = FakeRole(id, "@everyone")
         for channel in channels:
@@ -214,6 +227,9 @@ class FakeGuild:
 
     def get_role(self, role_id: int) -> FakeRole | None:
         return self.role_map.get(role_id)
+
+    def get_member(self, member_id: int) -> FakeMember | None:
+        return self.members.get(member_id)
 
     def get_thread(self, thread_id: int) -> FakeThread | None:
         """Like Discord's cache: archived threads aren't in it, only a fetch finds them."""
@@ -288,3 +304,16 @@ async def invoke(command: app_commands.Command, cog: Any, interaction: FakeInter
         await on_app_command_error(interaction, exc)  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001
         await on_app_command_error(interaction, app_commands.CommandInvokeError(command, exc))  # type: ignore[arg-type]
+
+
+@dataclass
+class FakeAttachment:
+    filename: str
+    content: bytes
+
+    @property
+    def size(self) -> int:
+        return len(self.content)
+
+    async def read(self) -> bytes:
+        return self.content

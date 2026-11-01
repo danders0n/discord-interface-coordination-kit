@@ -425,6 +425,8 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
 
     async def _retry(self, interaction, event, member) -> None:
         row = await services(interaction).reservations.retry(event.id)
+        if row is not None and row.state == "booked":
+            await services(interaction).channels.refresh_requests(event.id)  # Approve can be pressed now
         await reply(interaction, t("Server reserved.", interaction.locale) if row and row.state == "booked" else
                     t("No reservation: {reason}", interaction.locale, reason=row.error if row else "—"))
 

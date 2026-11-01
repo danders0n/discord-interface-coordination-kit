@@ -18,9 +18,12 @@ from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
 from app.servers.cog import ServerCog
 from app.eventchannel.service import EventChannels
+from app.events.cog import EventCog
 from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
+from app.approval.ui import ApprovalAction
+from app.signup.ui import OfferAction, SignupAction
 from app.services import Services
 from app.signup.service import Member, SignupService
 from app.staff_threads import KINDS
@@ -68,6 +71,7 @@ class EventBot(commands.Bot):
         signups = SignupService(s.db, s.store, lambda: s.ids, s.scheduler, channels, self.roles_of)
         channels.events, channels.signups = events, signups
         channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
+        channels.staff, channels.threads, channels.services, channels.roles_of = s.staff, s.threads, s, self.roles_of
         s.channels, s.events, s.signups = channels, events, signups
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
@@ -83,9 +87,10 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction)  # buttons that outlive a restart
+        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, OfferAction,  # outlive a restart
+                               ApprovalAction)
         self.tree.on_error = on_app_command_error
-        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services)):
+        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         self._tasks = [

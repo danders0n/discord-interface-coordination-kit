@@ -68,15 +68,17 @@ async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Mes
             elif op.action == "edit":
                 message = messages[op.key]
                 try:
+                    files = {"attachments": [discord.File(p, p.name) for p in message.files]} if message.replace_files else {}
                     await channel.get_partial_message(stored[op.key]).edit(content=message.content,
-                                                                           embeds=message.embeds, **_view(message))
+                                                                           embeds=message.embeds, **_view(message), **files)
                 except discord.NotFound:  # deleted by hand: post it and what follows again
                     missing = op.key
                     break
             else:
                 message = messages[op.key]
+                files = {"files": [discord.File(p, p.name) for p in message.files]} if message.files else {}
                 sent = await channel.send(content=message.content, embeds=message.embeds,
-                                          allowed_mentions=discord.AllowedMentions.none(), **_view(message))
+                                          allowed_mentions=discord.AllowedMentions.none(), **_view(message), **files)
                 stored[op.key] = sent.id
         if missing is None:
             return stored
