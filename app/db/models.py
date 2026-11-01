@@ -231,6 +231,33 @@ class HostReservation(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
+class SteamLink(Base):
+    """A member's Steam account (docs/PLAN.md, *Steam link and squad.xml*): their squad.xml entry, and from phase 6
+    how attendance knows them. One Steam ID belongs to one member. ``rank_lost_at``: without a rank role, or off
+    the server, since then; the link is deleted N days later."""
+
+    __tablename__ = "steam_link"
+
+    member_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    steam_id: Mapped[str] = mapped_column(String(17), unique=True)
+    nick: Mapped[str] = mapped_column(String(50))
+    linked_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    rank_lost_at: Mapped[datetime | None]
+
+
+class LinkReminder(Base):
+    """A member without a Steam link: when they were last reminded, and whether their first sign-up asked."""
+
+    __tablename__ = "link_reminder"
+
+    member_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    last_at: Mapped[datetime | None]
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    asked_at_signup: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class BotState(Base):
     """Small values the bot keeps between restarts (the header message id, the last start)."""
 

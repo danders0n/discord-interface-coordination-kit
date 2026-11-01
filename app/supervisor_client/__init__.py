@@ -129,6 +129,17 @@ class SupervisorClient:
     async def say(self, slug: str, message: str) -> None:
         await self.request("POST", f"/api/servers/{slug}/say", json={"message": message})
 
+    # ---------------------------------------------------------------- player stats
+
+    async def player_by_uid(self, uid: str) -> dict[str, Any] | None:
+        """The player with exactly this Steam ID (``name``, ``last_seen`` ...), or None when no server saw it.
+        Without ``player_uid_lookup`` the broad ``q=`` search, which also matches names, filtered here."""
+        await self.ensure_info()
+        params = {"uid": uid} if self.info.has("player_uid_lookup") else {"q": uid, "limit": "50"}
+        body = await self.request("GET", "/api/stats/players", params=params)
+        players = body.get("players", []) if isinstance(body, dict) else []
+        return next((p for p in players if p.get("uid") == uid), None)
+
     # ---------------------------------------------------------------- reservations
 
     async def reservations(self, managed_by: str | None = None, external_ref: str | None = None) -> list[dict[str, Any]]:

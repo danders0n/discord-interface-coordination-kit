@@ -4,7 +4,7 @@ A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservation
 [arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
 squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: phases 1–4.** The bot starts, checks its configuration on the server, keeps its database, backups,
+**Status: phases 1–5.** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
 (drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
@@ -13,7 +13,8 @@ by quarter. *Create event* in the header channel starts a wizard; *Organiser pan
 edits it, publishes or sends it for approval; moderators decide in the moderation thread. `/event preset` and
 `/event image` attach the launcher preset and the briefing image. Members sign up with the buttons under the
 ORBAT or `/slot take | leave`, freed slots are offered to the reserve list, and `/events` lists what is coming.
-The Steam link and squad.xml come next.
+Members link their Steam account with `/link` (or *Link now* in a reminder), `/unlink` removes it, staff use
+`/links set | remove`, and the bot keeps squad.xml in step with the rank and remark roles. Attendance comes next.
 
 ## Install
 
@@ -42,7 +43,7 @@ copy .env.example .env      # then fill it in, see below
    *Staff log* and *Moderacja* (names in `.env`). Put each channel and role into `.env` by **name or id**: a name is
    quicker, an id survives renames (turn on Developer Mode in *Settings → Advanced*, then right-click → *Copy ID*).
    A name that matches nothing, or more than one channel or role, is reported in the staff log.
-4. Staff commands (`/reload`, later `/server`, `/link set`, `/attendance report`, `/privacy erase`) are hidden from
+4. Staff commands (`/reload`, `/server`, `/links`, later `/attendance report`, `/privacy erase`) are hidden from
    everyone but admins at first. In *Server Settings → Integrations → the bot*, allow them for the roles you gave
    those permissions in `.env`. The bot still checks the roles on every use.
 
@@ -67,6 +68,21 @@ applies a changed file; the token, the guild, the data folder and the supervisor
 
 The `/privacy` text ships in `app/privacy/`; to change it, put `privacy.pl.md` / `privacy.en.md` into the data
 folder.
+
+### squad.xml and the old bot's links
+
+The bot writes only `squad.xml`, into `BOT_SQUAD_XML__OUTPUT_DIR`; IIS serves that folder, with `squad.dtd`,
+`squad.xsl` and the logo kept there by hand. Members are those with a `BOT_ROLES__RANK` role and a Steam link;
+`BOT_ROLES__REMARK` roles make the remark. On the switch-over day, stop the old bot's squad.xml export, then import
+its links before the first start:
+
+```powershell
+.venv\Scripts\python.exe -m app import-old-links D:\Workspace\python\IBC_BOT\data\steam_ids.json
+```
+
+It prints what it skipped (bad ids, duplicates). On its first start the bot posts one *Link now* announcement in
+`BOT_CHANNELS__LINK_REMINDER`; members with a rank and still no link get a DM `BOT_LINKS__REMINDER_DAYS` later
+(at most `BOT_LINKS__DMS_PER_HOUR` an hour), and again every that many days.
 
 ## Run as a service (NSSM)
 

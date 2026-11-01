@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,12 @@ class Services:
     events: Any = None
     signups: Any = None
     channels: Any = None
+    # Steam links and squad.xml (phase 5), also built by the bot: app.bot.EventBot.build_links.
+    links: Any = None
+    squadxml: Any = None
+    link_watch: Any = None
+    # A member's role ids now, or None when they are not on the server.
+    roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
 
     @property
     def settings(self) -> Settings:

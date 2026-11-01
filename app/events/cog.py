@@ -88,7 +88,8 @@ class EventCog(commands.Cog):
             await reply(interaction, t("Pick a slot from the list.", interaction.locale))
             return
         outcome = await self.services.signups.take(event.id, int(slot), member_of(interaction))
-        await signup_ui.answer(interaction, outcome, t("You have the slot. See you there!", interaction.locale))
+        await signup_ui.answer(interaction, outcome, t("You have the slot. See you there!", interaction.locale),
+                               ask_link=True)
 
     @take.autocomplete("slot")
     async def free_slots(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

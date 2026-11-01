@@ -20,7 +20,8 @@ supervisor client, host reservations as a service (`app/reservations/`), `/serve
 templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
 (`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
 organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
-messages, `/slot` and `/events` (4d); the Steam link and squad.xml (phase 5) come next. The
+messages, `/slot` and `/events` (4d), and the Steam link and squad.xml (phase 5); attendance (phase 6) comes
+next. The
 full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
 data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
@@ -116,6 +117,13 @@ exactly the settings.
   the DLC warning); the buttons are off before sign-up opens, after the start, and (*Coming*) at a Zeus limit.
   `app/approval/ui.py`: the request message in the moderation thread with *Approve* / *Reject*, and *Retry
   reservation* while Approve is off (`approval:<id>:<action>`).
+- `app/links/`: `service.py` (`LinkService`: Steam ID parsing, one Steam ID per member, `rank_lost_at` and the
+  deletion after N days, reminder bookkeeping, the rollout flag; `import_old` for `python -m app import-old-links`),
+  `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link`, the modal and `/links set`), `cog.py`
+  (`/link`, `/unlink`, staff `/links set | remove`), `watch.py` (`LinkWatch`: role changes, departures, renames,
+  the hourly `link_reminders` action with DMs or a reminder-channel ping, the first-run announcement).
+  `app/squadxml/service.py`: `render` (the old bot's layout) and `SquadXml` (debounced atomic writes, only when
+  changed, never while `roster()` is None). Both get the server's members through `EventBot.roster`.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

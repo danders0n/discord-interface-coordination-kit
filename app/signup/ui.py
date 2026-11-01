@@ -14,6 +14,7 @@ import discord
 from app.discord_util import reply, services
 from app.events.words import refusal
 from app.i18n import t
+from app.links.ui import link_view
 from app.presets import CDLCS
 from app.signup.service import Member, Outcome, Refusal
 
@@ -26,8 +27,9 @@ def member_of(interaction: discord.Interaction) -> Member:
     return Member(interaction.user.id, frozenset(role.id for role in getattr(interaction.user, "roles", ())))
 
 
-async def answer(interaction: discord.Interaction, outcome: Outcome, done: str) -> None:
-    """``done`` on success (with the DLC warning), the refusal otherwise."""
+async def answer(interaction: discord.Interaction, outcome: Outcome, done: str, ask_link: bool = False) -> None:
+    """``done`` on success (with the DLC warning), the refusal otherwise. ``ask_link``: a slot or *Coming*, so a
+    member's first one without a Steam link asks for it (docs/PLAN.md, *Supervisor: attendance*, *Identity*)."""
     locale = interaction.locale
     if not outcome.ok:
         other = None
@@ -39,6 +41,11 @@ async def answer(interaction: discord.Interaction, outcome: Outcome, done: str) 
     if outcome.missing_dlc:
         names = ", ".join(CDLCS[k].name for k in outcome.missing_dlc if k in CDLCS)
         text += "\n" + t("⚠ This mission needs Creator DLC you have no role for: {dlc}.", locale, dlc=names)
+    links = services(interaction).links
+    if ask_link and links is not None and await links.ask_at_signup(interaction.user.id):
+        text += "\n" + t("Link your Steam account so attendance counts you: press Link now, or use /link.", locale)
+        await reply(interaction, text, view=link_view(locale))
+        return
     await reply(interaction, text)
 
 
@@ -81,7 +88,8 @@ class SignupAction(discord.ui.DynamicItem[discord.ui.Button], template=r"signup:
             status = "maybe" if self.action == "maybe" else "cant"
             await answer(interaction, await signups.answer(self.event_id, member, status), t("Noted.", locale))
         elif self.action == "coming":
-            await answer(interaction, await signups.coming(self.event_id, member), t("You are coming. See you there!", locale))
+            await answer(interaction, await signups.coming(self.event_id, member), t("You are coming. See you there!", locale),
+                         ask_link=True)
         elif self.action == "leave":
             await answer(interaction, await signups.leave(self.event_id, member), t("You are off this event.", locale))
 
@@ -124,7 +132,7 @@ class SlotPicker(discord.ui.View):
 
     async def _slot(self, interaction: discord.Interaction, slot_id: int) -> None:
         outcome = await services(interaction).signups.take(self.event_id, slot_id, member_of(interaction))
-        await answer(interaction, outcome, t("You have the slot. See you there!", interaction.locale))
+        await answer(interaction, outcome, t("You have the slot. See you there!", interaction.locale), ask_link=True)
         if outcome.ok:
             self.stop()
 
@@ -147,7 +155,7 @@ class OfferAction(discord.ui.DynamicItem[discord.ui.Button], template=r"offer:(?
         member = Member(interaction.user.id, roles if roles is not None else frozenset())
         if self.action == "take":
             await answer(interaction, await signups.accept(self.offer_id, member),
-                         t("You have the slot. See you there!", locale))
+                         t("You have the slot. See you there!", locale), ask_link=True)
         else:
             await answer(interaction, await signups.decline(self.offer_id, member), t("Noted.", locale))
 

@@ -60,6 +60,10 @@ class Roles(BaseModel):
     mission_maker: Ref
     announcement: Ref | None = Field(None, description="Mentioned in announcements and when sign-up opens")
     signup: list[Ref] = Field(default_factory=list, description="Roles that may sign up for events")
+    rank: list[Ref] = Field(default_factory=list, description="Membership rank roles: who is in squad.xml and is "
+                                                              "reminded to link Steam")
+    remark: list[Ref] = Field(default_factory=list, description="Roles named in a member's squad.xml remark, in this "
+                                                                "order, e.g. Pilot;Medic")
 
 
 class Permissions(BaseModel):
@@ -116,6 +120,27 @@ class Events(BaseModel):
     climate_roles: list[Ref] = Field(default_factory=list, description="Interest roles such as @WW2 and @Modern")
 
 
+class SquadXml(BaseModel):
+    """The group's squad.xml (docs/PLAN.md, *Steam link and squad.xml*). Empty header fields take our group's."""
+
+    output_dir: Path | None = Field(None, description="Folder IIS serves squad.xml from; empty: no squad.xml is written")
+    url: str | None = Field(None, description="Public address of squad.xml, shown at /link")
+    nick: str | None = Field(None, max_length=50, description="<squad nick>; default: our acronym")
+    name: str | None = Field(None, max_length=200, description="<name>; default: our group's name")
+    email: str = "N/A"
+    web: str = ""
+    picture: str = Field("", description="File name of the logo .paa next to squad.xml")
+    title: str | None = Field(None, max_length=200, description="<title>; default: our group's name")
+
+
+class Links(BaseModel):
+    """Steam links (docs/PLAN.md, *Steam link and squad.xml*)."""
+
+    reminder_days: int = Field(14, ge=1, description="A member with a rank and no link is reminded every this many days")
+    delete_after_days: int = Field(90, ge=1, description="A link is deleted this long after its member lost the rank or left")
+    dms_per_hour: int = Field(20, ge=1, description="Reminder DMs sent per hour at most")
+
+
 class Backup(BaseModel):
     keep: int = Field(14, ge=1, description="How many daily database backups to keep")
 
@@ -143,6 +168,8 @@ class Settings(BaseSettings):
     events: Events = Field(default_factory=Events)
     times: Times = Field(default_factory=Times)
     supervisor: Supervisor = Field(default_factory=Supervisor)
+    squad_xml: SquadXml = Field(default_factory=SquadXml)
+    links: Links = Field(default_factory=Links)
     backup: Backup = Field(default_factory=Backup)
     logs: Logs = Field(default_factory=Logs)
 

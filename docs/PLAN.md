@@ -2,7 +2,8 @@
 
 Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
 event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
-buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01; phases 5–8 are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
+buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, and phase 5 (Steam link and
+squad.xml) the same day; phases 6–8 are planned. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
 plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
 
@@ -238,7 +239,7 @@ Decided 2026-10-31. A Zeus event has no ORBAT, only a list of who is coming.
 | Roles with *server override* (config) | *Start anyway?* during a reservation. |
 | Roles with *manage links* (config) | Set, change or remove anyone's Steam link and nick. |
 | Roles with *bot admin* (config) | `/reload`, `/attendance report`, `/privacy erase`. |
-| Everyone with a sign-up role | Sign up; `/events`, `/link`, `/privacy`, `/archive event` (their own events); `/attendance`, `/profile`, `/mission-maker` and `/group` with the limits in *Who sees what*. |
+| Everyone with a sign-up role | Sign up; `/events`, `/link`, `/unlink`, `/privacy`, `/archive event` (their own events); `/attendance`, `/profile`, `/mission-maker` and `/group` with the limits in *Who sees what*. |
 
 The role → permission mapping lives in `.env`, as lists of role ids or names. Every Discord user acts on the supervisor through the bot's
 one supervisor account, so these checks are the only thing limiting what each member can do there.
@@ -346,10 +347,10 @@ attendance.
 
 | Topic | Decision |
 |---|---|
-| Linking | `/link <steam64 or profile URL> <nick>`, or the *Link now* button in a reminder, which opens a modal. Accepted forms: a 17-digit Steam64 ID and `steamcommunity.com/profiles/<id>`. A custom URL (`steamcommunity.com/id/<name>`) is refused with a short how-to for finding the Steam64 ID; the bot doesn't use the Steam Web API, so it needs no key (decided 2026-10-31). An ID the supervisor hasn't seen is **still linked**; when the supervisor has seen it, the reply shows the last in-game name. The reply also gives the squad.xml URL (config) to put in the Arma profile. |
-| Privacy notice | The `/link` modal and reply say plainly what is **published** in squad.xml (Steam ID, nick, Discord username, remarks) and at which URL. A member who doesn't want that doesn't link, and `/link remove` deletes the link. |
+| Linking | `/link <steam64 or profile URL> <nick>` (without both it opens the modal), or the *Link now* button in a reminder, which opens the same modal; `/unlink` removes the own link. Discord gives a command group one visibility, so the members' commands are top-level and the staff's are the `/links` group (decided 2026-11-01). Accepted forms: a 17-digit Steam64 ID and `steamcommunity.com/profiles/<id>`. A custom URL (`steamcommunity.com/id/<name>`) is refused with a short how-to for finding the Steam64 ID; the bot doesn't use the Steam Web API, so it needs no key (decided 2026-10-31). An ID the supervisor hasn't seen is **still linked**; when the supervisor has seen it, the reply shows the last in-game name. The reply also gives the squad.xml URL (config) to put in the Arma profile. |
+| Privacy notice | The `/link` modal and reply say plainly what is **published** in squad.xml (Steam ID, nick, Discord username, remarks) and at which URL. A member who doesn't want that doesn't link, and `/unlink` deletes the link. |
 | Nick | Typed at `/link`; it is the `nick` in squad.xml. Staff can change it. |
-| Changes | Members can relink themselves, and each change is posted to the staff log. Roles with **manage links** can set, change or remove anyone's link and nick with `/link set @member` / `/link remove @member`. |
+| Changes | Members can relink themselves, and each change is posted to the staff log. Roles with **manage links** can set, change or remove anyone's link and nick with `/links set @member` / `/links remove @member`. |
 | Uniqueness | One Steam ID belongs to one member. A duplicate is refused, and staff are told in the staff log. |
 | Lost rank or left | The member drops out of squad.xml at once. After **N days** without a rank role or off the server (config; e.g. 90), the link itself is deleted and the staff log is told; the attendance history keeps the Steam ID, so it stays readable (decided 2026-10-31). Regaining a rank within N days changes nothing. |
 | Reminder | Applies to a member with a membership rank role and no link. They get a **DM** with a *Link now* button when they gain the rank, then again every **N days** (config) until they link. If their DMs are closed, they are pinged in a **reminder channel** (config) instead. |
@@ -364,9 +365,9 @@ squad.xml:
 | `<squad nick>`, `<name>`, `<email>`, `<web>`, `<picture>`, `<title>` | From config. `picture` is the file name of the logo `.paa` that IIS serves. |
 | `<member id>` | Steam64 ID. |
 | `<member nick>` | The nick typed at `/link`. |
-| `<remark>` | The configured **remark roles** the member has (e.g. Pilot, Medic), all of them, joined with `, ` in config order. Empty if none. The rank itself is not in the remark. |
+| `<remark>` | The configured **remark roles** the member has (e.g. Pilot, Medic), all of them, joined with `, ` in config order, cut to units.arma3.com's 128 characters. Empty if none. The rank itself is not in the remark. |
 | `<icq>` | The member's Discord **username**. |
-| `<member><name>`, `<email>` | `N/A` (assumed). |
+| `<member><name>`, `<email>` | The nick and `N/A`, as in the old bot's file, so the switch-over doesn't change it (decided 2026-11-01). |
 | Order | Members sorted by nick (assumed). |
 | Output | The bot writes **only `squad.xml`** to a directory from config. IIS hosts that directory with `squad.dtd`, `squad.xsl` and the logo, which are maintained by hand. The write is atomic (temp file, then replace), so IIS never serves a half-written file. Text is XML-escaped and UTF-8. |
 | When | On every relevant change: a link or nick changes, a member gains or loses a rank or remark role, or a member leaves. Changes are **debounced** (assumed 30 s), so a bulk role edit writes once, and the file is written only if its content changed. A full rebuild runs at startup and on `/reload`. |
@@ -388,7 +389,7 @@ config**. Slash command names and descriptions are localized through `app_comman
 | `/reload` | Only the **bot admin** role. The bot reads `.env` again and **validates it first**: on error nothing changes, and the errors are shown. An item removed from the config that existing events still use (a mission type, climate role, or role) stays readable on those events, because events store it **by value**, but it can't be picked for new ones. The reply lists the affected events. The token and the supervisor URL need a restart. |
 | Secrets | The Discord bot token and the supervisor API token, in the same `.env`. |
 | Check at startup | The bot checks that every configured channel and role exists, and that it has the Discord permissions it needs (View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage Channels, Manage Roles for channel overwrites, and *Mention @everyone, @here and All Roles* unless the announcement and climate roles are mentionable). What is missing is logged and posted to the staff log (assumed). |
-| Command visibility | Decided 2026-10-31. The staff commands (`/reload`, `/server`, `/link set` / `remove`, `/attendance report`, `/privacy erase`) carry `default_permissions` (Manage Server), so only admins see them at first; the server owner shows them to the roles from `.env` in *Server Settings → Integrations* (a setup step in the README). Members' commands are visible to all. The bot checks its own permissions on every use either way. |
+| Command visibility | Decided 2026-10-31. The staff commands (`/reload`, `/server`, `/links set` / `remove`, `/attendance report`, `/privacy erase`) carry `default_permissions` (Manage Server), so only admins see them at first; the server owner shows them to the roles from `.env` in *Server Settings → Integrations* (a setup step in the README). Members' commands are visible to all. The bot checks its own permissions on every use either way. |
 | What the bot sets up itself | The event channels with their permission overwrites, the archive categories, and the *Create event* message in the header channel (posted at startup when missing, then edited in place; its id is stored). The events category's own permissions (members read, don't write) are set by hand once (assumed). |
 | Host | The same machine as the supervisor (`http://localhost:8000`). |
 | Guild | **One** Discord server. Slash commands are synced to that guild only. |
@@ -468,7 +469,8 @@ Config contents (all in `.env`):
 | `signup` | Event, member, status (`maybe` / `cant` / `reserve`, with the reserve position; `coming` in a Zeus event) |
 | `offer` | Built in phase 3. A freed slot offered to one member, or (no member) to the whole reserve list; state (`open` / `taken` / `declined` / `expired` / `withdrawn`) and expiry. A member gets one offer per freed slot |
 | `orbat_template` | Name, owner, text |
-| `steam_link` | Member, Steam64 ID (unique), nick, linked by, times; reminder state; since when the member has had no rank (for the deletion after N days) |
+| `steam_link` | Built in phase 5. Member, Steam64 ID (unique), nick, linked by, times; since when the member has had no rank (for the deletion after N days) |
+| `link_reminder` | Built in phase 5. A member without a link: when last reminded, how often, and whether their first sign-up asked |
 | `attendance` | Event, member or Steam ID, seconds, status (`to_confirm` / `attended` / `no_show` / `excused` / `not_linked` / `walk_in`), corrected by; the guest count of a hosted event |
 | `scheduled_action` | Kind, event, due time, done time, attempts, last error |
 | `mission_rating` | Event, member, stars (1–5), comment, times (in a guest event, the rating of the cooperation with the host group) |
@@ -492,8 +494,8 @@ speaking the routes this plan uses), with no live Discord.
    (details, briefing, image, preset, ORBAT, *How to join*), approval, publish, the channel messages and
    thread, the sign-up buttons and `/slot`, the calendar and `/events`, the announcement, cancel, stale drafts, reminders, and archiving per
    quarter. It uses phases 2 and 3 as they are, so nothing is stubbed.
-5. **Steam link and squad.xml:** `/link`, the import of the old bot's links, reminders and rollout, and
-   squad.xml generation. The switch-over day can follow this phase.
+5. **Steam link and squad.xml** (built 2026-11-01): `/link`, `/unlink`, `/links`, the import of the old bot's
+   links, reminders and rollout, and squad.xml generation. The switch-over day can follow this phase.
 6. **Attendance:** the trigger, reading the plays, the report, corrections, `/attendance`, `/profile`, the
    mission feedback with `/mission-maker` and `/group`, and `/privacy erase`.
 7. **Event profile:** mission upload and pick, the mission report and warnings, cloning the base, the preset

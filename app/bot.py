@@ -23,9 +23,14 @@ from app.events.header import Header
 from app.events.service import EventService
 from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
 from app.approval.ui import ApprovalAction
+from app.links.cog import LinkCog
+from app.links.service import LinkService
+from app.links.ui import LinkNow
+from app.links.watch import LinkWatch
 from app.signup.ui import OfferAction, SignupAction
 from app.services import Services
 from app.signup.service import Member, SignupService
+from app.squadxml.service import Person, SquadXml
 from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
@@ -47,7 +52,9 @@ class EventBot(commands.Bot):
         self.services = services
         self._tasks: list[asyncio.Task] = []
         self._started = False
+        services.roles_of = self.roles_of
         self.build_events()
+        self.build_links()
 
     @property
     def guild_object(self) -> discord.Object:
@@ -74,10 +81,30 @@ class EventBot(commands.Bot):
         channels.staff, channels.threads, channels.services, channels.roles_of = s.staff, s.threads, s, self.roles_of
         s.channels, s.events, s.signups = channels, events, signups
 
+    def roster(self) -> dict[int, Person] | None:
+        """The server's members now, for squad.xml and the link reminders; None until the member list is loaded."""
+        guild = self.guild()
+        if guild is None or not guild.chunked:
+            return None
+        return {m.id: Person(frozenset(r.id for r in m.roles), m.name) for m in guild.members if not m.bot}
+
+    def build_links(self) -> None:
+        """Steam links and squad.xml (docs/PLAN.md, phase 5)."""
+        s = self.services
+        s.links = LinkService(s.db, s.scheduler.clock)
+        s.squadxml = SquadXml(s.links, s.store, lambda: s.ids, self.roster)
+        s.link_watch = LinkWatch(s, self.guild, self.roster)
+
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if before.guild.id == self.services.settings.guild_id and before.roles != after.roles:
+            previous = frozenset(r.id for r in before.roles)
             await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)),
-                                                       previous=frozenset(r.id for r in before.roles))
+                                                       previous=previous)
+            await self.services.link_watch.member_changed(after, previous)
+
+    async def on_user_update(self, before: discord.User, after: discord.User) -> None:
+        if before.name != after.name:
+            await self.services.link_watch.renamed(after.id)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         await expired(interaction)  # a wizard from before a restart
@@ -85,13 +112,15 @@ class EventBot(commands.Bot):
     async def on_member_remove(self, member: discord.Member) -> None:
         if member.guild.id == self.services.settings.guild_id:
             await self.services.signups.member_left(member.id)
+            await self.services.link_watch.member_left(member.id)
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, OfferAction,  # outlive a restart
-                               ApprovalAction)
+                               ApprovalAction, LinkNow)
         self.tree.on_error = on_app_command_error
-        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services)):
+        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
+                    LinkCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         self._tasks = [
@@ -139,6 +168,10 @@ class EventBot(commands.Bot):
         self.services.staff.post(text)
         await self.services.channels.refresh_all()  # whatever changed while the bot was down
         self.services.channels.header.request()
+        try:
+            await self.services.link_watch.start()  # ranks lost meanwhile, the rollout, squad.xml rebuilt
+        except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
+            log.exception("Starting the Steam links failed")
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

@@ -75,6 +75,22 @@ async def migrate_only(settings: Settings) -> None:
     print(f"Database at revision {migrate.head()}")
 
 
+async def import_old_links(settings: Settings, path: str) -> None:
+    """The old bot's Steam links (docs/PLAN.md, *Moving over from the old bot*)."""
+    from pathlib import Path
+
+    from app.links.service import import_old
+
+    db = await prepare_database(settings)
+    try:
+        imported, skipped = await import_old(db, Path(path))
+    finally:
+        await db.close()
+    print(f"Imported {imported} Steam links from {path}")
+    for line in skipped:
+        print(f"  skipped {line}")
+
+
 async def backup_only(settings: Settings) -> None:
     target = await backup.backup(settings.database_path, settings.data_dir / "backups", settings.backup.keep,
                                  datetime.now(UTC))
@@ -84,8 +100,9 @@ async def backup_only(settings: Settings) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app")
     parser.add_argument("command", nargs="?", default="run",
-                        choices=["run", "migrate", "backup", "check-config", "new-migration"])
-    parser.add_argument("message", nargs="?", help="new-migration: what it changes")
+                        choices=["run", "migrate", "backup", "check-config", "new-migration", "import-old-links"])
+    parser.add_argument("message", nargs="?", help="new-migration: what it changes; import-old-links: the old "
+                                                   "bot's data/steam_ids.json")
     parser.add_argument("--env-file", default=settings_module.ENV_FILE)
     args = parser.parse_args(argv)
     if args.command == "new-migration":  # (a developer's tool: needs no .env)
@@ -93,6 +110,8 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("new-migration needs a message")
         migrate.new_revision(args.message)
         return
+    if args.command == "import-old-links" and not args.message:
+        parser.error("import-old-links needs the path of steam_ids.json")
     settings = load_or_exit(args.env_file)
     if args.command == "check-config":
         print(f"{args.env_file} is valid")
@@ -100,7 +119,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.command != "run":
         logs.setup(settings.data_dir, settings.logs.keep_days)
     job = {"run": lambda: run(settings, args.env_file), "migrate": lambda: migrate_only(settings),
-           "backup": lambda: backup_only(settings)}[args.command]
+           "backup": lambda: backup_only(settings),
+           "import-old-links": lambda: import_old_links(settings, args.message)}[args.command]
     try:
         asyncio.run(job())
     except KeyboardInterrupt:

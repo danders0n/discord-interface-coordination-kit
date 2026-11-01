@@ -35,6 +35,7 @@ class State:
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
     servers: list[dict[str, Any]] = field(default_factory=lambda: [_server(1, "server-1"), _server(2, "event")])
     reservations: dict[int, dict[str, Any]] = field(default_factory=dict)
+    players: list[dict[str, Any]] = field(default_factory=list)  # player stats: uid, name, last_seen
     calls: list[tuple[str, str]] = field(default_factory=list)
     next_id: int = 1
 
@@ -229,6 +230,17 @@ def make_app(state: State | None = None) -> web.Application:
         r["ended"] = True
         return web.json_response(_occurrence(r, state))
 
+    # ------------------------------------------------------------ player stats
+
+    async def players(request: web.Request) -> web.Response:
+        """``uid=``: exactly that Steam ID; ``q=``: also part of a name or ID, as the real search."""
+        uid, q = request.query.get("uid"), request.query.get("q", "")
+        if uid is not None:
+            found = [p for p in state.players if p["uid"] == uid]
+        else:
+            found = [p for p in state.players if q.casefold() in p["name"].casefold() or q in p["uid"]]
+        return web.json_response({"total": len(found), "players": found})
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
     app.router.add_get("/api/system/info", system_info)
@@ -246,6 +258,7 @@ def make_app(state: State | None = None) -> web.Application:
     app.router.add_put("/api/reservations/{id:\\d+}", update)
     app.router.add_delete("/api/reservations/{id:\\d+}", delete)
     app.router.add_post("/api/reservations/{id:\\d+}/end", end_by_id)
+    app.router.add_get("/api/stats/players", players)
     return app
 
 
