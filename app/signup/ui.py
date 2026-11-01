@@ -42,7 +42,10 @@ async def answer(interaction: discord.Interaction, outcome: Outcome, done: str) 
     await reply(interaction, text)
 
 
-def buttons(event_id: int, zeus: bool, language: str) -> discord.ui.View:
+def buttons(event_id: int, zeus: bool, language: str, *, closed: bool = False, not_open: bool = False,
+            full: bool = False) -> discord.ui.View:
+    """``closed``: the event has started, nothing works. ``not_open``: before sign-up opens only Maybe, Can't come
+    (Not coming) and Leave work. ``full``: a Zeus event's limit is reached, Coming is off until someone leaves."""
     labels = {"take": t("Sign up", language), "reserve": t("Reserve", language), "maybe": t("Maybe", language),
               "cant": t("Can't come", language), "leave": t("Leave", language), "coming": t("Coming", language),
               "notcoming": t("Not coming", language)}
@@ -50,7 +53,10 @@ def buttons(event_id: int, zeus: bool, language: str) -> discord.ui.View:
               "leave": discord.ButtonStyle.danger}
     view = discord.ui.View(timeout=None)
     for action in ZEUS_ACTIONS if zeus else ORBAT_ACTIONS:
-        view.add_item(SignupAction(event_id, action, labels[action], styles.get(action, discord.ButtonStyle.secondary)))
+        button = SignupAction(event_id, action, labels[action], styles.get(action, discord.ButtonStyle.secondary))
+        button.item.disabled = closed or (not_open and action in ("take", "reserve", "coming")) or \
+            (full and action == "coming")
+        view.add_item(button)
     return view
 
 

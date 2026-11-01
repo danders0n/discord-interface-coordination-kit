@@ -8,7 +8,8 @@
 - Publishing moves the channel to the events category (its permissions, set by hand: members read, write in
   threads), keeps the organisers' right to post, and posts the announcement, which later edits keep in step.
 - Cancelling marks the messages, pings the members signed up in the thread, edits the announcement and archives
-  at once; a draft's channel is deleted instead. A published event is archived ``archive_hours`` after its end.
+  at once; a draft's channel is deleted instead. A published event is drawn again at its start (sign-up closes)
+  and archived ``archive_hours`` after its end; both follow the event when its times move.
 - The archive is a category per quarter of the event date (``archive_pattern``), made when missing, with an
   overflow ``(2)`` once one holds 50 channels; the channel is read-only there and its thread locked.
 
@@ -35,7 +36,9 @@ from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
 
 ARCHIVE_KIND = "archive"
+CLOSE_KIND = "signup_close"  # at the start: drawn again, with the sign-up buttons off
 CATEGORY_LIMIT = 50
+CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 log = logging.getLogger(__name__)
 
 BOT = discord.PermissionOverwrite(view_channel=True, send_messages=True, send_messages_in_threads=True,
@@ -113,6 +116,7 @@ class EventChannels:
         self.redrawer = Redrawer(self.redraw_now, interval)
         self._renames: dict[int, asyncio.Task] = {}
         scheduler.register(ARCHIVE_KIND, self._archive_action)
+        scheduler.register(CLOSE_KIND, self._close_action)
 
     # ---------------------------------------------------------------- helpers
 
@@ -148,8 +152,10 @@ class EventChannels:
             coming = len((await session.execute(select(Signup.id).where(
                 Signup.event_id == event.id, Signup.status == "coming"))).all())
         booked = await self.events.reservations.get(event.id) if self.events else None
-        return render.Context(self.language, self.clock(), host, guests, coming,
-                              server_confirmed=booked is not None and booked.state == "booked")
+        confirmed = booked is not None and booked.state == "booked"
+        if confirmed and event.kind == "zeus":  # a member's request holds the host, but a moderator confirms it
+            confirmed = not await self.events.server_pending(event.id)
+        return render.Context(self.language, self.clock(), host, guests, coming, server_confirmed=confirmed)
 
     def _organiser_overwrites(self, guild: Any, event: Event, organisers: set[int]) -> dict:
         overwrites: dict = {guild.me: BOT}
@@ -169,6 +175,37 @@ class EventChannels:
         base = dict(category.overwrites) if category is not None else {}
         return base | self._organiser_overwrites(guild, event, organisers)
 
+    async def organisers_changed(self, event_id: int) -> None:
+        """A co-organiser added or removed: the channel's overwrites follow (a draft is hidden from the others)."""
+        guild, event = self.guild(), await self._event(event_id)
+        channel = self._channel(event) if event is not None else None
+        if channel is None or event.archived_at is not None or event.status in ("cancelled", "ended"):
+            return
+        await channel.edit(overwrites=await self._overwrites(guild, event))
+
+    # ---------------------------------------------------------------- category room
+
+    def crowded(self, *keys: str) -> list[tuple[str, int]]:
+        """The categories (``drafts_category``, ``events_category``; both by default) with their channel counts."""
+        guild, ids = self.guild(), self.ids()
+        found = []
+        for key in keys or ("drafts_category", "events_category"):
+            category_id = getattr(ids, key)
+            category = guild.get_channel(category_id) if guild is not None and category_id else None
+            if category is not None:
+                found.append((category.name, len(category.channels)))
+        return found
+
+    def full(self, *keys: str) -> str | None:
+        """The name of a category that takes no more channels (the wizard refuses then), or None."""
+        return next((name for name, count in self.crowded(*keys) if count >= CATEGORY_LIMIT), None)
+
+    def _warn_room(self) -> None:
+        for name, count in self.crowded():
+            if count >= CATEGORY_WARNING:
+                self._staff(t("The category {category} holds {count} of {limit} channels.", self.language,
+                              category=name, count=count, limit=CATEGORY_LIMIT))
+
     # ---------------------------------------------------------------- the channel's life
 
     async def open_draft(self, event_id: int) -> Any:
@@ -183,6 +220,7 @@ class EventChannels:
         await self._save(event_id, channel_id=channel.id, thread_id=thread.id)
         await self.redraw_now(event_id)
         await self.events.refresh_reservation(event_id)  # now it can link to the channel
+        self._warn_room()
         return channel
 
     def link(self, event: Event) -> str | None:
@@ -206,7 +244,11 @@ class EventChannels:
             messages["info"].view = view
             if event.status == "published" and "orbat:0" in messages:
                 from app.signup.ui import buttons
-                messages["orbat:0"].view = buttons(event_id, event.kind == "zeus", self.language)
+                now = self.clock()
+                messages["orbat:0"].view = buttons(
+                    event_id, event.kind == "zeus", self.language, closed=now >= event.start_at,
+                    not_open=event.signup_opens_at is not None and now < event.signup_opens_at,
+                    full=event.kind == "zeus" and bool(event.signup_limit) and ctx.coming >= event.signup_limit)
         attached = dict(event.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
@@ -264,10 +306,21 @@ class EventChannels:
                                   allowed_mentions=discord.AllowedMentions(roles=[discord.Object(r) for r in roles],
                                                                            users=False, everyone=False))
             await self._save(event_id, announcement_id=sent.id)
+        await self._schedule(event)
+        self._warn_room()
+
+    async def _schedule(self, event: Event) -> None:
+        """A published event's own actions: sign-up closing at the start, the archive after the end."""
         times = self.store.current.times
+        await self.scheduler.schedule(CLOSE_KIND, event.start_at, key=f"{CLOSE_KIND}:{event.id}", event_id=event.id)
         await self.scheduler.schedule(ARCHIVE_KIND, event.start_at + timedelta(
             minutes=event.duration_minutes) + timedelta(hours=times.archive_hours),
-            key=f"{ARCHIVE_KIND}:{event_id}", event_id=event_id)
+            key=f"{ARCHIVE_KIND}:{event.id}", event_id=event.id)
+
+    async def moved(self, event_id: int) -> None:
+        event = await self._event(event_id)
+        if event is not None and event.status == "published" and event.archived_at is None:
+            await self._schedule(event)
 
     async def delete(self, event_id: int) -> None:
         event = await self._event(event_id)
@@ -287,6 +340,7 @@ class EventChannels:
                 await thread.send(content, allowed_mentions=discord.AllowedMentions(users=True, roles=False,
                                                                                    everyone=False))
         await self.scheduler.cancel(f"{ARCHIVE_KIND}:{event_id}")
+        await self.scheduler.cancel(f"{CLOSE_KIND}:{event_id}")
         await self.archive(event_id)
 
     async def _signed_up(self, event_id: int) -> list[int]:
@@ -333,6 +387,10 @@ class EventChannels:
     async def _archive_action(self, action: Action, now: datetime) -> None:
         await self.archive(action.event_id)  # type: ignore[arg-type]
 
+    async def _close_action(self, action: Action, now: datetime) -> None:
+        self.redrawer.request(action.event_id)  # type: ignore[arg-type]
+        self._calendar()
+
     # ---------------------------------------------------------------- start-up
 
     async def refresh_all(self) -> None:
@@ -353,9 +411,27 @@ class EventChannels:
         self.redrawer.request(event_id)
         self._calendar()
 
-    async def published(self, event_id: int) -> None:
+    async def group_changed(self, group_id: int) -> None:
+        """Another group corrected: its events not archived yet are drawn and named again (a guest event's channel
+        carries the host's acronym)."""
+        from app.db.models import EventGuestGroup
+
+        async with self.db.session() as session:
+            guests = select(EventGuestGroup.event_id).where(EventGuestGroup.group_id == group_id)
+            ids = (await session.execute(select(Event.id).where(
+                (Event.host_group_id == group_id) | Event.id.in_(guests), Event.channel_id.is_not(None),
+                Event.archived_at.is_(None)))).scalars().all()
+        for event_id in ids:
+            self.redrawer.request(event_id)
+        self._calendar()
+
+    async def published(self, event_id: int, by: int | None = None) -> None:
         await self.publish(event_id)
         self._calendar()
+        if by is not None:  # (published by an approval: approval_decided tells staff who decided)
+            event = await self._event(event_id)
+            self._staff(t("Published: {title} ({channel}), by {member}.", self.language, title=event.title,
+                          channel=f"<#{event.channel_id}>" if event.channel_id else "—", member=f"<@{by}>"))
 
     async def deleted(self, event_id: int) -> None:
         await self.delete(event_id)
@@ -389,19 +465,34 @@ class EventChannels:
         await self._ping(event, text, [event.created_by])
         self._staff(t("Still a draft: {title} ({channel}).", self.language, title=event.title,
                       channel=f"<#{event.channel_id}>" if event.channel_id else "—"))
+        if event.status == "pending":  # still waiting: the request goes up the moderation thread again
+            from app.db.models import ApprovalRequest
 
-    async def approval_requested(self, request_id: int) -> None:
+            async with self.db.session() as session:
+                ids = (await session.execute(select(ApprovalRequest.id).where(
+                    ApprovalRequest.event_id == event_id, ApprovalRequest.kind == "publish",
+                    ApprovalRequest.state == "pending"))).scalars().all()
+            for request_id in ids:
+                await self.approval_requested(request_id, again=True)
+
+    async def approval_requested(self, request_id: int, again: bool = False) -> None:
+        """Post the request in the moderation thread (``again``: re-posted for a stale event; the older message
+        keeps working, its buttons carry the request id)."""
         from app.approval.ui import request_message
         from app.db.models import ApprovalRequest
 
+        async with self.db.session() as session:
+            request = await session.get(ApprovalRequest, request_id)
+        if not again:
+            event = await self._event(request.event_id)
+            self._staff(t("Approval requested: {title}, by {member}.", self.language, title=event.title,
+                          member=f"<@{request.requested_by}>"))
         if self.threads is None or self.services is None:
             return
         guild = self.guild()
         staff = guild.get_channel(self.ids().staff) if guild and self.ids().staff else None
         if staff is None:
             return
-        async with self.db.session() as session:
-            request = await session.get(ApprovalRequest, request_id)
         embed, view = await request_message(self.services, request)
         sent = await self.threads.send(guild, staff, "moderation", embed=embed, **({"view": view} if view else {}))
         async with self.db.session() as session, session.begin():
@@ -468,6 +559,24 @@ class EventChannels:
             except discord.HTTPException:  # DMs closed: in the event's thread instead
                 pass
         await self._ping(event, text, [offer.member_id], view=offer_buttons(offer.id, self.language))
+
+    async def released(self, member_id: int, event_ids: list[int], left: bool) -> None:
+        names = []
+        for event_id in event_ids:
+            event = await self._event(event_id)
+            names.append(f"{event.title} (<#{event.channel_id}>)" if event.channel_id else event.title)
+        if left:
+            text = t("{member} left the server; their places were freed: {events}", self.language,
+                     member=f"<@{member_id}>", events=", ".join(names))
+        else:
+            text = t("{member} lost the sign-up role; their places were freed: {events}", self.language,
+                     member=f"<@{member_id}>", events=", ".join(names))
+        self._staff(text)
+
+    async def reservation_changed(self, event_id: int) -> None:
+        """The reservation changed in the background: the info embed and the requests waiting on it."""
+        self.redrawer.request(event_id)
+        await self.refresh_requests(event_id)
 
     async def lost_slot(self, event_id: int, member_ids: list[int]) -> None:
         event = await self._event(event_id)

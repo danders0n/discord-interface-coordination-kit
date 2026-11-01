@@ -94,6 +94,15 @@ async def services(settings: Settings, db: Database, clock: Clock, guild: FakeGu
     await client.close()
 
 
+async def settle(channels) -> None:
+    """Let an event stack's background work finish (redraws, renames) before the database closes."""
+    for _ in range(3):  # (a redraw may ask for another)
+        await channels.redrawer.settle()
+        if channels.header is not None:
+            await channels.header.redrawer.settle()
+        await asyncio.gather(*channels._renames.values(), return_exceptions=True)
+
+
 @pytest.fixture
 async def fake(services, clock):
     """A running fake supervisor, with the services' client pointed at it and its clock tied to the tests'."""

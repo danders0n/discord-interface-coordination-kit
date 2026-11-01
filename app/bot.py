@@ -76,7 +76,8 @@ class EventBot(commands.Bot):
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if before.guild.id == self.services.settings.guild_id and before.roles != after.roles:
-            await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)))
+            await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)),
+                                                       previous=frozenset(r.id for r in before.roles))
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         await expired(interaction)  # a wizard from before a restart

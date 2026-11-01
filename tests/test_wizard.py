@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import discord
 import pytest
-from conftest import ANNOUNCE, DRAFTS, EVENTS, HEADER, MEMBER, MISSION_MAKER, MODERATOR
+from conftest import ANNOUNCE, DRAFTS, EVENTS, HEADER, MEMBER, MISSION_MAKER, MODERATOR, settle
 from fakes import FakeInteraction, FakeMember, FakeRole
 
 from sqlalchemy import func, select
@@ -21,7 +21,7 @@ ENGLISH = discord.Locale.british_english
 
 
 @pytest.fixture
-def stack(services, fake, guild, clock):
+async def stack(services, fake, guild, clock):
     channels = EventChannels(services.db, services.store, lambda: services.ids, services.scheduler, lambda: guild,
                              interval=0)
     events = EventService(services.db, services.store, lambda: services.ids, services.scheduler,
@@ -31,7 +31,8 @@ def stack(services, fake, guild, clock):
     channels.events, channels.signups = events, signups
     channels.header = Header(services.db, services.store, lambda: services.ids, lambda: guild, clock, interval=0)
     services.events, services.signups, services.channels = events, signups, channels
-    return services
+    yield services
+    await settle(channels)
 
 
 def person(member_id: int, *roles: int) -> FakeMember:
@@ -86,6 +87,155 @@ async def test_the_wizard_answers_mistakes_and_needs(stack, guild, clock):
     assert early.replies[0].content == "Pick the kind and the mission type first."
     _, submit = await create(stack, guild, clock, person(10, MEMBER), date_days=400)
     assert submit.replies[0].content == "That date is too far ahead."
+
+
+async def test_the_wizard_refuses_while_a_category_is_full(stack, guild):
+    for n in range(50):
+        await guild.create_text_channel(f"old-{n}", category=guild.get_channel(DRAFTS))
+    start = asking(stack, guild, person(20, MEMBER, MISSION_MAKER))
+    await ui.CreateEvent().callback(start)
+    assert start.replies[0].content.startswith("The category Szkice is full")
+    assert "view" not in start.replies[0].kwargs
+
+
+async def test_the_panel_shows_what_needs_attention_and_the_invited_groups(stack, guild, clock):
+    from app.db.models import Slot
+    from app.events.groups import Groups
+
+    maker = person(20, MEMBER, MISSION_MAKER)
+    event, _ = await create(stack, guild, clock, maker, kind="hosted")
+    abc = await Groups(stack.db).add("ABC", "Alpha Bravo", 20)
+    await stack.events.update(event.id, Member(20, frozenset({MEMBER, MISSION_MAKER})), guest_group_ids=[abc.id])
+    await stack.signups.set_orbat(event.id, parse("# Alpha\nMedic\n", []))
+    async with stack.db.session() as session, session.begin():
+        slot = (await session.execute(select(Slot).where(Slot.event_id == event.id))).scalar_one()
+        slot.holder_id, slot.flagged = 30, True  # the holder lost the slot's role
+    opened = asking(stack, guild, maker)
+    await ui.open_panel(opened, event.id)
+    assert "⚠ Medic (Alpha): <@30> lost the role it needs." in opened.replies[0].content
+    shown = asking(stack, guild, maker)
+    await ui.PanelAction(event.id, "choices").callback(shown)
+    choices = shown.replies[0].kwargs["view"]
+    groups = next(c for c in choices.children if getattr(c, "custom_id", "").endswith(":groups"))
+    assert [o.default for o in groups.options] == [True]  # the current invited group is ticked
+    await choices._chosen(asking(stack, guild, maker), "groups", [])  # all of them unticked
+    await choices._go(asking(stack, guild, maker))
+    assert await stack.events.guest_groups(event.id) == []
+
+
+async def test_orbat_tools_are_locked_while_waiting_for_approval(stack, guild, clock):
+    from app.orbat.templates import Templates
+
+    member = person(10, MEMBER)
+    event, _ = await create(stack, guild, clock, member)
+    as_member = Member(10, frozenset({MEMBER}))
+    await stack.events.set_briefing(event.id, as_member, "x", "", "")
+    await stack.signups.set_orbat(event.id, parse("# A\nRifleman\n", []))
+    await stack.events.publish(event.id, as_member)  # pending
+    await Templates(stack.db).save("Platoon", "# B\nMedic x2\n", 20, False)
+    tools = ui.OrbatTools(asking(stack, guild, member), await stack.events.get(event.id))
+    pick = asking(stack, guild, member)
+    await tools._template(pick)
+    select_view = pick.replies[0].kwargs["view"]
+    (choose,) = select_view.children
+    choose._values = [choose.options[0].value]
+    chosen = asking(stack, guild, member)
+    await choose.callback(chosen)
+    assert chosen.replies[0].content.startswith("The event waits for approval")
+    assert [s.name for s in (await stack.signups.board(event.id)).slots] == ["Rifleman"]
+
+
+async def test_templates_are_renamed_and_deleted_by_their_author_only(stack, guild, clock):
+    from app.orbat.templates import Templates
+
+    member = person(10, MEMBER)
+    event, _ = await create(stack, guild, clock, member)
+    templates = Templates(stack.db)
+    await templates.save("Platoon", "# B\nMedic\n", 10, False)
+    await templates.save("Theirs", "# C\nMedic\n", 20, False)
+    tools = ui.OrbatTools(asking(stack, guild, member), event)
+    manage = asking(stack, guild, member)
+    await tools._manage(manage)
+    view = manage.replies[0].kwargs["view"]
+    assert [o.label for o in view.children[0].options] == ["Platoon"]  # only their own
+    await view._picked(asking(stack, guild, member), int(view.children[0].options[0].value))
+    rename = asking(stack, guild, member)
+    await view._rename(rename)
+    modal = rename.response.modals[0]
+    modal.text._value = "Theirs"
+    taken = asking(stack, guild, member)
+    await modal.on_submit(taken)
+    assert taken.replies[0].content == "A template of that name exists already."
+    modal.text._value = "Rifle platoon"
+    await modal.on_submit(asking(stack, guild, member))
+    deleted = asking(stack, guild, member)
+    await view._delete(deleted)
+    assert deleted.response.edited[0]["content"] == "Template deleted."
+    assert [x.name for x in await templates.all()] == ["Theirs"]
+    nothing = asking(stack, guild, person(11, MEMBER))
+    await ui.OrbatTools(asking(stack, guild, member), event)._manage(nothing)
+    assert nothing.replies[0].content == "You have no templates to change."
+
+
+async def test_a_manager_corrects_a_group_and_its_guest_channel_is_renamed(stack, guild, clock):
+    from conftest import ADMIN
+    from app.events.groups import Groups
+
+    maker = person(20, MEMBER, MISSION_MAKER)
+    abc = await Groups(stack.db).add("ABX", "Alpha Bravo", 20)
+    await Groups(stack.db).add("XYZ", "Xray", 20)
+    start = asking(stack, guild, maker)
+    await ui.CreateEvent().callback(start)
+    choices = start.replies[0].kwargs["view"]
+    await choices._chosen(asking(stack, guild, maker), "kind", ["guest"])
+    assert not any(getattr(c, "custom_id", "").endswith(":fixgroup") for c in choices.children)  # managers only
+    event, _ = await create(stack, guild, clock, maker, kind="internal")
+    await stack.events.update(event.id, Member(20, frozenset({MEMBER, MISSION_MAKER})), kind="guest",
+                              host_group_id=abc.id)
+    await settle(stack.channels)
+
+    manager = person(30, MEMBER, ADMIN)
+    shown = asking(stack, guild, manager)
+    await ui.PanelAction(event.id, "choices").callback(shown)
+    panel_choices = shown.replies[0].kwargs["view"]
+    fix = next(c for c in panel_choices.children if getattr(c, "custom_id", "").endswith(":fixgroup"))
+    picker = asking(stack, guild, manager)
+    await fix.callback(picker)
+    (select,) = picker.replies[0].kwargs["view"].children
+    select._values = [str(abc.id)]
+    opened = asking(stack, guild, manager)
+    await select.callback(opened)
+    modal = opened.response.modals[0]
+    modal.acronym._value, modal.name._value = "xyz", "Alpha Bravo"
+    clash = asking(stack, guild, manager)
+    await modal.on_submit(clash)
+    assert clash.replies[0].content == "Another group has that acronym."
+    modal.acronym._value = "abc"
+    done = asking(stack, guild, manager)
+    await modal.on_submit(done)
+    assert done.replies[0].content == "Saved."
+    await settle(stack.channels)
+    assert guild.get_channel(event.channel_id).name.endswith("-abc")
+
+
+async def test_reload_names_the_events_still_using_a_removed_item(stack, guild, clock, monkeypatch):
+    from app.admin.cog import AdminCog
+    from app.settings import ReloadResult
+
+    event, _ = await create(stack, guild, clock, person(20, MEMBER, MISSION_MAKER))
+
+    def reload():
+        stack.store.current = stack.settings.model_copy(update={"events": stack.settings.events.model_copy(
+            update={"mission_types": ["TvT"]})})
+        return ReloadResult(ok=True)
+
+    monkeypatch.setattr(stack.store, "reload", reload)
+    from conftest import ADMIN
+    from fakes import invoke
+    cog = AdminCog(stack)
+    interaction = asking(stack, guild, person(40, ADMIN))
+    await invoke(cog.reload, cog, interaction)
+    assert "no longer in the settings" in interaction.replies[0].content and event.title in interaction.replies[0].content
 
 
 async def test_a_wizard_from_before_a_restart_says_so(stack, guild):

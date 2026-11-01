@@ -33,6 +33,9 @@ class Recorder:
     async def lost_slot(self, event_id, member_ids):
         self.lost.append(member_ids)
 
+    async def released(self, member_id, event_ids, left):
+        self.released_from = (member_id, event_ids, left)
+
 
 @pytest.fixture
 def roles():
@@ -301,9 +304,26 @@ async def test_losing_the_sign_up_role_frees_places_but_not_assignments(services
     await signups.take(event.id, rifle.id, member(10))
     await signups.take(other.id, (await slots(services, other.id))[0].id, member(10))
     await signups.lock((await slots(services, other.id))[0].id, True)
-    await signups.member_changed(Member(10, frozenset({999})))
+    await signups.member_changed(Member(10, frozenset({999})), previous=frozenset({MEMBER}))
     assert (await slots(services, event.id))[2].holder_id is None
     assert (await slots(services, other.id))[0].holder_id == 10  # the organiser's assignment stays
+    assert signups.recorder.released_from == (10, [event.id], False)  # for the staff log
+
+
+async def test_only_losing_the_role_frees_places(services, clock, signups):
+    import dataclasses
+
+    event = await make_event(services, clock, signups)
+    rifle = (await slots(services, event.id))[2]
+    await signups.assign(rifle.id, 10)  # e.g. a guest Zeus, without a sign-up role
+    await signups.lock(rifle.id, False)
+    await signups.member_changed(Member(10, frozenset({999})), previous=frozenset({998}))  # never had one
+    assert (await slots(services, event.id))[2].holder_id == 10
+    resolved = services.ids
+    services.ids = dataclasses.replace(resolved, signup=frozenset())  # not resolved yet, or a mistyped name
+    await signups.member_changed(Member(10, frozenset({999})))
+    assert (await slots(services, event.id))[2].holder_id == 10
+    services.ids = resolved
 
 
 async def test_losing_a_slots_role_flags_it_and_leaving_the_server_frees_everything(services, clock, signups):

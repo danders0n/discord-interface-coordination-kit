@@ -50,9 +50,9 @@ async def guarded(interaction: discord.Interaction, action: Callable[[], Awaitab
         await reply(interaction, template_problem(exc.problem, interaction.locale))
     except OrbatError as exc:
         await reply(interaction, "\n".join(exc.problems)[:1900])
-    except GroupError:
-        await reply(interaction, t("Give the group an acronym of up to 10 letters or digits and a name.",
-                                   interaction.locale))
+    except GroupError as exc:
+        await reply(interaction, t("Another group has that acronym.", interaction.locale) if str(exc) == "acronym_taken"
+                    else t("Give the group an acronym of up to 10 letters or digits and a name.", interaction.locale))
     return None
 
 
@@ -71,7 +71,9 @@ async def expired(interaction: discord.Interaction) -> bool:
 class Choices(discord.ui.View):
     """Kind, mission type, climate and other groups: the wizard's first step, and the panel's *Type and groups*."""
 
-    def __init__(self, interaction: discord.Interaction, groups: list, *, event: Any = None) -> None:
+    def __init__(self, interaction: discord.Interaction, groups: list, *, event: Any = None,
+                 guests: list[int] | None = None) -> None:
+        """``guests``: a hosted event's invited groups now (the panel)."""
         super().__init__(timeout=TIMEOUT)
         self.token = secrets.token_hex(6)
         LIVE.add(self.token)
@@ -83,8 +85,9 @@ class Choices(discord.ui.View):
         self.mission_type = event.mission_type if event else None
         self.climate = event.climate_role_id if event else None
         self.host = event.host_group_id if event else None
-        self.guests: list[int] = []
-        labels = {"internal": t("Internal", self.locale), "guest": t("Guest", self.locale),
+        self.guests: list[int] = list(guests or [])
+        self.may_correct = s.events.access(self.member).has(Perm.MANAGE_ANY_EVENT)
+        labels ={"internal": t("Internal", self.locale), "guest": t("Guest", self.locale),
                   "hosted": t("Hosted", self.locale), "zeus": t("Zeus", self.locale)}
         if event is None or event.status == "draft":
             self.add_item(self._select("kind", t("Kind", self.locale),
@@ -98,27 +101,33 @@ class Choices(discord.ui.View):
                                        str(self.climate) if self.climate else None))
         self._group_items()
 
-    def _select(self, part: str, placeholder: str, options: list[tuple[str, str]], current: str | None,
+    def _select(self, part: str, placeholder: str, options: list[tuple[str, str]], current: str | set[str] | None,
                 many: bool = False) -> discord.ui.Select:
+        chosen = current if isinstance(current, set) else {current}
         select = discord.ui.Select(custom_id=f"wizard:{self.token}:{part}", placeholder=placeholder,
                                    min_values=0 if many else 1, max_values=min(len(options), 25) if many else 1,
                                    options=[discord.SelectOption(label=label[:100], value=value,
-                                                                 default=value == current) for label, value in options[:25]])
+                                                                 default=value in chosen) for label, value in options[:25]])
         select.callback = lambda interaction, s=select, p=part: self._chosen(interaction, p, s.values)
         return select
 
     def _group_items(self) -> None:
-        for item in [i for i in self.children if getattr(i, "custom_id", "").split(":")[-1] in ("groups", "newgroup", "go")]:
+        for item in [i for i in self.children
+                     if getattr(i, "custom_id", "").split(":")[-1] in ("groups", "newgroup", "fixgroup", "go")]:
             self.remove_item(item)
         if self.kind in ("guest", "hosted") and self.groups:
             options = [(f"{g.acronym} · {g.name}", str(g.id)) for g in self.groups]
             label = t("Host group", self.locale) if self.kind == "guest" else t("Invited groups", self.locale)
-            current = str(self.host) if self.kind == "guest" and self.host else None
+            current = (str(self.host) if self.host else None) if self.kind == "guest" else {str(g) for g in self.guests}
             self.add_item(self._select("groups", label, options, current, many=self.kind == "hosted"))
         if self.kind in ("guest", "hosted"):
             button = discord.ui.Button(custom_id=f"wizard:{self.token}:newgroup", label=t("New group", self.locale))
             button.callback = self._new_group
             self.add_item(button)
+            if self.may_correct and self.groups:
+                fix = discord.ui.Button(custom_id=f"wizard:{self.token}:fixgroup", label=t("Correct a group", self.locale))
+                fix.callback = self._fix_group
+                self.add_item(fix)
         go = discord.ui.Button(custom_id=f"wizard:{self.token}:go", style=discord.ButtonStyle.primary,
                                label=t("Continue", self.locale) if self.event is None else t("Save", self.locale))
         go.callback = self._go
@@ -142,6 +151,20 @@ class Choices(discord.ui.View):
     async def _new_group(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(NewGroup(self))
 
+    async def _fix_group(self, interaction: discord.Interaction) -> None:
+        """*Manage any event* only: pick a group, then correct its acronym or name in a modal."""
+        select = discord.ui.Select(placeholder=t("Correct a group", self.locale), options=[
+            discord.SelectOption(label=f"{g.acronym} · {g.name}"[:100], value=str(g.id)) for g in self.groups[:25]])
+
+        async def chosen(i: discord.Interaction) -> None:
+            group = next(g for g in self.groups if g.id == int(select.values[0]))
+            await i.response.send_modal(CorrectGroup(self, group))
+
+        select.callback = chosen
+        view = discord.ui.View(timeout=TIMEOUT)
+        view.add_item(select)
+        await reply(interaction, t("Correct a group", self.locale), view=view)
+
     async def _go(self, interaction: discord.Interaction) -> None:
         if not self.kind or not self.mission_type:
             await reply(interaction, t("Pick the kind and the mission type first.", self.locale))
@@ -158,7 +181,7 @@ class Choices(discord.ui.View):
             changes["kind"] = self.kind
         if self.kind == "guest":
             changes["host_group_id"] = self.host
-        if self.kind == "hosted" and self.guests:
+        if self.kind == "hosted":  # (all of them unticked: no invited groups)
             changes["guest_group_ids"] = self.guests
         await guarded(interaction, lambda: s.events.update(self.event.id, member_of(interaction), **changes))
         if not interaction.response.is_done():  # (a refusal was answered already)
@@ -193,6 +216,34 @@ class NewGroup(discord.ui.Modal):
             self.choices.guests = sorted({*self.choices.guests, group.id})
         self.choices._group_items()
         await interaction.response.edit_message(view=self.choices)
+
+
+class CorrectGroup(discord.ui.Modal):
+    """A group's acronym or name corrected; the channels and messages of its events follow."""
+
+    def __init__(self, choices: Choices, group: Any) -> None:
+        super().__init__(title=t("Correct a group", choices.locale)[:45], timeout=TIMEOUT)
+        self.choices, self.group = choices, group
+        self.acronym = discord.ui.TextInput(label=t("Acronym", choices.locale), max_length=10, default=group.acronym)
+        self.name = discord.ui.TextInput(label=t("Full name", choices.locale), max_length=100, default=group.name)
+        self.add_item(self.acronym)
+        self.add_item(self.name)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        s = services(interaction)
+        if not s.events.access(member_of(interaction)).has(Perm.MANAGE_ANY_EVENT):
+            await reply(interaction, t("You don't have the permission for this.", interaction.locale))
+            return
+        groups = Groups(s.db)
+        before = f"{self.group.acronym} · {self.group.name}"
+        group = await guarded(interaction, lambda: groups.correct(self.group.id, self.acronym.value, self.name.value))
+        if group is None:
+            return
+        self.choices.groups = await groups.all()
+        await s.channels.group_changed(group.id)
+        s.staff.post(t("{member} corrected the group {before} to {after}.", s.settings.language,
+                       member=interaction.user.mention, before=before, after=f"{group.acronym} · {group.name}"))
+        await reply(interaction, t("Saved.", interaction.locale))
 
 
 class DetailsModal(discord.ui.Modal):
@@ -262,6 +313,11 @@ class CreateEvent(discord.ui.DynamicItem[discord.ui.Button], template=r"event:cr
         if not s.events.access(member_of(interaction)).may_create_events:
             await reply(interaction, t("Creating events is for members.", interaction.locale))
             return
+        full = s.channels.full()
+        if full is not None:  # Discord's 50 channels per category
+            await reply(interaction, t("The category {category} is full (50 channels): staff must make room before "
+                                       "a new event can be made.", interaction.locale, category=full))
+            return
         view = Choices(interaction, await Groups(s.db).all())
         await reply(interaction, t("New event: pick the kind, the mission type and the climate, then Continue.",
                                    interaction.locale), view=view)
@@ -318,6 +374,7 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
                 "failed": t("No reservation: {reason}", locale, reason=booked.error if booked else ""),
                 "none": t("No reservation yet.", locale)}.get(state, t("Reservation: {state}", locale, state=state))
         lines.append(text)
+    lines += await _attention(s, event, locale)
     view = discord.ui.View(timeout=None)
     shown = ["details", "choices", "briefing"]
     shown += ["join"] if event.kind == "guest" else ["limit"] if event.kind == "zeus" else ["orbat"]
@@ -345,6 +402,27 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
             discord.ButtonStyle.success if action == "publish" else discord.ButtonStyle.secondary
         view.add_item(PanelAction(event.id, action, labels[action], style))
     return "\n".join(lines), view
+
+
+async def _attention(s: Any, event: Any, locale: Any) -> list[str]:
+    """What the organisers should look at: slots flagged ⚠ (the holder lost the slot's role), and the members
+    signed up without a Creator DLC the preset needs (going by their DLC roles)."""
+    from app.presets import CDLCS
+
+    board = await s.signups.board(event.id)
+    lines = [t("⚠ {slot} ({squad}): {member} lost the role it needs.", locale, slot=slot.name, squad=squad.name,
+               member=f"<@{slot.holder_id}>")
+             for squad, slots in board.squads for slot in slots if slot.flagged and slot.holder_id is not None]
+    if event.required_dlc:
+        attending = [slot.holder_id for slot in board.slots if slot.holder_id is not None] + board.status("coming")
+        without = []
+        for member_id in attending:
+            missing = s.signups.missing_dlc(event, s.channels.roles_of(member_id) or ())
+            if missing:
+                without.append(f"<@{member_id}> ({', '.join(CDLCS[k].name for k in missing if k in CDLCS)})")
+        if without:
+            lines.append(t("Without the Creator DLC: {members}", locale, members=", ".join(without))[:1000])
+    return lines
 
 
 class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:act:(?P<event>\d+):(?P<action>[a-z]+)"):
@@ -375,8 +453,10 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
         await interaction.response.send_modal(DetailsModal(interaction, event=event))
 
     async def _choices(self, interaction, event, member) -> None:
+        s = services(interaction)
+        guests = [g.id for g in await s.events.guest_groups(event.id)]
         await reply(interaction, t("Type and groups", interaction.locale),
-                    view=Choices(interaction, await Groups(services(interaction).db).all(), event=event))
+                    view=Choices(interaction, await Groups(s.db).all(), event=event, guests=guests))
 
     async def _briefing(self, interaction, event, member) -> None:
         await interaction.response.send_modal(BriefingModal(interaction, event))
@@ -408,6 +488,12 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
         await reply(interaction, t("Co-organisers", interaction.locale), view=Organisers(interaction, event))
 
     async def _publish(self, interaction, event, member) -> None:
+        s = services(interaction)
+        full = s.channels.full("events_category")  # publishing moves the channel there
+        if full is not None and (s.events.access(member).publishes_without_approval or event.kind == "zeus"):
+            await reply(interaction, t("The category {category} is full (50 channels): staff must make room before "
+                                       "a new event can be made.", interaction.locale, category=full))
+            return
         state = await guarded(interaction, lambda: services(interaction).events.publish(event.id, member))
         if state == "published":
             await reply(interaction, t("Published.", interaction.locale))
@@ -424,16 +510,18 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("The server is requested; a moderator decides.", interaction.locale))
 
     async def _retry(self, interaction, event, member) -> None:
-        row = await services(interaction).reservations.retry(event.id)
-        if row is not None and row.state == "booked":
-            await services(interaction).channels.refresh_requests(event.id)  # Approve can be pressed now
+        row = await services(interaction).reservations.retry(event.id)  # (its listener redraws the requests)
         await reply(interaction, t("Server reserved.", interaction.locale) if row and row.state == "booked" else
                     t("No reservation: {reason}", interaction.locale, reason=row.error if row else "—"))
 
     async def _endres(self, interaction, event, member) -> None:
-        ended = await services(interaction).reservations.end(event.id)
+        s = services(interaction)
+        ended = await s.reservations.end(event.id)
         await reply(interaction, t("The reservation has ended.", interaction.locale) if ended else
                     t("The reservation isn't under way.", interaction.locale))
+        if ended:
+            s.staff.post(t("{member} ended the reservation of {title}.", s.settings.language,
+                           member=interaction.user.mention, title=event.title))
 
     async def _cancel(self, interaction, event, member) -> None:
         await interaction.response.send_modal(TextModal(
@@ -442,9 +530,12 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             label=t("Reason", interaction.locale), done=t("Cancelled.", interaction.locale)))
 
     async def _end(self, interaction, event, member) -> None:
-        if await guarded(interaction, lambda: services(interaction).events.end(event.id, member)) is None and \
+        s = services(interaction)
+        if await guarded(interaction, lambda: s.events.end(event.id, member)) is None and \
                 not interaction.response.is_done():
             await reply(interaction, t("The event has ended.", interaction.locale))
+            s.staff.post(t("{member} ended {title}.", s.settings.language, member=interaction.user.mention,
+                           title=event.title))
 
 
 class TextModal(discord.ui.Modal):
@@ -553,13 +644,14 @@ class Organisers(discord.ui.View):
 
 
 class OrbatTools(discord.ui.View):
-    """Paste or edit the ORBAT, take a template, save one, and the organisers' slot tools."""
+    """Paste or edit the ORBAT, take a template, save, rename or delete one, and the organisers' slot tools."""
 
     def __init__(self, interaction: discord.Interaction, event: Any) -> None:
         super().__init__(timeout=TIMEOUT)
         self.event, locale = event, interaction.locale
         for action, label in (("paste", t("Write or paste", locale)), ("template", t("From a template", locale)),
-                              ("save", t("Save as template", locale)), ("slots", t("Lock, assign, remove", locale))):
+                              ("save", t("Save as template", locale)), ("manage", t("Rename or delete templates", locale)),
+                              ("slots", t("Lock, assign, remove", locale))):
             button = discord.ui.Button(label=label)
             button.callback = lambda i, a=action: getattr(self, f"_{a}")(i)
             self.add_item(button)
@@ -580,9 +672,7 @@ class OrbatTools(discord.ui.View):
         async def save(text: str) -> None:
             roles = [(role.id, role.name) for role in getattr(interaction.guild, "roles", ())]
             squads = parse(text, roles, interaction.locale)
-            current = await s.events.get(event.id)
-            if not await s.events.can_organise(current, member) or current.status not in ("draft", "published"):
-                raise EventError(Problem.NOT_DRAFT if current.status != "pending" else Problem.PENDING)
+            await s.events.editable(event.id, member)
             displaced = await s.signups.set_orbat(event.id, squads)
             if displaced:
                 log.info("ORBAT of event %s edited: %s moved to the reserve list", event.id, displaced)
@@ -604,7 +694,9 @@ class OrbatTools(discord.ui.View):
 
             async def save() -> bool:
                 roles = [(role.id, role.name) for role in getattr(i.guild, "roles", ())]
-                await s.signups.set_orbat(self.event.id, parse(template.text, roles))
+                squads = parse(template.text, roles, i.locale)
+                await s.events.editable(self.event.id, member_of(i))  # locked while waiting for approval
+                await s.signups.set_orbat(self.event.id, squads)
                 return True
 
             if await guarded(i, save):
@@ -627,6 +719,16 @@ class OrbatTools(discord.ui.View):
             lambda name: Templates(s.db).save(name, text, member.id, manage_any),
             label=t("Template name", interaction.locale)))
 
+    async def _manage(self, interaction: discord.Interaction) -> None:
+        s, member = services(interaction), member_of(interaction)
+        manage_any = s.events.access(member).has(Perm.MANAGE_ANY_EVENT)
+        mine = [x for x in await Templates(s.db).all() if manage_any or x.owner_id == member.id]
+        if not mine:
+            await reply(interaction, t("You have no templates to change.", interaction.locale))
+            return
+        await reply(interaction, t("Pick a template, then rename or delete it.", interaction.locale),
+                    view=TemplateTools(interaction, mine, manage_any))
+
     async def _slots(self, interaction: discord.Interaction) -> None:
         board = await services(interaction).signups.board(self.event.id)
         if not board.squads:
@@ -634,6 +736,49 @@ class OrbatTools(discord.ui.View):
             return
         await reply(interaction, t("Pick the squad, then the slot.", interaction.locale),
                     view=SlotTools(interaction, self.event, board))
+
+
+class TemplateTools(discord.ui.View):
+    """The templates the member may change (their own; every one for *manage any event*): pick, then rename or
+    delete. Overwriting is *Save as template* under the same name."""
+
+    def __init__(self, interaction: discord.Interaction, templates: list, manage_any: bool) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.templates, self.manage_any, self.template_id = templates, manage_any, None
+        pick = discord.ui.Select(placeholder=t("Template", interaction.locale), options=[
+            discord.SelectOption(label=x.name[:100], value=str(x.id)) for x in templates[:25]])
+        pick.callback = lambda i, s=pick: self._picked(i, int(s.values[0]))
+        self.add_item(pick)
+
+    async def _picked(self, interaction: discord.Interaction, template_id: int) -> None:
+        self.template_id, locale = template_id, interaction.locale
+        for item in list(self.children)[1:]:
+            self.remove_item(item)
+        for action, label, style in (("rename", t("Rename", locale), discord.ButtonStyle.secondary),
+                                     ("delete", t("Delete", locale), discord.ButtonStyle.danger)):
+            button = discord.ui.Button(label=label, style=style, row=1)
+            button.callback = lambda i, a=action: getattr(self, f"_{a}")(i)
+            self.add_item(button)
+        await interaction.response.edit_message(view=self)
+
+    async def _rename(self, interaction: discord.Interaction) -> None:
+        s, member_id = services(interaction), interaction.user.id
+        template = next(x for x in self.templates if x.id == self.template_id)
+        await interaction.response.send_modal(TextModal(
+            interaction, t("Rename", interaction.locale), template.name, 100,
+            lambda name: Templates(s.db).rename(template.id, name, member_id, self.manage_any),
+            label=t("Template name", interaction.locale)))
+
+    async def _delete(self, interaction: discord.Interaction) -> None:
+        s, template_id = services(interaction), self.template_id
+
+        async def delete() -> bool:
+            await Templates(s.db).delete(template_id, interaction.user.id, self.manage_any)
+            return True
+
+        if await guarded(interaction, delete):
+            self.templates = [x for x in self.templates if x.id != template_id]
+            await interaction.response.edit_message(content=t("Template deleted.", interaction.locale), view=None)
 
 
 class SlotTools(discord.ui.View):
@@ -654,7 +799,8 @@ class SlotTools(discord.ui.View):
             self.remove_item(item)
         pick = discord.ui.Select(placeholder=t("Slot", locale), options=[
             discord.SelectOption(label=f"{n + 1}. {slot.name}"[:100], value=str(slot.id),
-                                 description=("🔒 " if slot.locked else "") + (t("taken", locale) if slot.holder_id else t("free", locale)))
+                                 description=("⚠ " if slot.flagged else "") + ("🔒 " if slot.locked else "") +
+                                 (t("taken", locale) if slot.holder_id else t("free", locale)))
             for n, slot in enumerate(slots[:25])])
         pick.callback = lambda i, s=pick: self._slot(i, int(s.values[0]))
         self.add_item(pick)
@@ -674,13 +820,19 @@ class SlotTools(discord.ui.View):
         await interaction.response.edit_message(view=self)
 
     async def _act(self, interaction: discord.Interaction, action: str, member_id: int | None = None) -> None:
-        signups = services(interaction).signups
-        if action == "lock":
-            await signups.lock(self.slot_id, True)
-        elif action == "unlock":
-            await signups.lock(self.slot_id, False)
-        elif action == "remove":
-            await signups.remove(self.slot_id)
-        else:
-            await signups.assign(self.slot_id, member_id)
-        await reply(interaction, t("Saved.", interaction.locale))
+        s = services(interaction)
+
+        async def save() -> bool:
+            await s.events.editable(self.event.id, member_of(interaction))  # locked while waiting for approval
+            if action == "lock":
+                await s.signups.lock(self.slot_id, True)
+            elif action == "unlock":
+                await s.signups.lock(self.slot_id, False)
+            elif action == "remove":
+                await s.signups.remove(self.slot_id)
+            else:
+                await s.signups.assign(self.slot_id, member_id)
+            return True
+
+        if await guarded(interaction, save):
+            await reply(interaction, t("Saved.", interaction.locale))

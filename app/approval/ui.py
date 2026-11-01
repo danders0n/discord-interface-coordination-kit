@@ -2,7 +2,9 @@
 
 Each request is a message with the event, what is asked (publishing, the server for a Zeus event, or new times),
 the creator, the reservation, and persistent *Approve* / *Reject* buttons. *Approve* is disabled while the request's
-reservation failed; after *Retry reservation* the message is drawn again. *Reject* asks for the reason. Once decided,
+reservation failed, and *Retry reservation* sits next to it for the moderator who resolved the clash; whenever the
+reservation changes the message is drawn again. A request for new times shows the old and the new ones. *Reject*
+asks for the reason. Once decided,
 the message shows who decided and why, without buttons."""
 
 from __future__ import annotations
@@ -13,10 +15,11 @@ from typing import Any
 import discord
 
 from app.discord_util import reply, services
-from app.eventchannel.render import kind_label, ts
+from app.eventchannel.render import duration, kind_label, ts
 from app.events.service import EventError
 from app.events.words import event_problem
 from app.i18n import t
+from app.permissions import Perm
 from app.signup.service import Member
 
 COLOURS = {"pending": 0xF1C40F, "approved": 0x2ECC71, "rejected": 0xE74C3C, "withdrawn": 0x95A5A6}
@@ -32,10 +35,15 @@ async def request_message(s: Any, request: Any) -> tuple[discord.Embed, discord.
     embed.add_field(name=t("Requested by", language), value=f"<@{request.requested_by}>")
     if event.channel_id:
         embed.add_field(name=t("Channel", language), value=f"<#{event.channel_id}>")
-    embed.add_field(name=t("Date", language), value=f"{ts(event.assembly_at, 'F')}", inline=False)
     if request.kind == "times":
-        new = datetime.fromisoformat(request.proposed["assembly_at"])
-        embed.add_field(name=t("New date", language), value=ts(new, "F"), inline=False)
+        p = request.proposed
+        embed.add_field(name=t("Now", language), value=_times(event.assembly_at, event.start_at,
+                                                             event.duration_minutes, language), inline=False)
+        embed.add_field(name=t("New", language), value=_times(datetime.fromisoformat(p["assembly_at"]),
+                                                             datetime.fromisoformat(p["start_at"]),
+                                                             int(p["duration_minutes"]), language), inline=False)
+    else:
+        embed.add_field(name=t("Date", language), value=f"{ts(event.assembly_at, 'F')}", inline=False)
     booked = await s.reservations.get(event.id)
     if request.kind != "times" and event.kind != "guest":
         state = t("Server reserved.", language) if booked and booked.state == "booked" else \
@@ -53,12 +61,21 @@ async def request_message(s: Any, request: Any) -> tuple[discord.Embed, discord.
     approve.item.disabled = await s.events.approval_blocked(request)
     view.add_item(approve)
     view.add_item(ApprovalAction(request.id, "reject", t("Reject", language)))
+    if approve.item.disabled and booked is not None:  # the moderator resolved the clash: try again from here
+        view.add_item(ApprovalAction(request.id, "retry", t("Retry reservation", language)))
     return embed, view
 
 
-class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button], template=r"approval:(?P<request>\d+):(?P<action>approve|reject)"):
+def _times(assembly: datetime, start: datetime, minutes: int, language: str) -> str:
+    return t("{date}, assembly {assembly}, start {start}, {duration}", language, date=ts(assembly, "D"),
+             assembly=ts(assembly, "t"), start=ts(start, "t"), duration=duration(minutes, language))
+
+
+class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button],
+                     template=r"approval:(?P<request>\d+):(?P<action>approve|reject|retry)"):
     def __init__(self, request_id: int, action: str, label: str = "") -> None:
-        style = discord.ButtonStyle.success if action == "approve" else discord.ButtonStyle.danger
+        style = {"approve": discord.ButtonStyle.success, "reject": discord.ButtonStyle.danger}.get(
+            action, discord.ButtonStyle.secondary)
         super().__init__(discord.ui.Button(label=label or action, style=style, custom_id=f"approval:{request_id}:{action}"))
         self.request_id, self.action = request_id, action
 
@@ -71,12 +88,30 @@ class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button], template=r"appro
         if self.action == "reject":
             await interaction.response.send_modal(RejectModal(interaction, self.request_id))
             return
+        if self.action == "retry":
+            await self._retry(interaction, moderator)
+            return
         try:
             await services(interaction).events.approve(self.request_id, moderator)
         except EventError as exc:
             await reply(interaction, event_problem(exc.problem, interaction.locale, exc.missing))
             return
         await reply(interaction, t("Approved.", interaction.locale))
+
+    async def _retry(self, interaction: discord.Interaction, moderator: Member) -> None:
+        """*Retry reservation*; the reservation's listener draws this message again (Approve turns on)."""
+        s, locale = services(interaction), interaction.locale
+        if not s.events.access(moderator).has(Perm.APPROVE_EVENTS):
+            await reply(interaction, t("You don't have the permission for this.", locale))
+            return
+        try:
+            request = await s.events.request(self.request_id)
+        except EventError as exc:
+            await reply(interaction, event_problem(exc.problem, locale, exc.missing))
+            return
+        row = await s.reservations.retry(request.event_id)
+        await reply(interaction, t("Server reserved.", locale) if row and row.state == "booked" else
+                    t("No reservation: {reason}", locale, reason=row.error if row and row.error else "—"))
 
 
 class RejectModal(discord.ui.Modal):

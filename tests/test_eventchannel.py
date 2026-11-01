@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import discord
 import pytest
-from conftest import ADMIN, ANNOUNCE, ANNOUNCEMENT, DRAFTS, EVENTS, MEMBER, MISSION_MAKER, MODERATOR
+from conftest import ADMIN, ANNOUNCE, ANNOUNCEMENT, DRAFTS, EVENTS, MEMBER, MISSION_MAKER, MODERATOR, settle
 from fakes import FakeChannel
 
 from app.db.models import Event, Squad, Slot
@@ -93,7 +93,7 @@ async def test_redraws_are_batched():
 # ------------------------------------------------------------------ the channel's life
 
 @pytest.fixture
-def world(services, fake, guild, clock):
+async def world(services, fake, guild, clock):
     channels = EventChannels(services.db, services.store, lambda: services.ids, services.scheduler, lambda: guild,
                              interval=0)
     events = EventService(services.db, services.store, lambda: services.ids, services.scheduler,
@@ -102,7 +102,8 @@ def world(services, fake, guild, clock):
                             lambda _m: frozenset({MEMBER}))
     channels.events, channels.signups = events, signups
     guild.get_channel(EVENTS).overwrites = {guild.default_role: discord.PermissionOverwrite(send_messages=False)}
-    return channels, events, signups
+    yield channels, events, signups
+    await settle(channels)
 
 
 async def make(world, clock, days=5):
@@ -198,6 +199,112 @@ async def test_cancelling_pings_the_thread_and_archives_by_quarter(world, clock,
     assert channel.messages[0].embeds[0].title.startswith("ODWOŁANY")
     notice = guild.get_channel(ANNOUNCE).messages[0]
     assert notice.embeds[0].title.startswith("ODWOŁANY")
+
+
+async def test_a_cancelled_event_loses_its_buttons(world, clock):
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    await ready_and_publish(world, event)
+    await events.cancel(event.id, MAKER, "x")
+    info, orbat = channel.messages[0], channel.messages[-1]
+    assert info.edits[-1]["view"] is None and orbat.edits[-1]["view"] is None  # None removes them on Discord
+
+
+async def test_the_archive_and_the_closing_follow_new_times(world, clock, services):
+    channels, events, signups = world
+    event, _ = await make(world, clock)
+    await ready_and_publish(world, event)
+    later = event.assembly_at + timedelta(days=10)
+    await events.update(event.id, MAKER, times=Times(later, later + timedelta(minutes=30), 180))
+    clock.now = event.start_at + timedelta(minutes=180, hours=48)  # when it would have been archived
+    await services.scheduler.run_due()
+    assert (await events.get(event.id)).archived_at is None
+    clock.now = later + timedelta(minutes=30 + 180) + timedelta(hours=48)
+    await services.scheduler.run_due()
+    assert (await events.get(event.id)).archived_at is not None
+
+
+async def test_sign_up_buttons_follow_the_sign_up_state(world, clock, services):
+    channels, events, signups = world
+    event, channel = await make(world, clock)
+    await events.set_signup_start(event.id, MAKER, clock.now + timedelta(days=1))
+    await ready_and_publish(world, event)
+    orbat = channel.messages[-1]
+
+    def disabled():
+        view = orbat.edits[-1]["view"] if orbat.edits else orbat.kwargs["view"]
+        return [b.custom_id.split(":")[-1] for b in view.children if b.item.disabled]
+
+    assert disabled() == ["take", "reserve"]  # Maybe, Can't come and Leave work before it opens
+    clock.now += timedelta(days=1)
+    await services.scheduler.run_due()
+    await channels.redrawer.settle()
+    assert disabled() == []
+    clock.now = (await events.get(event.id)).start_at
+    await services.scheduler.run_due()  # sign-up closes at the start: drawn again
+    await channels.redrawer.settle()
+    assert disabled() == ["take", "reserve", "maybe", "cant", "leave"]
+
+
+async def test_a_full_zeus_event_turns_coming_off(world, clock):
+    channels, events, signups = world
+    start = clock.now + timedelta(days=5)
+    event = await events.create(Draft("zeus", "Zeus night", "Zeus", Times(start, start + timedelta(minutes=30), 180)),
+                                MAKER)
+    channel = await channels.open_draft(event.id)
+    await events.set_limit(event.id, MAKER, 1)
+    await events.set_briefing(event.id, MAKER, "x", "", "")
+    await events.publish(event.id, MAKER)
+    await signups.coming(event.id, Member(30, frozenset({MEMBER})))
+    await channels.redrawer.settle()
+    view = channel.messages[-1].edits[-1]["view"]
+    assert [b.custom_id.split(":")[-1] for b in view.children if b.item.disabled] == ["coming"]
+
+
+async def test_a_members_zeus_server_is_confirmed_only_by_a_moderator(world, clock):
+    channels, events, _ = world
+    member = Member(10, frozenset({MEMBER}))
+    start = clock.now + timedelta(days=5)
+    event = await events.create(Draft("zeus", "Zeus night", "Zeus", Times(start, start + timedelta(minutes=30), 180)),
+                                member)
+    channel = await channels.open_draft(event.id)
+    await events.set_briefing(event.id, member, "x", "", "")
+    await events.publish(event.id, member)
+
+    async def server() -> bool:
+        await channels.redrawer.settle()
+        return "Jeszcze niepotwierdzony" in [f.value for f in channel.messages[0].embeds[0].fields]
+
+    assert await server()
+    request = await events.request_server(event.id, member)
+    assert await server()  # the host is held, but nobody approved it yet
+    await events.approve(request.id, Member(40, frozenset({MODERATOR})))
+    assert not await server()
+
+
+async def test_a_co_organiser_added_later_sees_the_draft(world, clock):
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    await events.add_organiser(event.id, MAKER, 77)
+    assert channel.overwrites[discord.Object(id=77)].view_channel is True
+    await events.remove_organiser(event.id, MAKER, 77)
+    assert discord.Object(id=77) not in channel.overwrites
+
+
+async def test_crowded_categories_warn_staff_and_a_full_one_is_named(world, clock, guild, services):
+    channels, events, _ = world
+    channels.staff = services.staff
+    drafts = guild.get_channel(DRAFTS)
+    for n in range(44):
+        await guild.create_text_channel(f"old-{n}", category=drafts)
+    services.staff.drain()
+    await make(world, clock)
+    await asyncio.sleep(0)  # (posting is queued for the next loop round)
+    assert any("45 z 50" in note for note in services.staff.drain())
+    assert channels.full() is None
+    for n in range(5):
+        await guild.create_text_channel(f"more-{n}", category=drafts)
+    assert channels.full() == "Szkice" and channels.full("events_category") is None
 
 
 async def test_a_cancelled_draft_loses_its_channel(world, clock, guild):

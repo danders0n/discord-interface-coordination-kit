@@ -64,6 +64,20 @@ def test_an_unmentionable_announcement_role(guild, settings):
     assert check(guild, settings)[1] == []
 
 
+def test_an_unmentionable_climate_role(guild, settings):
+    guild.add(FakeRole(401, "Cold War"))
+    guild.get_role(401).mentionable = False
+    settings = english(settings, events=settings.events.model_copy(update={"climate_roles": [401]}))
+    (problem,) = check(guild, settings)[1]
+    assert "can't mention Cold War" in problem
+
+
+def test_no_sign_up_role_is_a_problem(guild, tmp_path):
+    settings = make_settings(tmp_path, language="en", roles={"member": [MEMBER], "mission_maker": MEMBER, "signup": []})
+    (problem,) = check(guild, settings)[1]
+    assert problem.startswith("BOT_ROLES__SIGNUP names no role")
+
+
 def test_problems_follow_the_public_language(guild, tmp_path):
     settings = make_settings(tmp_path, channels={"drafts_category": DRAFTS, "events_category": EVENTS,
                                                  "header": "brak", "announcements": "ogloszenia", "staff": STAFF})

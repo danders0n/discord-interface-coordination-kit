@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from app import logs, settings as settings_module
 from app.db import Database, backup, migrate
+from app.reservations.service import ReservationService
 from app.scheduler import Scheduler
 from app.settings import Settings, SettingsStore
 from app.staff_log import StaffLog

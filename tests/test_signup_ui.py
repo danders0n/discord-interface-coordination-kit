@@ -1,11 +1,12 @@
 """Phases 4c-2 and 4d on the Discord fakes: presets and images, the sign-up buttons and /slot, offers in DMs or
 the thread, approval in the moderation thread, the pings, and /events."""
 
+import asyncio
 from datetime import timedelta
 
 import discord
 import pytest
-from conftest import ANNOUNCEMENT, MEMBER, MISSION_MAKER, MODERATOR, STAFF
+from conftest import ANNOUNCEMENT, MEMBER, MISSION_MAKER, MODERATOR, STAFF, settle
 from fakes import FakeAttachment, FakeInteraction, FakeMember, FakeRole, invoke
 
 from app.approval.ui import ApprovalAction
@@ -33,7 +34,7 @@ PRESET = """<html><head><meta name="arma:PresetName" content="IBC Cold War" /></
 
 
 @pytest.fixture
-def stack(services, fake, guild, clock):
+async def stack(services, fake, guild, clock):
     channels = EventChannels(services.db, services.store, lambda: services.ids, services.scheduler, lambda: guild,
                              interval=0)
     events = EventService(services.db, services.store, lambda: services.ids, services.scheduler,
@@ -47,7 +48,8 @@ def stack(services, fake, guild, clock):
     channels.threads = services.threads = StaffThreads(services.db, services.store)
     channels.roles_of = signups.roles_of
     services.events, services.signups, services.channels = events, signups, channels
-    return services
+    yield services
+    await settle(channels)
 
 
 def person(guild, member_id: int, *roles: int, dms_closed: bool = False) -> FakeMember:
@@ -215,6 +217,56 @@ async def test_approval_in_the_moderation_thread(stack, guild, clock):
     assert decision["view"] is None and decision["embed"].fields[-1].value == "Zatwierdzone przez <@40>"
     thread = guild.threads[(await stack.events.get(event.id)).thread_id]
     assert "<@10>" in thread.sent[-1].content
+
+
+async def test_a_moderator_retries_the_reservation_from_the_request(stack, guild, clock):
+    member = Member(10, frozenset({MEMBER}))
+    start = clock.now + timedelta(days=5)
+    window = Times(start, start + timedelta(minutes=30), 180)
+    blocker = await stack.events.create(Draft("internal", "Op B", "Coop", window), MAKER)  # holds the host
+    event = await stack.events.create(Draft("internal", "Op M", "Coop", window), member)
+    await stack.channels.open_draft(event.id)
+    await stack.events.set_briefing(event.id, member, "x", "", "")
+    await stack.signups.set_orbat(event.id, parse("# A\nR\n", []))
+    await stack.events.publish(event.id, member)
+    moderation = next(t for t in guild.threads.values() if t.name == "Moderacja")
+    (request,) = moderation.sent
+    approve, _, retry = request.kwargs["view"].children
+    assert approve.item.disabled and retry.custom_id.endswith(":retry")
+    await stack.events.cancel(blocker.id, MAKER, "moved")  # the moderator resolved the clash
+    press = asking(stack, guild, person(guild, 40, MEMBER, MODERATOR))
+    await ApprovalAction(int(retry.custom_id.split(":")[1]), "retry").callback(press)
+    assert press.replies[0].content == "Server reserved."
+    redrawn = request.edits[-1]["view"].children
+    assert len(redrawn) == 2 and not redrawn[0].item.disabled  # Approve is on, Retry gone
+    member_press = asking(stack, guild, person(guild, 11, MEMBER))
+    await ApprovalAction(int(retry.custom_id.split(":")[1]), "retry").callback(member_press)
+    assert member_press.replies[0].content == "You don't have the permission for this."
+
+
+async def test_a_stale_pending_event_goes_up_the_moderation_thread_again(stack, guild, clock):
+    member = Member(10, frozenset({MEMBER}))
+    start = clock.now + timedelta(days=3)
+    event = await stack.events.create(Draft("internal", "Op S", "Coop", Times(start, start + timedelta(minutes=30), 180)),
+                                      member)
+    await stack.channels.open_draft(event.id)
+    await stack.events.set_briefing(event.id, member, "x", "", "")
+    await stack.signups.set_orbat(event.id, parse("# A\nR\n", []))
+    await stack.events.publish(event.id, member)
+    moderation = next(t for t in guild.threads.values() if t.name == "Moderacja")
+    assert len(moderation.sent) == 1
+    clock.now = start - timedelta(hours=47)
+    await stack.scheduler.run_due()
+    assert len(moderation.sent) == 2
+
+
+async def test_staff_hear_who_published(stack, guild, clock):
+    stack.staff.drain()
+    event = await published(stack, clock)
+    await asyncio.sleep(0)  # (posting is queued for the next loop round)
+    notes = stack.staff.drain()
+    assert any(n.startswith("Opublikowano: Operation X") and "<@20>" in n for n in notes)
+    assert event.status == "published"
 
 
 async def test_reminders_and_the_sign_up_ping_go_to_the_thread(stack, guild, clock):

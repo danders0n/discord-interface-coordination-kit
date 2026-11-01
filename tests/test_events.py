@@ -202,6 +202,7 @@ async def test_a_members_zeus_event_publishes_but_asks_for_the_server(events, fa
     assert await events.publish(event.id, MEMBER_A) == "published" and fake.reservations == {}
     request = await events.request_server(event.id, MEMBER_A)
     assert request.kind == "server" and len(fake.reservations) == 1
+    assert await events.server_pending(event.id) and events.recorder.calls[-1] == ("changed", event.id)
     assert (await events.request_server(event.id, MEMBER_A)).id == request.id  # asking twice: the same request
     await events.reject(request.id, MOD, "Not this week")
     assert fake.reservations == {}
@@ -234,6 +235,64 @@ async def test_a_members_new_times_are_a_proposal(events, fake, clock):
     assert moved.assembly_at == draft(clock, days=6).times.assembly_at
     (r,) = fake.reservations.values()
     assert r["starts_at"] == moved.assembly_at - timedelta(minutes=45)
+
+
+async def test_a_proposal_keeps_the_other_changes_made_with_it(events, fake, clock):
+    event = await events.create(draft(clock), MEMBER_A)
+    await ready(events, event, MEMBER_A)
+    await events.publish(event.id, MEMBER_A)
+    await events.approve(events.recorder.calls[-1][1], MOD)
+    proposal = await events.update(event.id, MEMBER_A, title="Operation Y", times=draft(clock, days=6).times)
+    assert proposal is not None
+    saved = await events.get(event.id)
+    assert saved.title == "Operation Y" and saved.assembly_at == draft(clock).times.assembly_at
+
+
+async def test_an_approved_move_asks_again_for_a_failed_reservation_at_the_new_times(events, fake, clock):
+    from app.db.models import HostReservation
+
+    event = await events.create(draft(clock), MEMBER_A)
+    await ready(events, event, MEMBER_A)
+    await events.publish(event.id, MEMBER_A)
+    await events.approve(events.recorder.calls[-1][1], MOD)
+    proposal = await events.update(event.id, MEMBER_A, times=draft(clock, days=6).times)
+    async with events.db.session() as session, session.begin():  # the reservation failed meanwhile
+        (await session.get(HostReservation, event.id)).state = "failed"
+    await events.approve(proposal.id, MOD)
+    asked = await events.reservations.get(event.id)  # what a later *Retry reservation* sends
+    assert asked.starts_at == draft(clock, days=6).times.assembly_at - timedelta(minutes=45)
+
+
+async def test_reminders_follow_the_offsets_in_force(events, clock, services):
+    event = await events.create(draft(clock), MAKER)
+    await ready(events, event, MAKER)
+    await events.publish(event.id, MAKER)
+    times = services.settings.times.model_copy(update={"reminder_minutes": [120]})
+    services.store.current = services.settings.model_copy(update={"times": times})  # a /reload
+    await events.update(event.id, MAKER, times=draft(clock, days=6).times)
+    assert not await services.scheduler.exists(f"reminder:{event.id}:60")
+    assert await services.scheduler.exists(f"reminder:{event.id}:120")
+    await events.cancel(event.id, MAKER, "x")
+    assert not await services.scheduler.exists(f"reminder:{event.id}:120")
+
+
+async def test_a_refused_preset_or_image_leaves_the_files_alone(events, clock, services):
+    event = await events.create(draft(clock), MEMBER_A)
+    await ready(events, event, MEMBER_A)
+    await events.publish(event.id, MEMBER_A)  # pending: locked
+    with pytest.raises(EventError):
+        await events.set_image(event.id, MEMBER_A, b"\x89PNG", ".png")
+    with pytest.raises(EventError):
+        await events.set_preset(event.id, MEMBER_A, b"<a href='filedetails/?id=1'>x</a>")
+    assert not (services.settings.data_dir / "images").exists() and not (services.settings.data_dir / "presets").exists()
+
+
+async def test_events_using_an_item_removed_from_the_settings(events, clock, services):
+    event = await events.create(draft(clock), MAKER)
+    assert await events.affected_by_config() == []
+    services.store.current = services.settings.model_copy(update={"events": services.settings.events.model_copy(
+        update={"mission_types": ["TvT"]})})
+    assert [e.id for e in await events.affected_by_config()] == [event.id]
 
 
 async def test_an_approved_move_into_a_clash_changes_nothing(events, fake, clock):

@@ -16,7 +16,7 @@ retried after a lost answer finds the one it made; without it the bot looks for 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -67,8 +67,19 @@ class ReservationService:
         self.scheduler = scheduler
         self.notify = notify
         self.clock = clock or scheduler.clock
+        # Told the event id when a reservation changes outside a member's action (a retry in the background, a
+        # cancel the supervisor took late, *Retry reservation*), so the messages that show it are drawn again.
+        self.listener: Callable[[int], Awaitable[None]] | None = None
         scheduler.register(RETRY_KIND, self._retry_action)
         scheduler.register(CANCEL_KIND, self._cancel_action)
+
+    async def _changed(self, event_id: int) -> None:
+        if self.listener is None:
+            return
+        try:
+            await self.listener(event_id)
+        except Exception:  # noqa: BLE001 - redrawing must not undo the reservation
+            log.exception("Telling about the reservation of event %s failed", event_id)
 
     # ---------------------------------------------------------------- reading
 
@@ -104,7 +115,9 @@ class ReservationService:
         """*Retry reservation*: try again with what was asked last."""
         if await self.get(event_id) is None:
             return None
-        return await self._push(event_id)
+        row = await self._push(event_id)
+        await self._changed(event_id)
+        return row
 
     def _body(self, row: HostReservation) -> dict[str, Any]:
         settings = self.store.current
@@ -182,6 +195,7 @@ class ReservationService:
             return None
         if now >= row.ends_at:
             await self._failed(row, row.error or "")
+            await self._changed(row.event_id)
             return None
         try:
             await self.client.ensure_info()
@@ -191,8 +205,10 @@ class ReservationService:
             raise  # the scheduler retries with a growing delay
         except SupervisorError as exc:
             await self._failed(row, exc.message)
+            await self._changed(row.event_id)
             return None
         await self._save(row.event_id, reservation_id=result["id"], state="booked", error=None)
+        await self._changed(row.event_id)
         return None
 
     # ---------------------------------------------------------------- ending and cancelling
@@ -248,6 +264,7 @@ class ReservationService:
             return None
         await self._delete(row.reservation_id)  # unreachable: raises, and the scheduler tries again
         await self._save(row.event_id, state="cancelled", reservation_id=None, error=None)
+        await self._changed(row.event_id)
         return None
 
     # ---------------------------------------------------------------- storage

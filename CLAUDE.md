@@ -79,7 +79,8 @@ exactly the settings.
   409 with `reservation`), capabilities, heartbeat loop.
 - `app/reservations/service.py`: an event's host reservation: `book` (create or move; `Frozen` from the quiet
   period), `retry`, `end`, `cancel` (ends one under way first); unreachable → scheduled retries, refused →
-  `failed` + staff note. State in `host_reservation`.
+  `failed` + staff note. State in `host_reservation`. Its `listener` (set by `EventService` to the notifier's
+  `reservation_changed`) hears changes made in the background, so the info embed and approval requests redraw.
 - Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts), `app/servers/` (`/server`
   with confirmation and override buttons).
 - `app/orbat/parser.py`: the ORBAT text format (`parse` names every problem's line; `render` writes it back with
@@ -94,13 +95,17 @@ exactly the settings.
   actions; refusals are `Problem` codes; the Discord side listens through `EventNotifier`).
 - `app/eventchannel/`: `render.py` (pure: event + board -> `Message`s keyed `info`, `briefing`, `preset`,
   `orbat:N`), `sync.py` (keeps them in order: edit in place, append / delete continuations at the end, re-post
-  after a late preset or a message deleted by hand), `service.py` (`EventChannels`: the draft's hidden channel and
-  thread, batched redraws via `Redrawer`, background renames, publish + announcement, cancel + thread ping, archive
-  by quarter with overflow categories; it is the notifier of `EventService` and `SignupService`). `EventBot.
+  after a late preset or a message deleted by hand; edits always pass `view`, as leaving it out keeps old buttons),
+  `service.py` (`EventChannels`: the draft's hidden channel and thread, overwrites that follow the co-organisers,
+  batched redraws via `Redrawer`, background renames, publish + announcement, a redraw at the start (sign-up
+  closes) and the archive, both moved with the event's times, cancel + thread ping, archive by quarter with
+  overflow categories, the 45 / 50 channel room of the categories; it is the notifier of `EventService` and
+  `SignupService`). `EventBot.
   build_events` wires the three together; `refresh_all` redraws after a restart.
 - `app/events/ui.py`: the wizard (`Choices` + `DetailsModal`, in memory; `expired()` answers its buttons after a
   restart), the persistent `CreateEvent`, `PanelButton` and `PanelAction` (`event:act:<id>:<action>`, one
-  `_<action>` method each), and the panel's modals and tools. `guarded()` turns service refusals into words
+  `_<action>` method each), and the panel's modals and tools (templates renamed / deleted by their author, other groups corrected by
+  *manage any event*, which redraws their events through `EventChannels.group_changed`). `guarded()` turns service refusals into words
   (`app/events/words.py`). `app/events/header.py`: the header message and its calendar. `app/events/cog.py`:
   `/event preset | image` (in the event's channel or thread, found by `EventService.by_channel`), `/slot take |
   leave`, `/events`.
@@ -108,8 +113,9 @@ exactly the settings.
   presets and images are files under `data/presets/` and `data/images/`, sent with the event's messages.
 - `app/signup/ui.py`: the sign-up buttons under `orbat:0` (`signup:<id>:<action>`, a squad-then-slot picker),
   the offer buttons (`offer:<id>:take|decline`, by DM or in the thread), and `answer()` (refusal or done, plus
-  the DLC warning). `app/approval/ui.py`: the request message in the moderation thread with *Approve* /
-  *Reject* (`approval:<id>:<action>`).
+  the DLC warning); the buttons are off before sign-up opens, after the start, and (*Coming*) at a Zeus limit.
+  `app/approval/ui.py`: the request message in the moderation thread with *Approve* / *Reject*, and *Retry
+  reservation* while Approve is off (`approval:<id>:<action>`).
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 

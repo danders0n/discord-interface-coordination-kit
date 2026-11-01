@@ -30,7 +30,9 @@ def order(key: str) -> int:
 
 
 def _view(message: Message) -> dict[str, Any]:
-    return {"view": message.view} if message.view is not None else {}  # (discord.py takes no view=None)
+    """For sending: a view only when there is one. Editing passes ``view`` always, as leaving it out keeps the
+    buttons the message had (a cancelled event's sign-up buttons), while None removes them."""
+    return {"view": message.view} if message.view is not None else {}
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,8 @@ async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Mes
                 try:
                     files = {"attachments": [discord.File(p, p.name) for p in message.files]} if message.replace_files else {}
                     await channel.get_partial_message(stored[op.key]).edit(content=message.content,
-                                                                           embeds=message.embeds, **_view(message), **files)
+                                                                           embeds=message.embeds, view=message.view,
+                                                                           **files)
                 except discord.NotFound:  # deleted by hand: post it and what follows again
                     missing = op.key
                     break

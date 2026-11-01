@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -89,6 +89,18 @@ class Scheduler:
                 return False
             await session.delete(row)
             return True
+
+    async def cancel_all(self, kind: str, event_id: int, keep: Iterable[str] = ()) -> int:
+        """Drop the event's unfinished actions of ``kind``, except the keys in ``keep``; returns how many."""
+        keep = set(keep)
+        async with self.db.session() as session, session.begin():
+            rows = (await session.execute(select(ScheduledAction).where(
+                ScheduledAction.kind == kind, ScheduledAction.event_id == event_id,
+                ScheduledAction.done_at.is_(None)))).scalars().all()
+            gone = [row for row in rows if row.key not in keep]
+            for row in gone:
+                await session.delete(row)
+            return len(gone)
 
     async def run_due(self) -> int:
         """Run every action that is due, oldest first. Returns how many ran (failed ones included)."""

@@ -24,6 +24,33 @@ async def test_an_old_database_is_backed_up_before_migrating(tmp_path):
     assert len(list((tmp_path / "backups").glob("bot-*.db"))) == 1
 
 
+async def test_run_wires_the_services_and_starts_the_bot(tmp_path, monkeypatch):
+    import app.bot
+    from app import __main__ as entry, logs
+
+    started = []
+
+    class Bot:
+        def __init__(self, services):
+            self.services = services
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            await self.services.supervisor.close()
+            await self.services.db.close()
+
+        async def start(self, token):
+            started.append((token, self.services))
+
+    monkeypatch.setattr(app.bot, "EventBot", Bot)
+    monkeypatch.setattr(logs, "setup", lambda *_a, **_k: None)
+    await entry.run(make_settings(tmp_path), "none.env")
+    ((token, services),) = started
+    assert token == "token" and services.reservations.store is services.store
+
+
 def test_check_config_reports_errors_and_exits(tmp_path, capsys, monkeypatch):
     import os
     for name in [n for n in os.environ if n.startswith("BOT_")]:

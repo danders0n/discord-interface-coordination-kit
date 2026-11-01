@@ -94,6 +94,7 @@ class Notifier(Protocol):
     async def changed(self, event_id: int) -> None: ...  # redraw the ORBAT / sign-up list
     async def offered(self, offer: Offer, member_ids: list[int]) -> None: ...  # DM them (or ping in the thread)
     async def lost_slot(self, event_id: int, member_ids: list[int]) -> None: ...  # now at the top of the reserve list
+    async def released(self, member_id: int, event_ids: list[int], left: bool) -> None: ...  # tell staff
 
 
 class _Refused(Exception):
@@ -542,10 +543,13 @@ class SignupService:
 
     # ---------------------------------------------------------------- members' roles
 
-    async def member_changed(self, member: Member) -> None:
-        """Roles changed. Without a sign-up role, the member's places in events not yet started are freed (an
-        organiser's assignment stays). A slot whose required role they lost is flagged ⚠, and unflagged again."""
-        if member.role_ids.isdisjoint(self.ids().signup):
+    async def member_changed(self, member: Member, previous: frozenset[int] | None = None) -> None:
+        """Roles changed (``previous``: the roles before, when known). A member who lost their last sign-up role has
+        their places in events not yet started freed (an organiser's assignment stays). A slot whose required role
+        they lost is flagged ⚠, and unflagged again. While the sign-up roles aren't resolved (before the bot has
+        seen the server, or a mistyped name) nobody counts as having lost one."""
+        signup = self.ids().signup
+        if signup and member.role_ids.isdisjoint(signup) and (previous is None or not previous.isdisjoint(signup)):
             await self._release(member.id, keep_assigned=True)
         touched: set[int] = set()
         async with self.db.session() as session, session.begin():
@@ -579,6 +583,8 @@ class SignupService:
             await self._offer(slot_id)
         for event_id in touched:
             await self.notifier.changed(event_id)
+        if touched:
+            await self.notifier.released(member_id, sorted(touched), left=not keep_assigned)
 
     # ---------------------------------------------------------------- storage
 

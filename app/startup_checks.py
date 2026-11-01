@@ -35,8 +35,12 @@ def check(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
             problems.append(t("{variable}: the bot lacks {permissions} in {name}", language,
                               variable=f"BOT_CHANNELS__{name.upper()}", permissions=", ".join(missing),
                               name=channel.name))
-    announcement = guild.get_role(ids.announcement) if ids.announcement else None
-    if announcement is not None and not announcement.mentionable and not me.guild_permissions.mention_everyone:
-        problems.append(t("The bot can't mention {role}: make the role mentionable, or give the bot "
-                          "\"Mention @everyone, @here and All Roles\"", language, role=announcement.name))
+    # Announcements and the sign-up ping mention the announcement role and the event's climate role.
+    for role_id in [ids.announcement, *ids.climates]:
+        role = guild.get_role(role_id) if role_id else None
+        if role is not None and not role.mentionable and not me.guild_permissions.mention_everyone:
+            problems.append(t("The bot can't mention {role}: make the role mentionable, or give the bot "
+                              "\"Mention @everyone, @here and All Roles\"", language, role=role.name))
+    if not ids.signup:
+        problems.append(t("BOT_ROLES__SIGNUP names no role on this server: nobody can sign up for events.", language))
     return ids, problems

@@ -36,6 +36,13 @@ class AdminCog(commands.Cog):
             if problems:
                 text += "\n" + t("Problems with the configuration:", locale) + "\n"
                 text += "\n".join(f"- {problem}" for problem in problems[:15])
-        await reply(interaction, text)
+        if self.services.events is not None:  # stored by value, they keep showing it, but nobody can pick it again
+            affected = await self.services.events.affected_by_config()
+            if affected:
+                text += "\n" + t("These events still use a mission type or climate no longer in the settings:",
+                                 locale) + "\n"
+                text += "\n".join(f"- {e.title}" + (f" (<#{e.channel_id}>)" if e.channel_id else "")
+                                  for e in affected[:15])
+        await reply(interaction, text[:2000])
         self.services.staff.post(t("Settings reloaded by {member}.", self.services.settings.language,
                                    member=interaction.user.mention))

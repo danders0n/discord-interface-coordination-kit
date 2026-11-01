@@ -94,7 +94,10 @@ class EventNotifier(Protocol):
     """What the Discord side does (phase 4b-4d)."""
 
     async def changed(self, event_id: int) -> None: ...  # redraw the messages; rename the channel if needed
-    async def published(self, event_id: int) -> None: ...  # show the channel, post the announcement
+    async def published(self, event_id: int, by: int | None) -> None: ...  # show the channel, announce; by: who pressed
+    async def moved(self, event_id: int) -> None: ...  # a published event's times changed: its own timed actions
+    async def organisers_changed(self, event_id: int) -> None: ...  # the channel's overwrites
+    async def reservation_changed(self, event_id: int) -> None: ...  # in the background: redraw what shows it
     async def deleted(self, event_id: int) -> None: ...  # a draft gone: delete its channel
     async def cancelled(self, event_id: int) -> None: ...  # CANCELLED, ping, archive
     async def signup_opened(self, event_id: int, ping: bool) -> None: ...
@@ -116,6 +119,7 @@ class EventService:
         self.db, self.store, self.ids = db, store, ids
         self.scheduler, self.reservations, self.notifier, self.link = scheduler, reservations, notifier, link
         self.clock = clock or scheduler.clock
+        reservations.listener = notifier.reservation_changed
         for kind, handler in ((self.SIGNUP_OPEN, self._signup_open), (self.REMINDER, self._reminder),
                               (self.STALE_PING, self._stale_ping), (self.STALE_CANCEL, self._stale_cancel),
                               (self.GUEST_END, self._guest_end)):
@@ -169,6 +173,32 @@ class EventService:
         if not await self.can_organise(event, member):
             raise EventError(Problem.NOT_ALLOWED)
         return event
+
+    async def editable(self, event_id: int, member: Member) -> Event:
+        """The event, if ``member`` organises it and it can still change (a draft or published, not pending)."""
+        event = await self._organiser(event_id, member)
+        if event.status == "pending":
+            raise EventError(Problem.PENDING)
+        if event.status not in ("draft", "published"):
+            raise EventError(Problem.NOT_DRAFT)
+        return event
+
+    async def server_pending(self, event_id: int) -> bool:
+        """A member's Zeus event whose server request waits for a moderator."""
+        async with self.db.session() as session:
+            return (await session.execute(select(ApprovalRequest.id).where(
+                ApprovalRequest.event_id == event_id, ApprovalRequest.kind == "server",
+                ApprovalRequest.state == "pending").limit(1))).first() is not None
+
+    async def affected_by_config(self) -> list[Event]:
+        """Events not over yet whose mission type or climate is no longer in the configuration (after /reload):
+        they keep showing it, stored by value, but it can't be picked again."""
+        types, climates = set(self.store.current.events.mission_types), self.ids().climates
+        async with self.db.session() as session:
+            events = (await session.execute(select(Event).where(Event.status.in_(("draft", "pending", "published")))
+                                            .order_by(Event.assembly_at))).scalars().all()
+        return [e for e in events if (e.mission_type and e.mission_type not in types)
+                or (e.climate_role_id is not None and e.climate_role_id not in climates)]
 
     async def channel_name(self, event: Event) -> str:
         """``dd-mm-xxx``: the event date and the acronym of the group whose server it is."""
@@ -234,12 +264,8 @@ class EventService:
                      host_group_id: int | None | object = UNSET, guest_group_ids: list[int] | None = None,
                      times: Times | None = None) -> ApprovalRequest | None:
         """Change the details (``UNSET``: leave as it is; None for the climate or host clears it). Returns the
-        request when new times went to the moderators instead."""
-        event = await self._organiser(event_id, member)
-        if event.status == "pending":
-            raise EventError(Problem.PENDING)
-        if event.status not in ("draft", "published"):
-            raise EventError(Problem.NOT_DRAFT)
+        request when new times went to the moderators instead (the other changes are saved either way)."""
+        event = await self.editable(event_id, member)
         if kind is not None and kind != event.kind:
             if event.status != "draft":
                 raise EventError(Problem.NOT_DRAFT)
@@ -252,13 +278,12 @@ class EventService:
             raise EventError(Problem.UNKNOWN_CLIMATE)
         new_times = times is not None and (times.assembly_at, times.start_at, times.duration_minutes) != \
             (event.assembly_at, event.start_at, event.duration_minutes)
+        proposal = None
         if new_times:
             await self._check_times(event, times)
             if event.status == "published" and not self.access(member).publishes_without_approval and \
                     (event.kind != "zeus" or await self.reservations.get(event.id) is not None):
-                return await self._request(event, "times", member, proposed={
-                    "assembly_at": times.assembly_at.isoformat(), "start_at": times.start_at.isoformat(),
-                    "duration_minutes": times.duration_minutes})
+                proposal, new_times = times, False  # nothing moves until a moderator approves
         old_kind = event.kind
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
@@ -274,8 +299,9 @@ class EventService:
                 row.host_group_id = host_group_id
             if row.kind == "guest" and row.host_group_id is None:
                 raise EventError(Problem.NEEDS_HOST)
-            if guest_group_ids is not None:
+            if guest_group_ids is not None or row.kind != "hosted":  # only a hosted event invites groups
                 await session.execute(delete(EventGuestGroup).where(EventGuestGroup.event_id == event_id))
+            if guest_group_ids is not None and row.kind == "hosted":
                 session.add_all(EventGuestGroup(event_id=event_id, group_id=g) for g in set(guest_group_ids))
             if new_times:
                 row.assembly_at, row.start_at, row.duration_minutes = times.assembly_at, times.start_at, times.duration_minutes
@@ -287,7 +313,11 @@ class EventService:
         if new_times:
             await self._reschedule(event)
         await self.notifier.changed(event_id)
-        return None
+        if proposal is None:
+            return None
+        return await self._request(event, "times", member, proposed={
+            "assembly_at": proposal.assembly_at.isoformat(), "start_at": proposal.start_at.isoformat(),
+            "duration_minutes": proposal.duration_minutes})
 
     async def _check_times(self, event: Event, times: Times) -> None:
         now = self.clock()
@@ -316,7 +346,7 @@ class EventService:
     async def set_preset(self, event_id: int, member: Member, content: bytes) -> Preset:
         """`/event preset`: parse an Arma 3 Launcher preset, keep the file, and take its Creator DLC as the DLC the
         event needs. Raises ValueError for a file with no mods and no DLC."""
-        await self._organiser(event_id, member)
+        await self.editable(event_id, member)  # (before the file is touched)
         preset = parse_preset_html(content.decode("utf-8", errors="replace"))
         path = self._file("presets", f"{event_id}.html")
         _write(path, content)
@@ -326,14 +356,14 @@ class EventService:
 
     async def set_image(self, event_id: int, member: Member, content: bytes, suffix: str) -> None:
         """`/event image`: the briefing's banner or map, kept by the bot (so it outlives the organiser's message)."""
-        event = await self._organiser(event_id, member)
+        event = await self.editable(event_id, member)  # (before the file is touched)
         if suffix.lower() not in IMAGE_SUFFIXES:
             raise EventError(Problem.NOT_AN_IMAGE)
         path = self._file("images", f"{event_id}{suffix.lower()}")
         _write(path, content)
+        await self._set(event_id, member, briefing_image=str(path))
         if event.briefing_image and event.briefing_image != str(path):
             Path(event.briefing_image).unlink(missing_ok=True)
-        await self._set(event_id, member, briefing_image=str(path))
 
     def _file(self, folder: str, name: str) -> Path:
         path = self.store.current.data_dir / folder / name
@@ -364,6 +394,7 @@ class EventService:
         async with self.db.session() as session, session.begin():
             if await session.get(EventOrganiser, (event_id, organiser_id)) is None:
                 session.add(EventOrganiser(event_id=event_id, member_id=organiser_id))
+        await self.notifier.organisers_changed(event_id)
         await self.notifier.changed(event_id)
 
     async def remove_organiser(self, event_id: int, member: Member, organiser_id: int) -> None:
@@ -371,14 +402,11 @@ class EventService:
         async with self.db.session() as session, session.begin():
             await session.execute(delete(EventOrganiser).where(EventOrganiser.event_id == event_id,
                                                                EventOrganiser.member_id == organiser_id))
+        await self.notifier.organisers_changed(event_id)
         await self.notifier.changed(event_id)
 
     async def _set(self, event_id: int, member: Member, **values) -> Event:
-        event = await self._organiser(event_id, member)
-        if event.status == "pending":
-            raise EventError(Problem.PENDING)
-        if event.status not in ("draft", "published"):
-            raise EventError(Problem.NOT_DRAFT)
+        await self.editable(event_id, member)
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             for name, value in values.items():
@@ -402,7 +430,7 @@ class EventService:
         if access.publishes_without_approval or event.kind == "zeus":
             if event.kind in RESERVED and access.publishes_without_approval and await self.reservations.get(event.id) is None:
                 await self._book(event)
-            await self._publish(event)
+            await self._publish(event, by=member.id)
             return "published"
         await self._book(event)  # a member's internal or hosted event: the clash shows in the request
         async with self.db.session() as session, session.begin():
@@ -425,7 +453,9 @@ class EventService:
         if waiting is not None:
             return waiting
         await self._book(event)
-        return await self._request(event, "server", member)
+        request = await self._request(event, "server", member)
+        await self.notifier.changed(event_id)  # the info embed: requested, not confirmed yet
+        return request
 
     async def withdraw(self, event_id: int, member: Member) -> None:
         """*Withdraw request*: a pending event goes back to draft, without its reservation."""
@@ -496,6 +526,9 @@ class EventService:
             raise EventError(Problem.NOT_PENDING)
         return request
 
+    async def request(self, request_id: int) -> ApprovalRequest:
+        return await self._request_row(request_id)
+
     async def _request_row(self, request_id: int) -> ApprovalRequest:
         async with self.db.session() as session:
             request = await session.get(ApprovalRequest, request_id)
@@ -508,7 +541,8 @@ class EventService:
             request = await session.get(ApprovalRequest, request_id)
             request.state, request.decided_by, request.reason, request.decided_at = state, moderator.id, reason, self.clock()
 
-    async def _publish(self, event: Event) -> None:
+    async def _publish(self, event: Event, by: int | None = None) -> None:
+        """``by``: who pressed *Publish* (None when a moderator's approval published it)."""
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event.id)
             row.status = "published"
@@ -520,7 +554,7 @@ class EventService:
             await self.scheduler.schedule(self.GUEST_END, row.start_at + timedelta(
                 minutes=row.duration_minutes + self.store.current.times.buffer_minutes),
                 key=f"{self.GUEST_END}:{row.id}", event_id=row.id)
-        await self.notifier.published(event.id)
+        await self.notifier.published(event.id, by)
 
     # ---------------------------------------------------------------- reservations
 
@@ -548,13 +582,14 @@ class EventService:
             await self._book(event)
 
     async def _move(self, event: Event, times: Times) -> None:
-        """Approved new times: move the reservation first; if the supervisor refuses, nothing changes."""
+        """Approved new times: move the reservation first; if the supervisor refuses a booked one, nothing changes.
+        One that isn't booked (failed, retrying) is asked for at the new times, so a later retry uses them."""
         moved = Event(**{c: getattr(event, c) for c in ("id", "kind", "title", "host_group_id")},
                       assembly_at=times.assembly_at, start_at=times.start_at, duration_minutes=times.duration_minutes)
         booked = await self.reservations.get(event.id)
-        if booked is not None and booked.state == "booked":
+        if booked is not None and booked.state not in ("cancelled", "cancelling", "ended"):
             row = await self.reservations.book(event.id, await self._window(moved))
-            if row.state != "booked":
+            if booked.state == "booked" and row.state != "booked":
                 await self.reservations.book(event.id, await self._window(event))  # back to the old times
                 raise EventError(Problem.NO_RESERVATION)
         async with self.db.session() as session, session.begin():
@@ -582,8 +617,7 @@ class EventService:
         await self.reservations.cancel(event_id)
         for kind in (self.SIGNUP_OPEN, self.STALE_PING, self.STALE_CANCEL, self.GUEST_END):
             await self.scheduler.cancel(f"{kind}:{event_id}")
-        for minutes in self.store.current.times.reminder_minutes:
-            await self.scheduler.cancel(f"{self.REMINDER}:{event_id}:{minutes}")
+        await self.scheduler.cancel_all(self.REMINDER, event_id)  # (whatever the offsets were when they were made)
         if was in ("draft", "pending"):
             await self.notifier.deleted(event_id)
         else:
@@ -622,8 +656,11 @@ class EventService:
             await self.scheduler.cancel(f"{self.SIGNUP_OPEN}:{event.id}")
 
     async def _schedule_reminders(self, event: Event) -> None:
-        now = self.clock()
-        for minutes in self.store.current.times.reminder_minutes:
+        """At the configured offsets; one made for an offset /reload has since removed is dropped."""
+        now, offsets = self.clock(), self.store.current.times.reminder_minutes
+        await self.scheduler.cancel_all(self.REMINDER, event.id,
+                                        keep={f"{self.REMINDER}:{event.id}:{m}" for m in offsets})
+        for minutes in offsets:
             due = event.assembly_at - timedelta(minutes=minutes)
             key = f"{self.REMINDER}:{event.id}:{minutes}"
             if due > now:
@@ -638,6 +675,7 @@ class EventService:
         elif event.status == "published":
             await self._schedule_signup_open(event)
             await self._schedule_reminders(event)
+            await self.notifier.moved(event.id)  # the channel's own actions: closing sign-up, the archive
 
     async def _live(self, action: Action, *statuses: str) -> Event | None:
         async with self.db.session() as session:
