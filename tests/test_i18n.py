@@ -62,6 +62,34 @@ def test_every_text_has_a_polish_translation_with_the_same_fields():
     assert problems == []
 
 
+async def test_every_translated_command_name_is_one_discord_accepts():
+    """A name shares its key with texts of the same words (the ``on`` parameter and the text "on" -> "wł."); one
+    invalid name makes Discord refuse the whole sync, so the payloads are built here as ``tree.sync`` does."""
+    from app.admin.cog import AdminCog
+    from app.archive.cog import ArchiveCog
+    from app.attendance.cog import AttendanceCog
+    from app.events.cog import EventCog
+    from app.i18n import Translator
+    from app.links.cog import LinkCog
+    from app.privacy.cog import PrivacyCog
+    from app.servers.cog import ServerCog
+
+    tree = discord.app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
+    problems = []
+
+    def names(payload: dict, where: str) -> None:
+        for locale, name in (payload.get("name_localizations") or {}).items():
+            if not (COMMAND_NAME.match(name) and name == name.lower()):
+                problems.append(f"{where} {payload['name']}: {locale} {name!r}")
+        for option in payload.get("options", []):
+            names(option, f"{where} {payload['name']}")
+
+    for cog in (AdminCog, PrivacyCog, ServerCog, EventCog, LinkCog, AttendanceCog, ArchiveCog):
+        for command in cog.__cog_app_commands__:
+            names(await command.get_translated_payload(tree, Translator()), cog.__name__)
+    assert problems == []
+
+
 def test_no_unused_translations():
     used = {key[0] if isinstance(key, tuple) else key for _, key, _ in texts()[0]}
     assert sorted(set(catalog("pl")) - used) == []

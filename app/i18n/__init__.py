@@ -8,6 +8,7 @@ to ``t()`` has a translation with the same fields, so ``t()`` is only ever calle
 from __future__ import annotations
 
 import json
+import re
 from functools import cache
 from pathlib import Path
 from string import Formatter
@@ -61,11 +62,29 @@ def placeholders(text: str) -> set[str]:
 
 
 class Translator(app_commands.Translator):
-    """Slash command names, descriptions and choices from the same catalog."""
+    """Slash command names, descriptions and choices from the same catalog.
+
+    A name (command, group, parameter) shares its key with any text of the same words, such as the ``on``
+    parameter and the text "on" ("wł."), so a translation that isn't a valid name is left out: Discord refuses
+    the whole sync over one."""
 
     async def translate(self, string: app_commands.locale_str, locale: discord.Locale,
                         context: app_commands.TranslationContextTypes) -> str | None:
         if language_of(locale) == "en":
             return None
         found = catalog(language_of(locale)).get(string.message)
-        return found if isinstance(found, str) else None
+        if not isinstance(found, str):
+            return None
+        if context.location in NAMES and not valid_name(found):
+            return None
+        return found
+
+
+NAMES = {app_commands.TranslationContextLocation.command_name, app_commands.TranslationContextLocation.group_name,
+         app_commands.TranslationContextLocation.parameter_name}
+# Discord's rule for command and option names, lower case only.
+_NAME = re.compile(r"^[-_\w]{1,32}$")
+
+
+def valid_name(text: str) -> bool:
+    return bool(_NAME.match(text)) and text == text.lower()
