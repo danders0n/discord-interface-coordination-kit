@@ -7,7 +7,10 @@
   in between clears it. :meth:`LinkService.reconcile` sets the times from the server at start-up.
 - Members with a rank and no link are reminded every N days (``link_reminder``), at most so many per run; the
   first rollout counts as a reminder for everyone then, so the DMs start N days later. A member's first sign-up
-  without a link asks once.
+  without a link asks once. Staff can turn a member's reminders off (``muted``: no DMs, pings or sign-up ask)
+  until they link.
+- Staff can give a link its own squad.xml remark (:meth:`LinkService.set_remark`), before the remark roles or
+  instead of them; it stays through a relink and goes with the link.
 - :func:`import_old` reads the old bot's ``data/steam_ids.json`` (``python -m app import-old-links``).
 
 Refusals are :class:`LinkError` codes the Discord layer words."""
@@ -31,6 +34,7 @@ STEAM64 = re.compile(r"7656119\d{10}")
 PROFILE = re.compile(r"steamcommunity\.com/profiles/(\d+)", re.IGNORECASE)
 CUSTOM = re.compile(r"steamcommunity\.com/id/", re.IGNORECASE)
 MAX_NICK = 50
+MAX_REMARK = 128  # units.arma3.com's limit for <remark>
 ROLLOUT_KEY = "links_rollout"
 
 
@@ -38,6 +42,7 @@ class Problem(StrEnum):
     BAD_ID = "bad_id"
     CUSTOM_URL = "custom_url"  # steamcommunity.com/id/<name>: the bot can't turn it into an ID
     BAD_NICK = "bad_nick"
+    BAD_REMARK = "bad_remark"
     TAKEN = "taken"  # the Steam ID belongs to another member (``owner_id``)
 
 
@@ -63,6 +68,13 @@ def nick(text: str) -> str:
     cleaned = " ".join(text.split())
     if not 1 <= len(cleaned) <= MAX_NICK or any(ord(c) < 32 for c in cleaned):
         raise LinkError(Problem.BAD_NICK)
+    return cleaned
+
+
+def remark_text(text: str) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) > MAX_REMARK or any(ord(c) < 32 for c in cleaned):
+        raise LinkError(Problem.BAD_REMARK)
     return cleaned
 
 
@@ -127,6 +139,15 @@ class LinkService:
                 await session.delete(row)
         return row
 
+    async def set_remark(self, member_id: int, text: str, only: bool) -> SteamLink | None:
+        """Staff's own remark for the member's squad.xml entry (empty: none); None when they have no link."""
+        cleaned = remark_text(text)
+        async with self.db.session() as session, session.begin():
+            row = await session.get(SteamLink, member_id)
+            if row is not None:
+                row.remark, row.remark_only = cleaned, only and bool(cleaned)
+        return row
+
     # ---------------------------------------------------------------- ranks
 
     async def rank_changed(self, member_id: int, has_rank: bool) -> None:
@@ -162,13 +183,16 @@ class LinkService:
     # ---------------------------------------------------------------- reminders
 
     async def due_reminders(self, ranked: Iterable[int], every: timedelta, limit: int) -> list[int]:
-        """Of the members with a rank, those without a link not reminded for ``every``: never reminded first."""
+        """Of the members with a rank, those without a link not reminded for ``every``, reminders on: never reminded
+        first."""
         ranked = set(ranked)
         cutoff = self.clock() - every
         async with self.db.session() as session:
             linked = set((await session.execute(select(SteamLink.member_id))).scalars())
-            last = {row.member_id: row.last_at for row in (await session.execute(select(LinkReminder))).scalars()}
-        due = [m for m in ranked - linked if last.get(m) is None or last[m] <= cutoff]
+            rows = list((await session.execute(select(LinkReminder))).scalars())
+        last = {row.member_id: row.last_at for row in rows}
+        muted = {row.member_id for row in rows if row.muted}
+        due = [m for m in ranked - linked - muted if last.get(m) is None or last[m] <= cutoff]
         due.sort(key=lambda m: (last.get(m) is not None, last.get(m) or self.clock(), m))
         return due[:limit]
 
@@ -191,10 +215,28 @@ class LinkService:
             if row is None:
                 session.add(LinkReminder(member_id=member_id, asked_at_signup=True))
                 return True
-            if row.asked_at_signup:
+            if row.asked_at_signup or row.muted:
                 return False
             row.asked_at_signup = True
             return True
+
+    async def mute(self, member_id: int, muted: bool) -> None:
+        """Turn the member's reminders off (or on again) until they link."""
+        async with self.db.session() as session, session.begin():
+            row = await session.get(LinkReminder, member_id)
+            if row is None:
+                session.add(LinkReminder(member_id=member_id, muted=muted))
+            else:
+                row.muted = muted
+
+    async def muted(self, member_id: int) -> bool:
+        async with self.db.session() as session:
+            row = await session.get(LinkReminder, member_id)
+        return row is not None and row.muted
+
+    async def reminders(self) -> dict[int, LinkReminder]:
+        async with self.db.session() as session:
+            return {row.member_id: row for row in (await session.execute(select(LinkReminder))).scalars()}
 
     async def rollout_done(self) -> bool:
         return await state.get(self.db, ROLLOUT_KEY) is not None

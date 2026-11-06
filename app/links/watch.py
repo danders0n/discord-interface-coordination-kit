@@ -2,8 +2,8 @@
 
 - A member who gains or loses a rank or remark role, leaves, or renames their Discord account: squad.xml is
   written again (debounced); a rank lost or regained moves the link's ``rank_lost_at``.
-- A member who gains a rank without a link gets a DM with *Link now* at once; if their DMs are closed, a ping in
-  the reminder channel instead.
+- A member who gains a rank without a link gets a DM with *Link now* at once (unless staff turned their reminders
+  off); if their DMs are closed, a ping in the reminder channel instead. ``/links remind`` sends the same.
 - An hourly scheduled action reminds the members with a rank and no link every N days, at most ``dms_per_hour``
   at a time, and deletes the links of members N days without a rank (told to the staff log).
 - The first run posts one announcement with *Link now* in the reminder channel; it counts as everyone's first
@@ -81,7 +81,8 @@ class LinkWatch:
         had, has = not before.isdisjoint(ids.rank), not after.isdisjoint(ids.rank)
         if had != has:
             await self.s.links.rank_changed(member.id, has)
-            if has and not getattr(member, "bot", False) and await self.s.links.get(member.id) is None:
+            if has and not getattr(member, "bot", False) and await self.s.links.get(member.id) is None \
+                    and not await self.s.links.muted(member.id):
                 await self.remind(member)
                 await self.s.links.reminded([member.id])
         if not (before ^ after).isdisjoint(ids.rank | set(ids.remark)):
@@ -102,23 +103,24 @@ class LinkWatch:
         guild, channel_id = self.guild(), self.s.ids.link_reminder
         return guild.get_channel(channel_id) if guild is not None and channel_id else None
 
-    async def remind(self, member: Any) -> bool:
-        """A DM with *Link now*; with DMs closed, a ping in the reminder channel. True when either went out."""
+    async def remind(self, member: Any) -> str | None:
+        """A DM with *Link now*; with DMs closed, a ping in the reminder channel. ``"dm"`` or ``"channel"``: how it
+        went out; None: it didn't."""
         text = t("You have a rank in {group} but no Steam link yet. Link your Steam account so you are in our "
                  "squad.xml and attendance counts you: press Link now, or use /link.", self.language,
                  group=self.s.settings.group.acronym)
         try:
             await member.send(text, view=link_view(self.language))
-            return True
+            return "dm"
         except discord.HTTPException:
             pass
         channel = self._reminder_channel()
         if channel is None:
             log.info("Could not remind %s to link Steam: DMs closed and no reminder channel", member.id)
-            return False
+            return None
         await channel.send(f"{member.mention} {text}", view=link_view(self.language),
                            allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False))
-        return True
+        return "channel"
 
     async def _hourly(self, action: Action, now: datetime) -> datetime:
         guild, settings = self.guild(), self.s.settings

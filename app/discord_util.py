@@ -40,14 +40,44 @@ def require(perm: Perm):
     return app_commands.check(predicate)
 
 
+def fleeting(interaction: discord.Interaction) -> float | None:
+    """How long a private answer stays (``times.reply_seconds``); None: it stays."""
+    settings = getattr(services(interaction), "settings", None)
+    return (settings.times.reply_seconds or None) if settings is not None else None
+
+
 async def reply(interaction: discord.Interaction, content: str | None = None, **kwargs: Any) -> None:
-    """Answer privately, whether or not the interaction was answered already."""
+    """Answer privately, whether or not the interaction was answered already. A plain text answer (a confirmation,
+    a refusal) disappears after :func:`fleeting`; one with buttons, an embed or a file stays to be used or read."""
     kwargs.setdefault("ephemeral", True)
     kwargs.setdefault("allowed_mentions", NO_MENTIONS)
+    plain = kwargs["ephemeral"] and not {"view", "embed", "embeds", "file", "files"} & set(kwargs)
+    seconds = fleeting(interaction) if plain else None
     if interaction.response.is_done():
-        await interaction.followup.send(content, **kwargs)
+        message = await interaction.followup.send(content, wait=True, **kwargs)
+        if seconds and message is not None:
+            await message.delete(delay=seconds)
     else:
-        await interaction.response.send_message(content, **kwargs)
+        await interaction.response.send_message(content, delete_after=seconds, **kwargs)
+
+
+async def thinking(interaction: discord.Interaction) -> None:
+    """Answer "thinking..." at once, unless answered already: Discord drops an interaction not answered within 3
+    seconds, and work that touches channels or the supervisor can take longer. :func:`reply` sends the answer."""
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+
+async def finish(interaction: discord.Interaction, content: str) -> None:
+    """Replace the message whose button was pressed with a last word, which then disappears like a reply. After
+    ``interaction.response.defer()`` (a deferred update, not :func:`thinking`) it edits that message as well."""
+    seconds = fleeting(interaction)
+    if not interaction.response.is_done():
+        await interaction.response.edit_message(content=content, view=None, delete_after=seconds)
+        return
+    message = await interaction.edit_original_response(content=content, view=None)
+    if seconds and message is not None:
+        await message.delete(delay=seconds)
 
 
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:

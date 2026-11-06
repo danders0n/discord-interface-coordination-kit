@@ -36,7 +36,7 @@ from app.links.service import LinkError, LinkService
 from app.reservations.service import ReservationService
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
-from app.signup.service import Member
+from app.signup.service import COMING, Member
 from app.supervisor_client import SupervisorError
 
 log = logging.getLogger(__name__)
@@ -165,7 +165,7 @@ class AttendanceService:
 
     async def _holders(self, event: Event) -> list[int]:
         async with self.db.session() as session:
-            if event.kind == "zeus":
+            if event.kind in COMING:
                 return list((await session.execute(select(Signup.member_id).where(
                     Signup.event_id == event.id, Signup.status == "coming").order_by(Signup.id))).scalars())
             return list((await session.execute(select(Slot.holder_id).where(
@@ -229,7 +229,7 @@ class AttendanceService:
             await self._trigger(event.id, "fallback", fallback, fallback + settle, end_reservation=False)
             return None
         server = self.settings.supervisor.event_server
-        if event.kind != "zeus" and not event.dont_end_automatically and server and now >= event.start_at:
+        if event.kind not in COMING and not event.dont_end_automatically and server and now >= event.start_at:
             earliest = event.start_at + timedelta(minutes=event.duration_minutes * a.finish_share_percent / 100)
             try:
                 stats = await self.reader.read(server, await self._window_start(event), now, players=False)

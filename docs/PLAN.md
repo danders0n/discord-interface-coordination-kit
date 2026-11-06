@@ -7,7 +7,10 @@ squad.xml), 6a (the attendance trigger, reading the plays, the report, correctio
 `/attendance`, `/profile`, `/mission-maker`, `/group`), 6c (`/privacy-erase`), phase 7 (the event profile) and
 phase 8 (the long-term archive) the same day: every phase is built. Written 2026-10-14 from design interviews with the owner, and revised the same
 day after a review of the plan's gaps. Revised on 2026-10-31: the supervisor facts were checked again, and the
-plan now serves one group with four event kinds (Zeus among them) and approval by the moderators.
+plan now serves one group with four event kinds (Zeus among them) and approval by the moderators. Revised on
+2026-11-01 after the first review: a fifth kind, *Training*, with Zeus's rules, and the mission type dropped
+(the climate is what classifies a mission); the briefing and the ORBAT became plain text, the discussion link
+the channel's last message, the kinds' and the thread's names configurable, and short private replies fleeting.
 
 ## Goal
 
@@ -19,7 +22,7 @@ server the bot reserves the host on **arma-server-supervisor**, and afterwards r
 the supervisor's player statistics. It also keeps the group's squad.xml in step with Discord roles.
 
 **Done when:** an IBC mission maker presses *Create event* in the header channel and fills in the wizard: kind
-*Internal*, type Coop, climate Cold War, 18.10, assembly ("zbiórka") 19:00, start 19:30, duration 3 h. Then:
+*Internal*, climate Cold War, 18.10, assembly ("zbiórka") 19:00, start 19:30, duration 3 h. Then:
 
 - a hidden draft channel `18-10-ibc` appears in the events category. The supervisor has a reservation for the
   default event server from 19:00 − lead time to 19:30 + 3 h + buffer;
@@ -61,9 +64,10 @@ supervisor):
 
 ### Event kinds
 
-Decided 2026-10-31. Every event is one of four kinds, picked first in the wizard:
+Decided 2026-10-31. Every event is one of five kinds, picked first in the wizard. *Training* (added 2026-11-01)
+follows Zeus's rules in every row and differs only in its name:
 
-| | **Internal** | **Guest** | **Hosted** | **Zeus** |
+| | **Internal** | **Guest** | **Hosted** | **Zeus** and **Training** |
 |---|---|---|---|---|
 | Who organises | We do | Another group | We do, and invite other groups | We do |
 | Whose server | Ours | The host group's | Ours | Ours |
@@ -83,11 +87,11 @@ name or acronym; a group is never deleted, because events refer to it.
 | Topic | Decision |
 |---|---|
 | Where | A new text channel per event. Drafts and pending events live in a hidden **drafts category**; publishing moves the channel to the **events category** (both in config). Each category holds at most 50 channels: at 45 in either the staff log is warned, and at 50 the wizard refuses with an explanation (decided 2026-10-31). |
-| Name | `dd-mm-xxx`: the day and month of the event date, then the acronym of the group whose server it is: ours for internal, hosted and Zeus events (`18-10-ibc`), the host group's for a guest event (`18-10-abc`). Same-day events with the same host get the same name; the channel topic tells them apart (title, kind, times). |
+| Name | `dd-mm-xxx`: the day and month of the event date, then the acronym of the group whose server it is: ours for internal, hosted, Zeus and training events (`18-10-ibc`), the host group's for a guest event (`18-10-abc`). Same-day events with the same host get the same name; the channel topic tells them apart (title, kind, times). |
 | Members' rights | **Read-only** for members: only the bot and the organisers post there, so the event messages stay together at the top. |
-| Messages, in order | 1. **Info embed**: title, kind, mission type, climate, the host group (a guest event) or the invited groups (a hosted event), author, date, assembly time, start time, duration, the modset summary, sign-up state, and the *Organiser panel* button. 2. **Briefing** (text and an optional image). 3. **Preset**: the launcher `.html` posted by the bot. 4. **ORBAT**: one embed per squad with the holders, then the Maybe / Can't come / reserve lists. It carries the sign-up buttons (*Sign up*, *Reserve*, *Maybe*, *Can't come*, *Leave*). If it no longer fits in one message (10 embeds, 6000 characters), it continues in **"ORBAT (cont.)" messages** after it. A Zeus event has the **sign-up list** here instead (see *Zeus sign-up*). |
+| Messages, in order | 1. **Info embed**: title, kind, climate, the host group (a guest event) or the invited groups (a hosted event), author, date, assembly time, start time, duration, the modset summary, sign-up state, and the *Organiser panel* button. 2. **Briefing**: plain text (decided 2026-11-01), with the optional image attached; past Discord's 2000 characters it continues in further messages. 3. **Preset**: the launcher `.html` posted by the bot. 4. **ORBAT**: plain text (decided 2026-11-01), laid out like the group's old bot: `## Sign-up: title`, a line with the start, the taken slots and the closed ones (a lock), the sign-up state with a coloured dot (after publishing, from a time, open until the start, closed); then each squad's name in bold with its slots numbered from 1, ``1.` Name (@Role) — holder`, a free or offered slot in words, a closed one with a lock; then Maybe / Can't come / reserve, and while sign-up is open the hint "pick your squad below, then the slot, and press Sign up". A Zeus or training event has the same header and lists *Coming* and *Not coming*, one member per line. Saving an ORBAT answers with its squads and their slot counts, so a squad line missing its `#` shows at once; a slot repeats only as `Name xN`. Its last message carries the **squad list** (the squads with a free slot and how many) and the buttons *Reserve*, *Maybe*, *Can't come*, *Leave*. Past 2000 characters it continues in further messages after it, cut between squads. 5. The **attendance report** (an embed), once there is one. 6. **Discussion**: a link to the thread, always last. A Zeus or training event has the **sign-up list** here instead (see *Zeus sign-up*). |
 | Order kept | The bot stores every message id and edits the messages in place. The ORBAT is **last** (decided 2026-10-31), so a new continuation message is simply posted at the end and nothing is deleted; a continuation no longer needed is deleted from the end. A preset added later than the ORBAT is the one exception: the preset message is posted then, and the ORBAT messages are re-posted after it. |
-| Discussion | A **public thread** in the channel ("Dyskusja"), created **with the channel** (a draft's thread is as hidden as its channel). **Every ping goes to the thread** (decided 2026-10-31): sign-up opening, reminders, offers when DMs are closed, approval results, stale-draft warnings, cancelling. The main channel holds only the bot's own messages, so their order never breaks; the attendance report is the one message added there later, after the ORBAT has stopped changing. |
+| Discussion | A **public thread** in the channel (named in config; default "Dyskusja"), created **at publishing**, after the channel's messages (decided 2026-11-02), so Discord's native "started a thread" card (name, message count, last reply) is the **last** message and stands in for the link. A draft has no thread: its pings (stale draft, rejection, a failed server profile) go to the members by DM. Discord cannot re-post the card, so when a later message (a late preset, an ORBAT continuation, the report) must go after it, the card is deleted (the thread stays) and the bot's own `💬 <#thread>` link is posted last, as before. Spacing: an empty first line (a zero-width space) opens the briefing, ORBAT / sign-up list and report messages. **Every ping goes to the thread** (decided 2026-10-31): sign-up opening, reminders, offers when DMs are closed, approval results, stale-draft warnings, cancelling. The main channel holds only the bot's own messages, so their order never breaks; the attendance report is the one message added there later, after the ORBAT has stopped changing. |
 | Native Discord Scheduled Event | **None.** |
 | Archive | `archive_hours` (config; 48) after the attendance report (see *Supervisor: attendance*), and at the latest that long after the end (start + duration); the channel moves to the archive category of the event date's **quarter**, e.g. `Archiwum Q1 2026` (the name pattern is in config). The bot creates the category when missing. The channel and its thread become read-only and locked. If a quarter reaches Discord's 50-channel limit, an overflow category `Archiwum Q1 2026 (2)` is created (assumed). |
 | Retention | Discord allows 500 channels per server, categories included, so only the **current quarter and the 3 before it** stay as channels (the number is in config). When a new quarter begins, the oldest kept quarter is moved into the database (see *Long-term archive*), its channels are deleted, and so are its now empty categories. |
@@ -114,11 +118,11 @@ Members (both are switched on in the Discord developer portal).
 | Entry point | A **header channel** in the events category, with instructions and a persistent *Create event* button (it keeps working across bot restarts). |
 | Calendar | Decided 2026-10-31. The header message also lists the **published events of the next N days** (config; assumed 14): date as a Discord timestamp, kind, title, taken / total slots (in a Zeus event, *Coming* and the limit), and a link to the channel. It is edited whenever one of them changes, batched like the other edits. `/events` shows the same list privately, plus the member's own sign-ups. |
 | Flow | A short step-by-step **ephemeral wizard** (selects, buttons, modals). It creates a **draft**; everything else is filled in the **organiser panel**. The wizard's answers live in memory until its last step creates the draft: after a restart its buttons say the session expired and to start again (decided 2026-10-31). The panel's buttons carry the event id in `custom_id`, so they keep working. |
-| Wizard fields | Kind, then the host group (guest) or the invited groups (hosted, optional at this point), title, mission type, climate, date, assembly time, start time, duration. |
+| Wizard fields | Kind, then the host group (guest) or the invited groups (hosted, optional at this point), title, climate, date, assembly time, start time, duration. |
 | Who | Any member with one of the group's **member roles** (config, a list, e.g. *Klanowicz*); guest events only the mission maker role and above. Whether the event then needs approval depends on the creator (see *Approval*). |
-| Kind | *Internal*, *Guest*, *Hosted* or *Zeus* (see *Event kinds*). |
+| Kind | *Internal*, *Guest*, *Hosted*, *Zeus* or *Training* (see *Event kinds*). In Polish: *Wewnętrzny*, *Zewnętrzny organizator*, *Zewnętrzni goście*, *Zeus*, *Trening*. |
 | Other groups | Picked from the known groups, or added on the spot (see *Event kinds*). |
-| Mission type | Picked from a **fixed list in config**. For display only; it changes no rules. |
+| Mission type | Dropped 2026-11-01: the climate is what classifies a mission. |
 | Climate | Picked from the **climate roles** in config: Discord interest roles such as @WW2, @Cold War and @Modern, which members assign themselves. Shown in the info embed, and mentioned in the announcement and the sign-up-open ping. |
 | Author | The mission maker. It defaults to the creator and can be changed in the panel to a member with the **mission maker role** (config). |
 | Date | `dd.mm` means the **next** such date: this year if it hasn't passed, otherwise next year. `dd.mm.yyyy` is accepted too. A date more than **N days** ahead (config; e.g. 120) is refused as a likely typo. |
@@ -156,7 +160,7 @@ Decided 2026-10-31.
 | Topic | Decision |
 |---|---|
 | Where | The *Organiser panel* button on the info embed. Only the creator, co-organisers and *manage any event* roles can open it; it opens as an **ephemeral** message with a button per section. |
-| Details | Title, kind (draft only), host group or invited groups, mission type, climate, author, date, assembly, start, duration (the same validation as the wizard). The date and times are **locked from the start of the reservation's quiet period** (reservation start − 30 min), because the supervisor no longer moves an occurrence under way (decided 2026-10-31). A new date or host group **renames the channel**, and the reservation, reminders and sign-up start move with it. Discord allows only 2 channel renames per 10 minutes, so a rename may be queued while the messages update at once (assumed). |
+| Details | Title, kind (draft only), host group or invited groups, climate, author, date, assembly, start, duration (the same validation as the wizard). The date and times are **locked from the start of the reservation's quiet period** (reservation start − 30 min), because the supervisor no longer moves an occurrence under way (decided 2026-10-31). A new date or host group **renames the channel**, and the reservation, reminders and sign-up start move with it. Discord allows only 2 channel renames per 10 minutes, so a rename may be queued while the messages update at once (assumed). |
 | Briefing | A modal with **Situation**, **Mission** and **Notes** fields (Discord markdown, up to 4000 characters in total), shown in the briefing message. An optional banner or map image is uploaded with `/event image file:<png/jpg>`. The bot **stores the file on its disk** (a folder from config) and attaches it to the briefing message itself (`attachment://` in the embed), re-attaching it on every edit, so it never depends on the organiser's message or an expiring CDN link (decided 2026-10-31). |
 | ORBAT | Pick a **template**, or **paste text** (see *ORBAT format*); editing pre-fills the modal with the current ORBAT. Pasted text can be saved as a new template. Also here: lock, assign and remove slots, and see slots flagged ⚠ (holder lost the required role). |
 | Modset | The panel explains the upload: `/event preset file:<.html>` in the event channel, with an Arma 3 Launcher preset; running it again replaces the preset. The bot parses it, reporting mod names, Workshop ids and Creator DLC; the parser is a port of the supervisor's `app/steam/presets.py`, including its Creator DLC table. A file without mods or DLC is refused. The info embed shows a summary (the preset name, N mods, the DLC required), and the preset message carries the `.html`. The server's mods stay managed in the supervisor. |
@@ -182,7 +186,7 @@ Decided 2026-10-31.
 | Creator DLC | Decided 2026-10-31. Members' DLC are **Discord roles**; `.env` maps each Creator DLC of the preset parser's table to its role. When the event's preset needs a DLC a member's roles don't show, taking a slot (or *Coming*) still works, but the reply warns them privately, and the panel lists the holders without it. |
 | Overlapping events | Taking a slot is **refused** if the member holds a slot in another event whose window (assembly → start + duration) overlaps. The reply links the other event. |
 | Full | When every slot is taken, *Reserve* puts the member on the reserve list. |
-| Picking | (a) The *Sign up* button opens an ephemeral two-step select: squad, then free slot. This works around Discord's limit of 25 options per select. (b) `/slot take` with autocomplete. |
+| Picking | (a) Decided 2026-11-01: the squad list under the ORBAT opens a private picker on the squad picked: the squad (to change it), its free slots the member's roles allow, and *Sign up* to confirm, which takes the slot or moves the member there. The slots are private because a list under a shared message is the same for everyone. More than 25 squads go into further lists (up to four). (b) `/slot take` with autocomplete. |
 | Leaving | Allowed until the **start time**; sign-up also closes then. A freed slot is **offered** to the first member on the reserve list who meets its role rule: they get a **DM** with a *Take it* button, or, with DMs closed, a ping in the event's thread (decided 2026-10-31). If they don't answer within the offer timeout (config; assumed 30 min), the offer goes to the next one. Near the start (decided 2026-10-31): an offer lasts at most until the start; in the last hour before the assembly a freed slot is offered to the **whole** reserve list at once (one ping in the thread), and the first to confirm takes it; after the start there are no offers. |
 | Holder left the server | The slot is freed and offered to the reserve list. |
 | Holder lost the required role | The slot is **kept** but flagged ⚠ in the panel; the organisers decide. |
@@ -355,7 +359,8 @@ attendance.
 | Changes | Members can relink themselves, and each change is posted to the staff log. Roles with **manage links** can set, change or remove anyone's link and nick with `/links set @member` / `/links remove @member`. |
 | Uniqueness | One Steam ID belongs to one member. A duplicate is refused, and staff are told in the staff log. |
 | Lost rank or left | The member drops out of squad.xml at once. After **N days** without a rank role or off the server (config; e.g. 90), the link itself is deleted and the staff log is told; the attendance history keeps the Steam ID, so it stays readable (decided 2026-10-31). Regaining a rank within N days changes nothing. |
-| Reminder | Applies to a member with a membership rank role and no link. They get a **DM** with a *Link now* button when they gain the rank, then again every **N days** (config) until they link. If their DMs are closed, they are pinged in a **reminder channel** (config) instead. |
+| Reminder | Applies to a member with a membership rank role and no link. They get a **DM** with a *Link now* button when they gain the rank, then again every **N days** (config) until they link. If their DMs are closed, they are pinged in a **reminder channel** (config) instead. Decided 2026-11-01: *manage links* roles send one at once with `/links remind @member`, and turn a member's automatic reminders off with `/links reminders @member on:False` (no DMs, pings or the first sign-up's question) until they link, as linking deletes the reminder row. |
+| Management | Decided 2026-11-01, for *manage links* roles, in the `/links` group: `/links status` (the folder, the address, how many are in the file, when it was written, whether it holds what would be written now or a write is pending, which of `squad.dtd`, `squad.xsl` and the logo are missing next to it, the last failed write), with the file attached and a *Write now* button (`squadxml:write`); `/links list` (in squad.xml; a rank and no link, with the reminders so far; linked without a rank, with the day the link goes; reminders off; own remarks), as a file too when it doesn't fit the embed; `/links remark @member [text] [only]` (see `<remark>`). Header fields stay in `.env`. |
 | First rollout | On the first run the bot posts **one announcement** in the reminder channel with a *Link now* button. Individual DMs start N days later for members still missing a link, **throttled** (assumed: at most 20 per hour). |
 
 squad.xml:
@@ -367,7 +372,7 @@ squad.xml:
 | `<squad nick>`, `<name>`, `<email>`, `<web>`, `<picture>`, `<title>` | From config. `picture` is the file name of the logo `.paa` that IIS serves. |
 | `<member id>` | Steam64 ID. |
 | `<member nick>` | The nick typed at `/link`. |
-| `<remark>` | The configured **remark roles** the member has (e.g. Pilot, Medic), all of them, joined with `, ` in config order, cut to units.arma3.com's 128 characters. Empty if none. The rank itself is not in the remark. |
+| `<remark>` | The configured **remark roles** the member has (e.g. Pilot, Medic), all of them, joined with `, ` in config order, cut to units.arma3.com's 128 characters. Empty if none. The rank itself is not in the remark. Staff's **own remark** of the link (`/links remark`, up to 128 characters; decided 2026-11-01) goes before the roles, or replaces them with `only`; it stays through a relink and goes with the link. |
 | `<icq>` | The member's Discord **username**. |
 | `<member><name>`, `<email>` | The nick and `N/A`, as in the old bot's file, so the switch-over doesn't change it (decided 2026-11-01). |
 | Order | Members sorted by nick (assumed). |
@@ -380,7 +385,9 @@ Role changes and departures arrive as member events, so the bot needs the privil
 ### Language
 
 Polish and English. Private replies (the wizard, the panel, the picker, errors) follow each member's **Discord
-locale**. Public messages (the event messages, announcements, pings, reports) use the **one language set in
+locale**. A plain text reply (a confirmation, a refusal) disappears after `reply_seconds` (config; 60; decided
+2026-11-01); replies with buttons, an embed or a file stay. The kinds' names can be set in config, one name for
+every language. Public messages (the event messages, announcements, pings, reports) use the **one language set in
 config**. Slash command names and descriptions are localized through `app_commands.Translator`.
 
 ### Configuration and deployment
@@ -388,7 +395,7 @@ config**. Slash command names and descriptions are localized through `app_comman
 | Topic | Decision |
 |---|---|
 | Config | **Everything in `.env`** (decided 2026-10-31), read with pydantic-settings and validated at startup, following the supervisor's convention: one prefix (assumed `BOT_`), `__` for nested fields, lists as JSON or separated by `;`, real environment variables override the file. Channels and roles are given by Discord **id or name** (decided 2026-10-31): names are matched on the server, ignoring case, at start-up and on `/reload`; a name that matches nothing or several is reported, and an id never breaks on a rename (Developer Mode → *Copy ID*). `check-config` also lists unknown `BOT_` variables (typos, renamed settings). A `.env.example` lists every setting with its default and a comment. Its contents are listed under *Config contents*. |
-| `/reload` | Only the **bot admin** role. The bot reads `.env` again and **validates it first**: on error nothing changes, and the errors are shown. An item removed from the config that existing events still use (a mission type, climate role, or role) stays readable on those events, because events store it **by value**, but it can't be picked for new ones. The reply lists the affected events. The token and the supervisor URL need a restart. |
+| `/reload` | Only the **bot admin** role. The bot reads `.env` again and **validates it first**: on error nothing changes, and the errors are shown. An item removed from the config that existing events still use (a climate role, or role) stays readable on those events, because events store it **by value**, but it can't be picked for new ones. The reply lists the affected events. The token and the supervisor URL need a restart. |
 | Secrets | The Discord bot token and the supervisor API token, in the same `.env`. |
 | Check at startup | The bot checks that every configured channel and role exists, and that it has the Discord permissions it needs (View Channels, Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage Channels, Manage Roles for channel overwrites, and *Mention @everyone, @here and All Roles* unless the announcement and climate roles are mentionable). What is missing is logged and posted to the staff log (assumed). |
 | Command visibility | Decided 2026-10-31. The staff commands (`/reload`, `/server`, `/links set` / `remove`, `/attendance-report`, `/privacy-erase`) carry `default_permissions` (Manage Server), so only admins see them at first; the server owner shows them to the roles from `.env` in *Server Settings → Integrations* (a setup step in the README). Members' commands are visible to all. The bot checks its own permissions on every use either way. |
@@ -440,7 +447,7 @@ Config contents (all in `.env`):
   staff log and moderation threads,
   and the archive category name pattern;
 - the sign-up roles;
-- our group (acronym, full name), mission types, climate roles (other groups live in the database);
+- our group (acronym, full name), climate roles (other groups live in the database);
 - the role → permission mapping: approve events, manage any event, server control, server message, server
   override, manage links, bot admin; plus the member role, the mission maker role and the announcement role;
 - times: reminder offsets, stale-draft hours (N, M), default duration, lead time, buffer, archive delay, offer
@@ -471,8 +478,8 @@ Config contents (all in `.env`):
 | `signup` | Event, member, status (`maybe` / `cant` / `reserve`, with the reserve position; `coming` in a Zeus event) |
 | `offer` | Built in phase 3. A freed slot offered to one member, or (no member) to the whole reserve list; state (`open` / `taken` / `declined` / `expired` / `withdrawn`) and expiry. A member gets one offer per freed slot |
 | `orbat_template` | Name, owner, text |
-| `steam_link` | Built in phase 5. Member, Steam64 ID (unique), nick, linked by, times; since when the member has had no rank (for the deletion after N days) |
-| `link_reminder` | Built in phase 5. A member without a link: when last reminded, how often, and whether their first sign-up asked |
+| `steam_link` | Built in phase 5. Member, Steam64 ID (unique), nick, staff's own remark and `remark_only`, linked by, times; since when the member has had no rank (for the deletion after N days) |
+| `link_reminder` | Built in phase 5. A member without a link: when last reminded, how often, whether their first sign-up asked, and `muted` (staff turned the reminders off) |
 | `attendance` | Built in phase 6a. Event, member or Steam ID and in-game name, seconds, whether a slot holder, status (`to_confirm` / `attended` / `no_show` / `excused` / `not_linked` / `walk_in`), a probable Steam ID for an unlinked holder, corrected by and when; the event keeps the state (`waiting` / `reported` / `unavailable`), the trigger, the window and the guest count of a hosted event |
 | `scheduled_action` | Kind, event, due time, done time, attempts, last error |
 | `mission_rating` | Built in phase 6b. Event, member, stars (1–5), comment, times (in a guest event, the rating of the cooperation with the host group) |
@@ -492,7 +499,7 @@ speaking the routes this plan uses), with no live Discord.
 3. **ORBAT and sign-up logic:** the format parser, templates, slots, the reserve list and offers, overlap
    checks, the DLC warning, locks and assignment, edits after sign-ups, the concurrency rules, and the Zeus sign-up with its
    limit, as services tested without Discord.
-4. **Events:** the header channel and wizard, the four kinds and the other groups, drafts, the organiser panel
+4. **Events:** the header channel and wizard, the kinds and the other groups, drafts, the organiser panel
    (details, briefing, image, preset, ORBAT, *How to join*), approval, publish, the channel messages and
    thread, the sign-up buttons and `/slot`, the calendar and `/events`, the announcement, cancel, stale drafts, reminders, and archiving per
    quarter. It uses phases 2 and 3 as they are, so nothing is stubbed.

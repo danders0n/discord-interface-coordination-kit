@@ -32,6 +32,7 @@ from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
 
 OFFER_KIND = "offer_expiry"
+COMING = ("zeus", "training")  # event kinds without an ORBAT: Coming / Not coming, a limit, no approval to publish
 ACTIVE = ("draft", "pending", "published")  # events whose sign-ups still change
 log = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ class SignupService:
         try:
             async with self.db.session() as session, session.begin():
                 event = await self._event(session, event_id)
-                if event.kind == "zeus":
+                if event.kind in COMING:
                     raise _Refused(Refusal.WRONG_KIND)
                 self._check_signup(event, member, now)
                 slot = await session.get(Slot, slot_id)
@@ -273,7 +274,7 @@ class SignupService:
         try:
             async with self.db.session() as session, session.begin():
                 event = await self._event(session, event_id)
-                if status == "maybe" and event.kind == "zeus":
+                if status == "maybe" and event.kind in COMING:
                     raise _Refused(Refusal.WRONG_KIND)
                 self._check_signup(event, member, self.clock(), answer=True)
                 entry = await self._signup(session, event_id, member.id)
@@ -297,7 +298,7 @@ class SignupService:
         try:
             async with self.db.session() as session, session.begin():
                 event = await self._event(session, event_id)
-                if event.kind == "zeus":
+                if event.kind in COMING:
                     raise _Refused(Refusal.WRONG_KIND)
                 self._check_signup(event, member, self.clock())
                 entry = await self._signup(session, event_id, member.id)
@@ -330,7 +331,7 @@ class SignupService:
         try:
             async with self.db.session() as session, session.begin():
                 event = await self._event(session, event_id)
-                if event.kind != "zeus":
+                if event.kind not in COMING:
                     raise _Refused(Refusal.WRONG_KIND)
                 self._check_signup(event, member, now)
                 entry = await self._signup(session, event_id, member.id)
@@ -491,7 +492,7 @@ class SignupService:
         loses its holder. Members whose slot is gone go to the top of the reserve list; they are returned."""
         async with self.db.session() as session, session.begin():
             event = await session.get(Event, event_id)
-            if event is None or event.kind == "zeus":
+            if event is None or event.kind in COMING:
                 raise ValueError("A Zeus event has no ORBAT")
             old: dict[tuple[str, str, int], tuple[int | None, bool]] = {}  # -> (holder, locked)
             count: dict[tuple[str, str], int] = {}

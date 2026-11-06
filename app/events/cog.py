@@ -175,7 +175,7 @@ class EventCog(commands.Cog):
         for event in coming:
             mine = t("your slot", locale) if event.id in mine_slots else names.get(mine_lists.get(event.id, ""), "")
             link = f" · <#{event.channel_id}>" if event.channel_id else ""
-            lines.append(f"{ts(event.assembly_at, 'f')} · {kind_label(event.kind, locale)} · **{event.title}**"
+            lines.append(f"{ts(event.assembly_at, 'f')} · {kind_label(event.kind, locale, self.services.settings.events.kind_names)} · **{event.title}**"
                          f"{link}" + (f" · __{mine}__" if mine else ""))
         embed = discord.Embed(title=t("The next {days} days", locale, days=days),
                               description="\n".join(lines)[:4096] if lines else t("Nothing planned yet.", locale))

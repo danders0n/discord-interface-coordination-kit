@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.discord_util import access, reply, require
+from app.discord_util import access, finish, reply, require
 from app.i18n import t
 from app.permissions import Perm
 from app.services import Services
@@ -165,7 +165,7 @@ class Confirm(_Owned):
 
     @discord.ui.button(style=discord.ButtonStyle.secondary)
     async def no(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
-        await interaction.response.edit_message(content=t("Nothing was done.", interaction.locale), view=None)
+        await finish(interaction, t("Nothing was done.", interaction.locale))
         self.stop()
 
 

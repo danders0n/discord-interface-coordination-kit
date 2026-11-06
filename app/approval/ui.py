@@ -1,6 +1,6 @@
 """Approval requests in the moderation thread (docs/PLAN.md, *Approval*).
 
-Each request is a message with the event, what is asked (publishing, the server for a Zeus event, or new times),
+Each request is a message with the event, what is asked (publishing, the server for a Zeus or training event, or new times),
 the creator, the reservation, and persistent *Approve* / *Reject* buttons. *Approve* is disabled while the request's
 reservation failed, and *Retry reservation* sits next to it for the moderator who resolved the clash; whenever the
 reservation changes the message is drawn again. A request for new times shows the old and the new ones. *Reject*
@@ -14,7 +14,7 @@ from typing import Any
 
 import discord
 
-from app.discord_util import reply, services
+from app.discord_util import reply, services, thinking
 from app.eventchannel.render import duration, kind_label, ts
 from app.events.service import EventError
 from app.events.words import event_problem
@@ -28,10 +28,10 @@ COLOURS = {"pending": 0xF1C40F, "approved": 0x2ECC71, "rejected": 0xE74C3C, "wit
 async def request_message(s: Any, request: Any) -> tuple[discord.Embed, discord.ui.View | None]:
     language = s.settings.language
     event = await s.events.get(request.event_id)
-    asked = {"publish": t("Publish the event", language), "server": t("Reserve the server for a Zeus event", language),
+    asked = {"publish": t("Publish the event", language), "server": t("Reserve the server for a Zeus or training event", language),
              "times": t("Move the event", language)}[request.kind]
     embed = discord.Embed(title=f"{asked}: {event.title}", colour=COLOURS.get(request.state, 0x95A5A6))
-    embed.add_field(name=t("Kind", language), value=kind_label(event.kind, language))
+    embed.add_field(name=t("Kind", language), value=kind_label(event.kind, language, s.settings.events.kind_names))
     embed.add_field(name=t("Requested by", language), value=f"<@{request.requested_by}>")
     if event.channel_id:
         embed.add_field(name=t("Channel", language), value=f"<#{event.channel_id}>")
@@ -91,6 +91,7 @@ class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button],
         if self.action == "retry":
             await self._retry(interaction, moderator)
             return
+        await thinking(interaction)  # approving publishes: the channel moves, the announcement goes out
         try:
             await services(interaction).events.approve(self.request_id, moderator)
         except EventError as exc:
@@ -109,6 +110,7 @@ class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button],
         except EventError as exc:
             await reply(interaction, event_problem(exc.problem, locale, exc.missing))
             return
+        await thinking(interaction)
         row = await s.reservations.retry(request.event_id)
         await reply(interaction, t("Server reserved.", locale) if row and row.state == "booked" else
                     t("No reservation: {reason}", locale, reason=row.error if row and row.error else "—"))
@@ -124,6 +126,7 @@ class RejectModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         moderator = Member(interaction.user.id, frozenset(r.id for r in getattr(interaction.user, "roles", ())))
+        await thinking(interaction)
         try:
             await services(interaction).events.reject(self.request_id, moderator, self.reason.value)
         except EventError as exc:

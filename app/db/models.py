@@ -60,7 +60,7 @@ class Event(Base):
     __tablename__ = "event"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(String(10))  # internal | guest | hosted | zeus
+    kind: Mapped[str] = mapped_column(String(10))  # internal | guest | hosted | zeus | training
     title: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | pending | published | ended | cancelled
     assembly_at: Mapped[datetime]
@@ -71,8 +71,7 @@ class Event(Base):
     required_dlc: Mapped[list[str]] = mapped_column(JSON, default=list)  # Creator DLC keys of the preset (gm, vn ...)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    # Phase 4a: by value, so /reload can drop a mission type or climate without breaking the event.
-    mission_type: Mapped[str] = mapped_column(String(50), default="")
+    # Phase 4a: by value, so /reload can drop a climate without breaking the event.
     climate: Mapped[str] = mapped_column(String(100), default="")
     climate_role_id: Mapped[int | None] = mapped_column(BigInteger)
     author_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -313,13 +312,16 @@ class MissionRating(Base):
 class SteamLink(Base):
     """A member's Steam account (docs/PLAN.md, *Steam link and squad.xml*): their squad.xml entry, and from phase 6
     how attendance knows them. One Steam ID belongs to one member. ``rank_lost_at``: without a rank role, or off
-    the server, since then; the link is deleted N days later."""
+    the server, since then; the link is deleted N days later. ``remark``: staff's own, before the remark roles, or
+    instead of them with ``remark_only``."""
 
     __tablename__ = "steam_link"
 
     member_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     steam_id: Mapped[str] = mapped_column(String(17), unique=True)
     nick: Mapped[str] = mapped_column(String(50))
+    remark: Mapped[str] = mapped_column(String(128), default="")
+    remark_only: Mapped[bool] = mapped_column(Boolean, default=False)
     linked_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
@@ -327,7 +329,8 @@ class SteamLink(Base):
 
 
 class LinkReminder(Base):
-    """A member without a Steam link: when they were last reminded, and whether their first sign-up asked."""
+    """A member without a Steam link: when they were last reminded, whether their first sign-up asked, and whether
+    staff turned the reminders off (``muted``; linking deletes the row, so it lasts until then)."""
 
     __tablename__ = "link_reminder"
 
@@ -335,6 +338,7 @@ class LinkReminder(Base):
     last_at: Mapped[datetime | None]
     count: Mapped[int] = mapped_column(Integer, default=0)
     asked_at_signup: Mapped[bool] = mapped_column(Boolean, default=False)
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class BotState(Base):

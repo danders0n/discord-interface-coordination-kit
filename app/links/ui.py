@@ -1,7 +1,8 @@
 """Steam links on Discord (docs/PLAN.md, *Steam link and squad.xml*): the *Link now* button (in reminders, the
 rollout announcement and a first sign-up's answer; it keeps working after a restart), its modal, and
 :func:`save`, which ``/link``, the modal and ``/links set`` share. The reply says what squad.xml publishes and where
-it is; every change goes to the staff log, and so does a refused duplicate."""
+it is; every change goes to the staff log, and so does a refused duplicate. Also ``/links status``'s embed and its
+*Write now* button (``squadxml:write``, *manage links* only)."""
 
 from __future__ import annotations
 
@@ -11,9 +12,12 @@ from typing import Any
 
 import discord
 
-from app.discord_util import reply, services
+from app.discord_util import access, reply, services
+from app.eventchannel.render import ts
 from app.i18n import t
 from app.links.service import MAX_NICK, LinkError, Problem
+from app.permissions import Perm
+from app.squadxml.service import Status
 from app.supervisor_client import SupervisorError
 
 log = logging.getLogger(__name__)
@@ -29,6 +33,7 @@ def problem(code: Problem, locale: Any) -> str:
                               "details: your Steam ID (17 digits) is under your account name. Use that, or a "
                               "steamcommunity.com/profiles/… address.", locale),
         Problem.BAD_NICK: t("Give a nick of 1 to 50 characters.", locale),
+        Problem.BAD_REMARK: t("Give a remark of at most 128 characters.", locale),
         Problem.TAKEN: t("That Steam ID is linked to another member. Staff have been told; ask them if it is yours.",
                          locale),
     }[code]
@@ -118,3 +123,63 @@ class LinkModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await save(interaction, interaction.user.id, self.steam.value, self.nick.value)
+
+
+# ---------------------------------------------------------------- /links status
+
+def status_embed(status: Status, url: str | None, locale: Any) -> discord.Embed:
+    embed = discord.Embed(title=t("squad.xml", locale))
+    embed.add_field(name=t("Folder", locale), value=str(status.path.parent) if status.path else
+                    t("Not set (BOT_SQUAD_XML__OUTPUT_DIR): no squad.xml is written.", locale), inline=False)
+    embed.add_field(name=t("Address", locale), value=url or t("Not set (BOT_SQUAD_XML__URL).", locale), inline=False)
+    embed.add_field(name=t("Members in it", locale), value=str(status.members) if status.members is not None else
+                    t("Not known yet: the bot is still loading the server's members.", locale))
+    if status.path is not None:
+        embed.add_field(name=t("Written", locale), value=f"{ts(status.written_at, 'f')} ({ts(status.written_at, 'R')})"
+                        if status.written_at else t("Never", locale))
+    if status.in_step is not None:
+        embed.add_field(name=t("Up to date", locale), value=t("Yes", locale) if status.in_step else
+                        t("No: a write is pending.", locale) if status.pending else t("No: press Write now.", locale))
+    if status.missing:
+        embed.add_field(name=t("Missing next to it (kept by hand)", locale), value=", ".join(status.missing),
+                        inline=False)
+    if status.error:
+        embed.add_field(name=t("Last write failed", locale), value=status.error[:1024], inline=False)
+    return embed
+
+
+def write_view(locale: Any) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(WriteNow(t("Write now", locale)))
+    return view
+
+
+class WriteNow(discord.ui.DynamicItem[discord.ui.Button], template=r"squadxml:write"):
+    """Write squad.xml at once, for *manage links* roles (under ``/links status``)."""
+
+    def __init__(self, label: str = "Write now") -> None:
+        super().__init__(discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, emoji="💾",
+                                           custom_id="squadxml:write"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> WriteNow:
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        s, locale = services(interaction), interaction.locale
+        if not access(interaction).has(Perm.MANAGE_LINKS):
+            await reply(interaction, t("You don't have the permission for this.", locale))
+            return
+        if s.squadxml.path is None:
+            await reply(interaction, t("Not set (BOT_SQUAD_XML__OUTPUT_DIR): no squad.xml is written.", locale))
+            return
+        if s.squadxml.roster() is None:
+            await reply(interaction, t("Not known yet: the bot is still loading the server's members.", locale))
+            return
+        try:
+            written = await s.squadxml.write_now()
+        except OSError as exc:
+            await reply(interaction, t("squad.xml could not be written: {error}", locale, error=str(exc)))
+            return
+        await reply(interaction, t("squad.xml written.", locale) if written else
+                    t("squad.xml was up to date: nothing to write.", locale))

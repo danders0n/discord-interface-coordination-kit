@@ -50,7 +50,7 @@ async def test_an_erasure_replaces_the_member_everywhere_and_frees_coming_places
     assert set(coming_slots) == {None}  # a coming event: the place is freed
     assert -1 in past_slots and pseudonym(-1) == "former:1"
     assert set(events) == {20}  # (the creator wasn't erased)
-    report = guild.get_channel(past.channel_id).messages[-1]
+    report = guild.get_channel(past.channel_id).messages[-2]
     fields = {f.name: f.value for f in (report.edits[-1] if report.edits else report.kwargs)["embeds"][0].fields}
     assert fields["Obecni (1)"] == "former:1"
     notes = stack.staff.drain()

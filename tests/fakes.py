@@ -67,10 +67,16 @@ class Sent:
     id: int = field(default_factory=lambda: next(_ids))
     deleted: bool = False
     edits: list[dict[str, Any]] = field(default_factory=list)
+    type: discord.MessageType = discord.MessageType.default
 
     @property
     def embeds(self) -> list[Any]:
         return (self.edits[-1] if self.edits else self.kwargs).get("embeds", [])
+
+    @property
+    def text(self) -> str:
+        """The content now, after the edits."""
+        return (self.edits[-1].get("content") if self.edits else self.content) or ""
 
 
 @dataclass
@@ -84,6 +90,11 @@ class FakeMessage:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     edited_at: datetime | None = None
     id: int = field(default_factory=lambda: next(_ids))
+    type: discord.MessageType = discord.MessageType.default
+    channel: Any = None  # set for a message the bot may delete from ``posts``
+
+    async def delete(self) -> None:
+        self.channel.posts.remove(self)
 
 
 async def _history(messages: list[Any], oldest_first: bool):
@@ -92,8 +103,8 @@ async def _history(messages: list[Any], oldest_first: bool):
 
 
 def _bot_messages(sent: list[Sent]) -> list[FakeMessage]:
-    return [FakeMessage(SimpleNamespace(id=BOT_ID, name="bot", display_name="bot"), m.content or "", id=m.id)
-            for m in sent if not m.deleted]
+    return [FakeMessage(SimpleNamespace(id=BOT_ID, name="bot", display_name="bot"), m.content or "", id=m.id,
+                        type=m.type) for m in sent if not m.deleted]
 
 
 def _not_found(what: str) -> discord.NotFound:
@@ -114,6 +125,9 @@ class MessageRef:
 
     async def edit(self, **changes: Any) -> Sent:
         message = self._find()
+        if message.type != discord.MessageType.default:
+            raise discord.HTTPException(SimpleNamespace(status=400, reason="Bad Request"),
+                                        "Cannot execute action on a system message")
         message.edits.append(changes)
         return message
 
@@ -211,6 +225,7 @@ class FakeChannel:
     async def create_thread(self, *, name: str, type: discord.ChannelType, auto_archive_duration: int) -> FakeThread:
         thread = FakeThread(next(_ids), name, self.id)
         self.guild.threads[thread.id] = thread
+        self.sent.append(Sent(None, {"thread": thread.id}, type=discord.MessageType.thread_created))  # the card
         return thread
 
 
@@ -281,26 +296,37 @@ class FakeGuild:
 
 
 class FakeResponse:
+    """An interaction's one answer: a second one raises, as on Discord."""
+
     def __init__(self) -> None:
         self.sent: list[Sent] = []
         self.modals: list[Any] = []
         self.edited: list[dict[str, Any]] = []
         self.deferred = False
+        self.deferred_with: dict[str, Any] = {}
 
     def is_done(self) -> bool:
         return bool(self.sent or self.modals or self.deferred or self.edited)
 
+    def _once(self) -> None:
+        if self.is_done():
+            raise discord.InteractionResponded(SimpleNamespace())  # type: ignore[arg-type]
+
     async def edit_message(self, **kwargs: Any) -> None:
+        self._once()
         self.edited.append(kwargs)
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
+        self._once()
         self.sent.append(Sent(content, kwargs))
 
     async def send_modal(self, modal: Any) -> None:
+        self._once()
         self.modals.append(modal)
 
     async def defer(self, **kwargs: Any) -> None:
-        self.deferred = True
+        self._once()
+        self.deferred, self.deferred_with = True, kwargs
 
 
 class FakeFollowup:
@@ -308,7 +334,7 @@ class FakeFollowup:
         self.sent: list[Sent] = []
 
     async def send(self, content: str | None = None, **kwargs: Any) -> None:
-        self.sent.append(Sent(content, kwargs))
+        self.sent.append(Sent(content, kwargs))  # (wait=True would return the message: None, nothing to delete)
 
 
 class FakeInteraction:
@@ -323,6 +349,12 @@ class FakeInteraction:
         self.followup = FakeFollowup()
         self.type = discord.InteractionType.component
         self.data: dict[str, Any] = {}
+        self.original_edits: list[dict[str, Any]] = []
+
+    async def edit_original_response(self, **kwargs: Any) -> None:
+        if not self.response.is_done():
+            raise AssertionError("no original response to edit")
+        self.original_edits.append(kwargs)
 
     @property
     def replies(self) -> list[Sent]:

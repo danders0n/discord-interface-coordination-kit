@@ -59,7 +59,7 @@ class ReportAction(discord.ui.DynamicItem[discord.ui.Button], template=r"attenda
 
     async def callback(self, interaction: discord.Interaction) -> None:
         s, locale = services(interaction), interaction.locale
-        event = await guarded(interaction, lambda: s.events.get(self.event_id))
+        event = await guarded(interaction, lambda: s.events.get(self.event_id), slow=False)  # (a modal may follow)
         if event is None:
             return
         if self.action == "rate":

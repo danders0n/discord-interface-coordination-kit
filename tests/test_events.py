@@ -1,5 +1,6 @@
 """Events as a service (docs/PLAN.md, *Event kinds* to *Scheduled actions and downtime*), on the fake supervisor."""
 
+import dataclasses
 from datetime import timedelta
 
 import pytest
@@ -9,7 +10,7 @@ from app.events.groups import Groups
 from app.events.service import Draft, EventError, EventService, Problem
 from app.events.times import Times
 from app.orbat.parser import parse
-from app.signup.service import Member, SignupService
+from app.signup.service import COMING, Member, SignupService
 
 CLIMATE = 401
 
@@ -53,14 +54,14 @@ ADMIN_ = Member(40, frozenset({ADMIN}))
 
 def draft(clock, kind="internal", days=5, hours=0, **fields) -> Draft:
     assembly = clock.now + timedelta(days=days, hours=hours)
-    return Draft(kind=kind, title="Operation X", mission_type="Coop", climate_role_id=CLIMATE,
+    return Draft(kind=kind, title="Operation X", climate_role_id=CLIMATE,
                  times=Times(assembly, assembly + timedelta(minutes=30), 180), **fields)
 
 
 async def ready(events, event, member):
     """Give the event what publishing needs."""
     await events.set_briefing(event.id, member, "Situation", "Mission", "")
-    if event.kind != "zeus":
+    if event.kind not in COMING:
         await events.signups.set_orbat(event.id, parse("# A\nRifleman x2\n", []))
     if event.kind == "guest":
         await events.set_how_to_join(event.id, member, "127.0.0.1:2302, password x")
@@ -97,10 +98,10 @@ async def test_who_may_create_what(events, clock, services):
         await events.create(draft(clock, "guest"), MAKER)
     assert caught.value.problem == Problem.NEEDS_HOST
     bad = draft(clock)
-    bad.mission_type = "Picnic"
+    bad.climate_role_id = 999
     with pytest.raises(EventError) as caught:
         await events.create(bad, MAKER)
-    assert caught.value.problem == Problem.UNKNOWN_TYPE
+    assert caught.value.problem == Problem.UNKNOWN_CLIMATE
 
 
 async def test_a_guest_event_is_named_after_its_host_and_never_reserves(events, fake, clock, services):
@@ -196,8 +197,9 @@ async def test_the_presser_decides_not_the_creator(events, clock):
     assert await events.publish(own.id, MOD) == "published"  # a moderator just publishes
 
 
-async def test_a_members_zeus_event_publishes_but_asks_for_the_server(events, fake, clock):
-    event = await events.create(draft(clock, "zeus"), MEMBER_A)
+@pytest.mark.parametrize("kind", COMING)
+async def test_a_members_zeus_or_training_event_publishes_but_asks_for_the_server(events, fake, clock, kind):
+    event = await events.create(draft(clock, kind), MEMBER_A)
     await ready(events, event, MEMBER_A)
     assert await events.publish(event.id, MEMBER_A) == "published" and fake.reservations == {}
     request = await events.request_server(event.id, MEMBER_A)
@@ -290,8 +292,7 @@ async def test_a_refused_preset_or_image_leaves_the_files_alone(events, clock, s
 async def test_events_using_an_item_removed_from_the_settings(events, clock, services):
     event = await events.create(draft(clock), MAKER)
     assert await events.affected_by_config() == []
-    services.store.current = services.settings.model_copy(update={"events": services.settings.events.model_copy(
-        update={"mission_types": ["TvT"]})})
+    services.ids = dataclasses.replace(services.ids, climates={})  # the climate role left the settings
     assert [e.id for e in await events.affected_by_config()] == [event.id]
 
 

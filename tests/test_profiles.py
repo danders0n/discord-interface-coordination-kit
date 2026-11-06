@@ -164,7 +164,7 @@ async def test_profiles_are_deleted_after_the_event_retried_while_running_and_at
     assert event.profile_id not in fake.profiles and (await stack.events.get(event.id)).profile_id is None
 
     start = clock.now + timedelta(days=3)
-    draft = await stack.events.create(Draft("internal", "Op Y", "Coop", Times(start, start + timedelta(minutes=30), 120)),
+    draft = await stack.events.create(Draft("internal", "Op Y", Times(start, start + timedelta(minutes=30), 120)),
                                       MAKER)
     await stack.channels.open_draft(draft.id)
     await profiles.pick_mission(draft.id, MAKER, "op_x.Altis.pbo")
@@ -176,7 +176,7 @@ async def test_profiles_are_deleted_after_the_event_retried_while_running_and_at
 
 async def test_publishing_builds_the_profile_and_kept_profiles_stay(stack, profiles, guild, clock, fake):
     start = clock.now + timedelta(days=2)
-    draft = await stack.events.create(Draft("internal", "Op Z", "Coop", Times(start, start + timedelta(minutes=30), 120)),
+    draft = await stack.events.create(Draft("internal", "Op Z", Times(start, start + timedelta(minutes=30), 120)),
                                       MAKER)
     await stack.channels.open_draft(draft.id)
     fake.missions["op_z.Altis.pbo"] = {"report": fake.mission_report("op_z.Altis.pbo")}

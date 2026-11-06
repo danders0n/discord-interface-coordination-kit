@@ -47,7 +47,7 @@ async def rate(stack, guild, event, member_id, stars, comment=""):
 
 async def test_attendees_rate_the_mission_and_the_report_shows_the_average(stack, guild, clock, fake):
     event = await reported(stack, guild, clock, fake)
-    report = guild.get_channel(event.channel_id).messages[-1]
+    report = guild.get_channel(event.channel_id).messages[-2]
     buttons = [b.custom_id for b in report.kwargs["view"].children]
     assert buttons == [f"attendance:{event.id}:rate", f"attendance:{event.id}:edit"]
     assert await rate(stack, guild, event, 2, "5") == "Only those who attended rate the mission."
@@ -83,11 +83,12 @@ async def test_the_panel_shows_the_ratings_to_organisers_and_guest_ratings_only_
 
     abc = await Groups(stack.db).add("ABC", "Alpha Bravo", 20)
     guest = await reported(stack, guild, clock, fake, kind="guest", host=abc.id)
-    report = guild.get_channel(guest.channel_id).messages[-1]
+    report = guild.get_channel(guest.channel_id).messages[-2]
     assert report.kwargs["view"].children[0].item.label == "Oceń współpracę z ABC"
     assert (await rate(stack, guild, guest, 2, "3", "Late start")).startswith("Thank you")  # to confirm: may rate
     _, view = await panel(asking(stack, guild, maker), guest)
     assert "ratings" not in {item.action for item in view.children}  # a mission maker isn't staff
+    assert {"join", "orbat"} <= {item.action for item in view.children}  # our part of the host's ORBAT
     staff = person(guild, 30, MEMBER, ADMIN)
     _, view = await panel(asking(stack, guild, staff), guest)
     assert "ratings" in {item.action for item in view.children}

@@ -34,9 +34,9 @@ from app.attendance.stats import StatsReader
 from app.attendance.ui import ReportAction
 from app.links.cog import LinkCog
 from app.links.service import LinkService
-from app.links.ui import LinkNow
+from app.links.ui import LinkNow, WriteNow
 from app.links.watch import LinkWatch
-from app.signup.ui import OfferAction, SignupAction
+from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.services import Services
 from app.signup.service import Member, SignupService
 from app.squadxml.service import Person, SquadXml
@@ -139,8 +139,8 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, OfferAction,  # outlive a restart
-                               ApprovalAction, LinkNow, ReportAction)
+        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, SquadList, OfferAction,  # outlive a restart
+                               ApprovalAction, LinkNow, WriteNow, ReportAction)
         self.tree.on_error = on_app_command_error
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
                     LinkCog(self.services), AttendanceCog(self.services), ArchiveCog(self.services)):

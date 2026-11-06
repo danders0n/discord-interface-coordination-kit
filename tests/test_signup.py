@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.db.models import Event, Offer, Signup, Slot
 from app.orbat.parser import parse
-from app.signup.service import Member, Refusal, SignupService
+from app.signup.service import COMING, Member, Refusal, SignupService
 
 MEDIC = 3
 ROLES = [(MEDIC, "Medic")]
@@ -61,7 +61,7 @@ async def make_event(services, clock, signups, *, kind="internal", days=3, statu
                   duration_minutes=180, created_by=1, **fields)
     async with services.db.session() as session, session.begin():
         session.add(event)
-    if orbat and kind != "zeus":
+    if orbat and kind not in COMING:
         await signups.set_orbat(event.id, parse(orbat, ROLES))
     return event
 
@@ -273,8 +273,9 @@ async def test_closing_a_held_slot_with_a_bang(services, clock, signups):
 
 # ------------------------------------------------------------------ Zeus
 
-async def test_zeus_coming_with_a_limit_even_in_a_rush(services, clock, signups):
-    event = await make_event(services, clock, signups, kind="zeus", signup_limit=3)
+@pytest.mark.parametrize("kind", COMING)
+async def test_zeus_coming_with_a_limit_even_in_a_rush(services, clock, signups, kind):
+    event = await make_event(services, clock, signups, kind=kind, signup_limit=3)
     results = await asyncio.gather(*(signups.coming(event.id, member(n)) for n in range(10, 18)))
     assert sum(r.ok for r in results) == 3 and {r.refusal for r in results if not r.ok} == {Refusal.FULL}
     coming = [m for m, (status, _) in (await entries(services, event.id)).items() if status == "coming"]

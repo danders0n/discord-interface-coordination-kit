@@ -37,7 +37,7 @@ from app.permissions import Perm
 from app.reservations.service import MANAGED_BY
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
-from app.signup.service import Member
+from app.signup.service import COMING, Member
 from app.supervisor_client import SupervisorClient, SupervisorError, SupervisorUnreachable
 
 log = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ class ProfileService:
         return event
 
     async def slots(self, event: Event) -> int:
-        if event.kind == "zeus":
+        if event.kind in COMING:
             return event.signup_limit or 0
         async with self.db.session() as session:
             return int((await session.execute(select(func.count(Slot.id)).where(Slot.event_id == event.id))).scalar_one())
@@ -173,7 +173,7 @@ class ProfileService:
             if missing:
                 found.append(("missing_mods", ", ".join(missing)[:500]))
         playable, slots = report.get("playable"), await self.slots(event)
-        if playable is not None and event.kind != "zeus" and playable < slots:
+        if playable is not None and event.kind not in COMING and playable < slots:
             found.append(("few_slots", f"{playable}/{slots}"))
         if report.get("status") == "error":
             found.append(("mission_error", "; ".join(report.get("errors") or ())[:500]))

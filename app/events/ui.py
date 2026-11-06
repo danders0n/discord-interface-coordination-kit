@@ -1,6 +1,6 @@
 """Creating and organising events on Discord (docs/PLAN.md, *Creating an event*, *Organiser panel*).
 
-- *Create event* in the header channel opens the **wizard**: kind, mission type, climate and the other groups in
+- *Create event* in the header channel opens the **wizard**: kind, climate and the other groups in
   selects, then title, date and times in a modal. It lives in memory; after a restart its buttons say the session
   expired (:func:`expired`), and the member starts again. Its last step makes the draft and its channel.
 - *Organiser panel* under an event's info opens the **panel** privately: a button per section. These buttons
@@ -18,7 +18,8 @@ from typing import Any
 
 import discord
 
-from app.discord_util import reply, services
+from app.discord_util import finish, reply, services, thinking
+from app.eventchannel.render import kind_label
 from app.events import times as event_times
 from app.events.groups import GroupError, Groups
 from app.events.service import KINDS, Draft, EventError, Problem
@@ -27,7 +28,7 @@ from app.i18n import t
 from app.orbat.parser import OrbatError, ParsedSlot, parse, render
 from app.orbat.templates import TemplateError, Templates
 from app.permissions import Perm
-from app.signup.service import Member
+from app.signup.service import COMING, Member
 
 log = logging.getLogger(__name__)
 LIVE: set[str] = set()  # the wizards open in this run (their custom ids start with wizard:<token>)
@@ -38,8 +39,12 @@ def member_of(interaction: discord.Interaction) -> Member:
     return Member(interaction.user.id, frozenset(role.id for role in getattr(interaction.user, "roles", ())))
 
 
-async def guarded(interaction: discord.Interaction, action: Callable[[], Awaitable[Any]]) -> Any:
-    """Run ``action``; a refusal from the services is answered in the member's words."""
+async def guarded(interaction: discord.Interaction, action: Callable[[], Awaitable[Any]], *, slow: bool = True) -> Any:
+    """Run ``action``; a refusal from the services is answered in the member's words. ``slow``: answer
+    "thinking..." first (:func:`thinking`), as the services may touch channels or the supervisor; False only for a
+    quick read that a modal or a message edit follows, as neither can come after it."""
+    if slow:
+        await thinking(interaction)
     try:
         return await action()
     except EventError as exc:
@@ -56,6 +61,19 @@ async def guarded(interaction: discord.Interaction, action: Callable[[], Awaitab
     return None
 
 
+def orbat_summary(squads: list, locale: Any) -> str:
+    """What was saved, squad by squad, so a squad line missing its ``#`` shows at once."""
+    listed = ", ".join(f"{squad.name} ({len(squad.slots)})" for squad in squads)
+    return t(("Saved: {count} squad: {squads}.", "Saved: {count} squads: {squads}."), locale, count=len(squads),
+             squads=listed)[:1900]
+
+
+async def _done(work: Awaitable[Any]) -> bool:
+    """For :func:`guarded`: True once ``work`` is done, as its None result would read as a refusal."""
+    await work
+    return True
+
+
 async def expired(interaction: discord.Interaction) -> bool:
     """A wizard button from before a restart: say so. True when it answered."""
     custom_id = (interaction.data or {}).get("custom_id", "") if interaction.type == discord.InteractionType.component else ""
@@ -69,7 +87,7 @@ async def expired(interaction: discord.Interaction) -> bool:
 # ---------------------------------------------------------------------------- the wizard and its choices
 
 class Choices(discord.ui.View):
-    """Kind, mission type, climate and other groups: the wizard's first step, and the panel's *Type and groups*."""
+    """Kind, climate and other groups: the wizard's first step, and the panel's *Type and groups*."""
 
     def __init__(self, interaction: discord.Interaction, groups: list, *, event: Any = None,
                  guests: list[int] | None = None) -> None:
@@ -82,18 +100,15 @@ class Choices(discord.ui.View):
         self.member = member_of(interaction)
         may_guest = s.events.access(self.member).publishes_without_approval
         self.kind = event.kind if event else None
-        self.mission_type = event.mission_type if event else None
         self.climate = event.climate_role_id if event else None
         self.host = event.host_group_id if event else None
         self.guests: list[int] = list(guests or [])
         self.may_correct = s.events.access(self.member).has(Perm.MANAGE_ANY_EVENT)
-        labels ={"internal": t("Internal", self.locale), "guest": t("Guest", self.locale),
-                  "hosted": t("Hosted", self.locale), "zeus": t("Zeus", self.locale)}
         if event is None or event.status == "draft":
             self.add_item(self._select("kind", t("Kind", self.locale),
-                                       [(labels[k], k) for k in KINDS if k != "guest" or may_guest], self.kind))
-        self.add_item(self._select("type", t("Mission type", self.locale),
-                                   [(m, m) for m in s.settings.events.mission_types], self.mission_type))
+                                       [(kind_label(k, self.locale, s.settings.events.kind_names), k) for k in KINDS
+                                        if k != "guest" or may_guest],
+                                       self.kind))
         climates = s.ids.climates
         if climates:
             self.add_item(self._select("climate", t("Climate", self.locale),
@@ -117,7 +132,8 @@ class Choices(discord.ui.View):
             self.remove_item(item)
         if self.kind in ("guest", "hosted") and self.groups:
             options = [(f"{g.acronym} · {g.name}", str(g.id)) for g in self.groups]
-            label = t("Host group", self.locale) if self.kind == "guest" else t("Invited groups", self.locale)
+            label = t("Host group", self.locale) if self.kind == "guest" else \
+                t("Invited groups: any number; New group adds another", self.locale)
             current = (str(self.host) if self.host else None) if self.kind == "guest" else {str(g) for g in self.guests}
             self.add_item(self._select("groups", label, options, current, many=self.kind == "hosted"))
         if self.kind in ("guest", "hosted"):
@@ -134,11 +150,13 @@ class Choices(discord.ui.View):
         self.add_item(go)
 
     async def _chosen(self, interaction: discord.Interaction, part: str, values: list[str]) -> None:
+        for item in self.children:  # redrawn without defaults, Discord would show the select empty again
+            if getattr(item, "custom_id", "") == f"wizard:{self.token}:{part}":
+                for option in item.options:
+                    option.default = option.value in values
         if part == "kind":
             self.kind = values[0]
             self._group_items()
-        elif part == "type":
-            self.mission_type = values[0]
         elif part == "climate":
             self.climate = int(values[0])
         elif part == "groups":
@@ -166,8 +184,8 @@ class Choices(discord.ui.View):
         await reply(interaction, t("Correct a group", self.locale), view=view)
 
     async def _go(self, interaction: discord.Interaction) -> None:
-        if not self.kind or not self.mission_type:
-            await reply(interaction, t("Pick the kind and the mission type first.", self.locale))
+        if not self.kind:
+            await reply(interaction, t("Pick the kind first.", self.locale))
             return
         if self.kind == "guest" and self.host is None:
             await reply(interaction, event_problem(Problem.NEEDS_HOST, self.locale))
@@ -176,16 +194,21 @@ class Choices(discord.ui.View):
             await interaction.response.send_modal(DetailsModal(interaction, choices=self))
             return
         s = services(interaction)
-        changes: dict[str, Any] = {"mission_type": self.mission_type, "climate_role_id": self.climate}
+        changes: dict[str, Any] = {"climate_role_id": self.climate}
         if self.event.status == "draft":
             changes["kind"] = self.kind
         if self.kind == "guest":
             changes["host_group_id"] = self.host
         if self.kind == "hosted":  # (all of them unticked: no invited groups)
             changes["guest_group_ids"] = self.guests
-        await guarded(interaction, lambda: s.events.update(self.event.id, member_of(interaction), **changes))
-        if not interaction.response.is_done():  # (a refusal was answered already)
-            await interaction.response.edit_message(content=t("Saved.", self.locale), view=None)
+        await interaction.response.defer()  # (saving may move the reservation; finish() edits these choices)
+
+        async def save() -> bool:
+            await s.events.update(self.event.id, member_of(interaction), **changes)
+            return True
+
+        if await guarded(interaction, save):
+            await finish(interaction, t("Saved.", self.locale))
 
     def stop(self) -> None:
         LIVE.discard(self.token)
@@ -206,7 +229,8 @@ class NewGroup(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         groups = Groups(services(interaction).db)
-        group = await guarded(interaction, lambda: groups.add(self.acronym.value, self.name.value, interaction.user.id))
+        group = await guarded(interaction, lambda: groups.add(self.acronym.value, self.name.value, interaction.user.id),
+                              slow=False)
         if group is None:
             return
         self.choices.groups = await groups.all()
@@ -280,7 +304,7 @@ class DetailsModal(discord.ui.Modal):
             if self.event is not None:
                 return await s.events.update(self.event.id, member, title=self.name.value, times=parsed) or "saved"
             c = self.choices
-            event = await s.events.create(Draft(c.kind, self.name.value, c.mission_type, parsed, c.climate,
+            event = await s.events.create(Draft(c.kind, self.name.value, parsed, c.climate,
                                                 c.host if c.kind == "guest" else None,
                                                 c.guests if c.kind == "hosted" else []), member)
             c.stop()
@@ -319,7 +343,7 @@ class CreateEvent(discord.ui.DynamicItem[discord.ui.Button], template=r"event:cr
                                        "a new event can be made.", interaction.locale, category=full))
             return
         view = Choices(interaction, await Groups(s.db).all())
-        await reply(interaction, t("New event: pick the kind, the mission type and the climate, then Continue.",
+        await reply(interaction, t("New event: pick the kind and the climate, then Continue.",
                                    interaction.locale), view=view)
 
 
@@ -347,7 +371,7 @@ class PanelButton(discord.ui.DynamicItem[discord.ui.Button], template=r"event:pa
 
 async def open_panel(interaction: discord.Interaction, event_id: int) -> None:
     s = services(interaction)
-    event = await guarded(interaction, lambda: s.events.get(event_id))
+    event = await guarded(interaction, lambda: s.events.get(event_id), slow=False)
     if event is None:
         return
     if not await s.events.can_organise(event, member_of(interaction)):
@@ -377,13 +401,13 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
     lines += await _attention(s, event, locale)
     view = discord.ui.View(timeout=None)
     shown = ["details", "choices", "briefing"]
-    shown += ["join"] if event.kind == "guest" else ["limit"] if event.kind == "zeus" else ["orbat"]
+    shown += ["limit"] if event.kind in COMING else ["join", "orbat"] if event.kind == "guest" else ["orbat"]
     shown += ["signup", "organisers"]
     if event.status == "draft":
         shown.append("publish")
     if event.status == "pending":
         shown.append("withdraw")
-    if event.kind == "zeus" and not access.publishes_without_approval and (booked is None or booked.state != "booked"):
+    if event.kind in COMING and not access.publishes_without_approval and (booked is None or booked.state != "booked"):
         shown.append("server")
     if booked is not None and booked.state in ("failed", "retrying"):
         shown.append("retry")
@@ -397,7 +421,7 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
         shown.append("ratings")  # a guest event's cooperation ratings are for staff only
     if event.status in ("draft", "pending", "published"):
         shown.append("end" if s.events.clock() >= event.start_at else "cancel")
-    publish_label = t("Publish", locale) if access.publishes_without_approval or event.kind == "zeus" else t("Send for approval", locale)
+    publish_label = t("Publish", locale) if access.publishes_without_approval or event.kind in COMING else t("Send for approval", locale)
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "briefing": t("Briefing", locale),
               "orbat": t("ORBAT", locale), "join": t("How to join", locale), "signup": t("Sign-up start", locale),
               "limit": t("Sign-up limit", locale), "organisers": t("Co-organisers", locale), "publish": publish_label,
@@ -446,7 +470,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
 
     async def callback(self, interaction: discord.Interaction) -> None:
         s, locale = services(interaction), interaction.locale
-        event = await guarded(interaction, lambda: s.events.get(self.event_id))
+        event = await guarded(interaction, lambda: s.events.get(self.event_id), slow=False)  # (handlers open modals)
         if event is None:
             return
         member = member_of(interaction)
@@ -500,7 +524,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
     async def _publish(self, interaction, event, member) -> None:
         s = services(interaction)
         full = s.channels.full("events_category")  # publishing moves the channel there
-        if full is not None and (s.events.access(member).publishes_without_approval or event.kind == "zeus"):
+        if full is not None and (s.events.access(member).publishes_without_approval or event.kind in COMING):
             await reply(interaction, t("The category {category} is full (50 channels): staff must make room before "
                                        "a new event can be made.", interaction.locale, category=full))
             return
@@ -511,8 +535,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("Sent to the moderators for approval.", interaction.locale))
 
     async def _withdraw(self, interaction, event, member) -> None:
-        if await guarded(interaction, lambda: services(interaction).events.withdraw(event.id, member)) is None and \
-                not interaction.response.is_done():
+        if await guarded(interaction, lambda: _done(services(interaction).events.withdraw(event.id, member))):
             await reply(interaction, t("The request is withdrawn; the event is a draft again.", interaction.locale))
 
     async def _server(self, interaction, event, member) -> None:
@@ -520,12 +543,14 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
             await reply(interaction, t("The server is requested; a moderator decides.", interaction.locale))
 
     async def _retry(self, interaction, event, member) -> None:
+        await thinking(interaction)
         row = await services(interaction).reservations.retry(event.id)  # (its listener redraws the requests)
         await reply(interaction, t("Server reserved.", interaction.locale) if row and row.state == "booked" else
                     t("No reservation: {reason}", interaction.locale, reason=row.error if row else "—"))
 
     async def _endres(self, interaction, event, member) -> None:
         s = services(interaction)
+        await thinking(interaction)
         ended = await s.reservations.end(event.id)
         await reply(interaction, t("The reservation has ended.", interaction.locale) if ended else
                     t("The reservation isn't under way.", interaction.locale))
@@ -535,8 +560,8 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
 
     async def _autoend(self, interaction, event, member) -> None:
         value = not event.dont_end_automatically
-        if await guarded(interaction, lambda: services(interaction).events.set_dont_end_automatically(
-                event.id, member, value)) is None and not interaction.response.is_done():
+        if await guarded(interaction, lambda: _done(services(interaction).events.set_dont_end_automatically(
+                event.id, member, value))):
             await reply(interaction, t("A finished mission no longer ends this event; the reservation's end or End "
                                        "event does.", interaction.locale) if value else
                         t("A finished mission ends this event again.", interaction.locale))
@@ -572,8 +597,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
 
     async def _end(self, interaction, event, member) -> None:
         s = services(interaction)
-        if await guarded(interaction, lambda: s.events.end(event.id, member)) is None and \
-                not interaction.response.is_done():
+        if await guarded(interaction, lambda: _done(s.events.end(event.id, member))):
             await reply(interaction, t("The event has ended.", interaction.locale))
             s.staff.post(t("{member} ended {title}.", s.settings.language, member=interaction.user.mention,
                            title=event.title))
@@ -592,12 +616,14 @@ class TextModal(discord.ui.Modal):
         self.add_item(self.text)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        if await guarded(interaction, lambda: self._save(self.text.value)) is not None:
-            await reply(interaction, self.done or t("Saved.", interaction.locale))
+        result = await guarded(interaction, lambda: self._save(self.text.value))
+        if result is not None:
+            await reply(interaction, result if isinstance(result, str) else self.done or t("Saved.", interaction.locale))
 
-    async def _save(self, text: str) -> bool:
-        await self.save(text)
-        return True
+    async def _save(self, text: str) -> str | bool:
+        """``save``'s answer when it gives one in words (the ORBAT's summary), else True."""
+        result = await self.save(text)
+        return result if isinstance(result, str) else True
 
 
 class BriefingModal(discord.ui.Modal):
@@ -717,6 +743,7 @@ class OrbatTools(discord.ui.View):
             displaced = await s.signups.set_orbat(event.id, squads)
             if displaced:
                 log.info("ORBAT of event %s edited: %s moved to the reserve list", event.id, displaced)
+            return orbat_summary(squads, interaction.locale)
 
         await interaction.response.send_modal(TextModal(interaction, t("ORBAT", interaction.locale),
                                                         await self._text(interaction), 4000, save))
@@ -738,10 +765,11 @@ class OrbatTools(discord.ui.View):
                 squads = parse(template.text, roles, i.locale)
                 await s.events.editable(self.event.id, member_of(i))  # locked while waiting for approval
                 await s.signups.set_orbat(self.event.id, squads)
-                return True
+                return orbat_summary(squads, i.locale)
 
-            if await guarded(i, save):
-                await reply(i, t("Saved.", i.locale))
+            summary = await guarded(i, save)
+            if summary:
+                await reply(i, summary)
 
         select.callback = chosen
         view = discord.ui.View(timeout=TIMEOUT)
@@ -817,9 +845,9 @@ class TemplateTools(discord.ui.View):
             await Templates(s.db).delete(template_id, interaction.user.id, self.manage_any)
             return True
 
-        if await guarded(interaction, delete):
+        if await guarded(interaction, delete, slow=False):
             self.templates = [x for x in self.templates if x.id != template_id]
-            await interaction.response.edit_message(content=t("Template deleted.", interaction.locale), view=None)
+            await finish(interaction, t("Template deleted.", interaction.locale))
 
 
 class SlotTools(discord.ui.View):

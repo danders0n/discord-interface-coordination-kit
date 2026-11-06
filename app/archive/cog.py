@@ -75,13 +75,13 @@ class ArchiveCog(commands.Cog):
         slug = _slug(found.title)
 
         def build() -> discord.File:
-            html = render(found, board, entries, messages, names, "inline", language, tz).encode("utf-8")
+            html = render(found, board, entries, messages, names, "inline", language, tz, s.settings.events.kind_names).encode("utf-8")
             if len(html) <= limit:
                 return discord.File(io.BytesIO(html), f"{slug}.html")
-            packed = _zip(render(found, board, entries, messages, names, "zip", language, tz), messages)
+            packed = _zip(render(found, board, entries, messages, names, "zip", language, tz, s.settings.events.kind_names), messages)
             if len(packed) <= limit:
                 return discord.File(io.BytesIO(packed), f"{slug}.zip")
-            listed = render(found, board, entries, messages, names, "listed", language, tz).encode("utf-8")
+            listed = render(found, board, entries, messages, names, "listed", language, tz, s.settings.events.kind_names).encode("utf-8")
             return discord.File(io.BytesIO(listed), f"{slug}.html")
 
         await reply(interaction, t("{title}, from the archive.", locale, title=found.title),

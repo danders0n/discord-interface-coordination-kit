@@ -10,6 +10,7 @@ from conftest import ANNOUNCEMENT, MEMBER, MISSION_MAKER, MODERATOR, STAFF, sett
 from fakes import FakeAttachment, FakeInteraction, FakeMember, FakeRole, invoke
 
 from app.approval.ui import ApprovalAction
+from app.eventchannel import render
 from app.eventchannel.service import EventChannels
 from app.events.cog import EventCog
 from app.events.header import Header
@@ -18,7 +19,7 @@ from app.events.times import Times
 from app.orbat.parser import parse
 from app.presets import parse_preset_html
 from app.signup.service import Member, SignupService
-from app.signup.ui import OfferAction, SignupAction
+from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.staff_threads import StaffThreads
 
 ENGLISH = discord.Locale.british_english
@@ -66,7 +67,7 @@ def asking(stack, guild, who, channel=None) -> FakeInteraction:
 
 async def published(stack, clock, orbat="# Alpha\nLeader\nMedic [Medic]\nRifleman\n", days=5, creator=MAKER):
     start = clock.now + timedelta(days=days)
-    event = await stack.events.create(Draft("internal", "Operation X", "Coop", Times(start, start + timedelta(minutes=30), 180)),
+    event = await stack.events.create(Draft("internal", "Operation X", Times(start, start + timedelta(minutes=30), 180)),
                                       creator)
     await stack.channels.open_draft(event.id)
     await stack.events.set_briefing(event.id, creator, "Night", "Bridge", "")
@@ -97,7 +98,7 @@ async def test_event_preset_sets_the_modset_dlc_and_its_message(stack, guild, cl
     assert saved.required_dlc == ["vn"] and saved.preset_name == "IBC Cold War"
     await stack.channels.redrawer.settle()
     keys = list((await stack.events.get(event.id)).messages)
-    assert keys == ["info", "briefing", "preset", "orbat:0"]  # the ORBAT went after the late preset
+    assert keys == ["info", "briefing", "preset", "orbat:0", "discussion"]  # the ORBAT went after the late preset
     messages = channel.messages
     assert messages[2].kwargs["files"][0].filename == f"{event.id}.html"
     modset = next(f for f in messages[0].embeds[0].fields if f.name == "Modset")
@@ -120,7 +121,7 @@ async def test_event_image_goes_into_the_briefing(stack, guild, clock):
     await invoke(cog.image, cog, asking(stack, guild, maker, channel), file=FakeAttachment("map.png", b"\x89PNG"))
     await stack.channels.redrawer.settle()
     briefing = channel.messages[1]
-    assert briefing.embeds[0].image.url == f"attachment://{event.id}.png"
+    assert briefing.text.startswith(f"{render.SPACER}## Briefing") and not briefing.embeds  # plain text, the image attached
     assert briefing.edits[-1]["attachments"][0].filename == f"{event.id}.png"
     elsewhere = asking(stack, guild, maker, guild.get_channel(STAFF))
     await invoke(cog.image, cog, elsewhere, file=FakeAttachment("map.png", b"x"))
@@ -131,21 +132,39 @@ async def test_event_image_goes_into_the_briefing(stack, guild, clock):
 
 async def test_sign_up_through_the_buttons(stack, guild, clock):
     event = await published(stack, clock)
-    orbat = guild.get_channel(event.channel_id).messages[-1]
-    actions = [item.custom_id for item in orbat.kwargs.get("view", orbat.edits[-1].get("view")).children]
-    assert actions == [f"signup:{event.id}:{a}" for a in ("take", "reserve", "maybe", "cant", "leave")]
+    orbat = guild.get_channel(event.channel_id).messages[-2]
+    view = orbat.edits[-1]["view"] if orbat.edits else orbat.kwargs["view"]
+    squad_list, *rest = view.children
+    assert [item.custom_id for item in rest] == [f"signup:{event.id}:{a}" for a in ("reserve", "maybe", "cant", "leave")]
+    assert squad_list.custom_id == f"squad:{event.id}:0"  # the squads, right under the ORBAT
+    assert [(o.label, o.description) for o in squad_list.item.options] == [("Alpha", "3 wolne sloty")]  # public: the config language
     anna = person(guild, 30, MEMBER)
-    press = asking(stack, guild, anna)
-    await SignupAction(event.id, "take").callback(press)
-    picker = press.replies[0].kwargs["view"]
-    assert [o.label for o in picker.children[0].options] == ["Alpha (2)"]  # the Medic slot needs a role she lacks
-    squad = asking(stack, guild, anna)
-    await picker._squad(squad, int(picker.children[0].options[0].value))
-    slots = picker.children[1].options
-    assert [o.label for o in slots] == ["Leader", "Rifleman"]
+
+    async def open_picker():
+        restored = await SquadList.from_custom_id(asking(stack, guild, anna), squad_list.item,
+                                                  {"event": str(event.id), "number": "0"})  # as after a restart
+        opened = asking(stack, guild, anna)
+        opened.data = {"custom_id": squad_list.custom_id, "values": [squad_list.item.options[0].value]}
+        await restored.callback(opened)
+        assert opened.replies[0].content == "Pick the slot, then Sign up."  # privately, on the squad picked
+        return opened.replies[0].kwargs["view"]
+
+    picker = await open_picker()
+    squad, slot, confirm = picker.children
+    assert [o.default for o in squad.options] == [True]
+    assert [o.label for o in slot.options] == ["1. Leader", "3. Rifleman"]  # the Medic slot needs a role she lacks
+    assert confirm.label == "Sign up" and confirm.disabled  # nothing picked yet
+    await picker._slot(asking(stack, guild, anna), int(slot.options[0].value))
+    assert not picker.children[2].disabled and [o.default for o in picker.children[1].options] == [True, False]
     taken = asking(stack, guild, anna)
-    await picker._slot(taken, int(slots[0].value))
-    assert taken.replies[0].content == "You have the slot. See you there!"
+    await picker._confirm(taken)
+    assert taken.response.edited[0]["content"] == "You have the slot. See you there!"
+    assert taken.response.edited[0]["view"] is None  # the picker became the answer
+    picker = await open_picker()
+    await picker._slot(asking(stack, guild, anna), int(picker.children[1].options[-1].value))
+    await picker._confirm(asking(stack, guild, anna))  # another slot: she moves there
+    holders = {s.name: s.holder_id for s in (await stack.signups.board(event.id)).slots}
+    assert holders == {"Leader": None, "Medic": None, "Rifleman": 30}
     leave = asking(stack, guild, anna)
     await SignupAction(event.id, "leave").callback(leave)
     assert leave.replies[0].content == "You are off this event."
@@ -200,7 +219,7 @@ async def test_a_freed_slot_is_offered_by_dm_or_in_the_thread(stack, guild, cloc
 async def test_approval_in_the_moderation_thread(stack, guild, clock):
     member = Member(10, frozenset({MEMBER}))
     start = clock.now + timedelta(days=5)
-    event = await stack.events.create(Draft("internal", "Op M", "Coop", Times(start, start + timedelta(minutes=30), 180)), member)
+    event = await stack.events.create(Draft("internal", "Op M", Times(start, start + timedelta(minutes=30), 180)), member)
     await stack.channels.open_draft(event.id)
     await stack.events.set_briefing(event.id, member, "x", "", "")
     await stack.signups.set_orbat(event.id, parse("# A\nR\n", []))
@@ -223,8 +242,8 @@ async def test_a_moderator_retries_the_reservation_from_the_request(stack, guild
     member = Member(10, frozenset({MEMBER}))
     start = clock.now + timedelta(days=5)
     window = Times(start, start + timedelta(minutes=30), 180)
-    blocker = await stack.events.create(Draft("internal", "Op B", "Coop", window), MAKER)  # holds the host
-    event = await stack.events.create(Draft("internal", "Op M", "Coop", window), member)
+    blocker = await stack.events.create(Draft("internal", "Op B", window), MAKER)  # holds the host
+    event = await stack.events.create(Draft("internal", "Op M", window), member)
     await stack.channels.open_draft(event.id)
     await stack.events.set_briefing(event.id, member, "x", "", "")
     await stack.signups.set_orbat(event.id, parse("# A\nR\n", []))
@@ -247,7 +266,7 @@ async def test_a_moderator_retries_the_reservation_from_the_request(stack, guild
 async def test_a_stale_pending_event_goes_up_the_moderation_thread_again(stack, guild, clock):
     member = Member(10, frozenset({MEMBER}))
     start = clock.now + timedelta(days=3)
-    event = await stack.events.create(Draft("internal", "Op S", "Coop", Times(start, start + timedelta(minutes=30), 180)),
+    event = await stack.events.create(Draft("internal", "Op S", Times(start, start + timedelta(minutes=30), 180)),
                                       member)
     await stack.channels.open_draft(event.id)
     await stack.events.set_briefing(event.id, member, "x", "", "")
@@ -272,7 +291,7 @@ async def test_staff_hear_who_published(stack, guild, clock):
 async def test_reminders_and_the_sign_up_ping_go_to_the_thread(stack, guild, clock):
     services = stack
     start = clock.now + timedelta(days=3)
-    event = await stack.events.create(Draft("internal", "Op R", "Coop", Times(start, start + timedelta(minutes=30), 180)), MAKER)
+    event = await stack.events.create(Draft("internal", "Op R", Times(start, start + timedelta(minutes=30), 180)), MAKER)
     await stack.channels.open_draft(event.id)
     await stack.events.set_signup_start(event.id, MAKER, clock.now + timedelta(days=1))
     await stack.events.set_briefing(event.id, MAKER, "x", "", "")

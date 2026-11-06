@@ -344,6 +344,161 @@ async def test_a_first_slot_without_a_link_asks_for_it(stack, guild):
     assert second.replies[0].content == "You have the slot." and "view" not in second.replies[0].kwargs
 
 
+# ---------------------------------------------------------------------------- managing squad.xml
+
+def staff_asking(stack, guild) -> FakeInteraction:
+    return asking(stack, guild, guild.members.get(999) or person(guild, 999, "staff_dc", LINKS_ROLE))
+
+
+async def test_an_own_remark_goes_before_the_roles_or_instead_of_them(stack, guild):
+    anna = person(guild, 1, "anna_dc", RANK, PILOT)
+    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    cog = LinkCog(stack)
+    asked = staff_asking(stack, guild)
+    await invoke(cog.remark, cog, asked, member=anna, text="  Dowódca  ")
+    assert asked.replies[0].content == "The remark of <@1> in squad.xml: Dowódca, Pilot"
+    await stack.squadxml.settle()
+    assert "<remark>Dowódca, Pilot</remark>" in stack.squadxml.path.read_text(encoding="utf-8")
+    assert any("Dowódca" in n and "<@999>" in n for n in await notes(stack))
+    only = staff_asking(stack, guild)
+    await invoke(cog.remark, cog, only, member=anna, text="Dowódca", only=True)
+    assert only.replies[0].content.endswith(": Dowódca")
+    await stack.links.link(1, ANNA, "Anna K", 1, has_rank=True)  # a relink keeps it
+    cleared = staff_asking(stack, guild)
+    await invoke(cog.remark, cog, cleared, member=anna)
+    assert cleared.replies[0].content.endswith(": Pilot")
+    link = await stack.links.get(1)
+    assert (link.nick, link.remark, link.remark_only) == ("Anna K", "", False)
+    long = staff_asking(stack, guild)
+    await invoke(cog.remark, cog, long, member=anna, text="x" * 129)
+    assert long.replies[0].content == "Give a remark of at most 128 characters."
+    unlinked = staff_asking(stack, guild)
+    await invoke(cog.remark, cog, unlinked, member=person(guild, 2, "bob_dc", RANK), text="x")
+    assert unlinked.replies[0].content == "<@2> has no Steam link, so no squad.xml entry."
+
+
+async def test_status_shows_the_file_what_is_missing_and_write_now_writes(stack, guild):
+    person(guild, 1, "anna_dc", RANK)
+    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    (stack.squadxml.path.parent / "squad.dtd").write_text("", encoding="utf-8")
+    cog = LinkCog(stack)
+    before = staff_asking(stack, guild)
+    await invoke(cog.status, cog, before)
+    (shown,) = before.replies
+    fields = {f.name: f.value for f in shown.kwargs["embed"].fields}
+    assert fields["Members in it"] == "1" and fields["Written"] == "Never" and fields["Up to date"] == "No: press Write now."
+    assert fields["Missing next to it (kept by hand)"] == "squad.xsl, logo.paa"
+    assert fields["Address"] == "https://example.org/squad.xml" and "file" not in shown.kwargs
+    button = shown.kwargs["view"].children[0]
+    assert button.custom_id == "squadxml:write"
+    refused = asking(stack, guild, person(guild, 2, "bob_dc", RANK))
+    await ui.WriteNow().callback(refused)
+    assert refused.replies[0].content == "You don't have the permission for this." and not stack.squadxml.path.exists()
+    pressed = staff_asking(stack, guild)
+    await ui.WriteNow().callback(pressed)
+    assert pressed.replies[0].content == "squad.xml written."
+    again = staff_asking(stack, guild)
+    await ui.WriteNow().callback(again)
+    assert again.replies[0].content == "squad.xml was up to date: nothing to write."
+    after = staff_asking(stack, guild)
+    await invoke(cog.status, cog, after)
+    fields = {f.name: f.value for f in after.replies[0].kwargs["embed"].fields}
+    assert fields["Up to date"] == "Yes" and fields["Written"].startswith("<t:")
+    assert after.replies[0].kwargs["file"].filename == "squad.xml"
+
+
+async def test_a_failed_write_shows_in_the_status_until_one_succeeds(stack, guild, monkeypatch):
+    from app.squadxml import service
+
+    person(guild, 1, "anna_dc", RANK)
+    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+
+    def locked(path, text):
+        raise PermissionError("[WinError 5] Access is denied")
+
+    monkeypatch.setattr(service, "_write", locked)
+    pressed = staff_asking(stack, guild)
+    await ui.WriteNow().callback(pressed)
+    assert pressed.replies[0].content == "squad.xml could not be written: [WinError 5] Access is denied"
+    assert (await stack.squadxml.status()).error == "[WinError 5] Access is denied"
+    monkeypatch.undo()
+    assert await stack.squadxml.write_now() is True and (await stack.squadxml.status()).error is None
+
+
+async def test_the_lists_for_staff(stack, guild, clock):
+    person(guild, 1, "anna_dc", RANK)
+    person(guild, 2, "bob_dc", MEMBER)
+    person(guild, 3, "cid_dc", RANK)
+    person(guild, 4, "dan_dc", RANK)
+    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    await stack.links.link(2, BOB, "Bob", 2, has_rank=False)
+    await stack.links.set_remark(1, "Dowódca", only=True)
+    await stack.links.reminded([3])
+    await stack.links.mute(4, True)
+    cog = LinkCog(stack)
+
+    async def shown(show: str) -> str:
+        asked = staff_asking(stack, guild)
+        await invoke(cog.list_links, cog, asked, show=show)
+        embed = asked.replies[0].kwargs["embed"]
+        return f"{embed.title}\n{embed.description}"
+
+    assert await shown("in_file") == f"In squad.xml (1)\n<@1> · Anna · {ANNA} · Dowódca"
+    unlinked = await shown("unlinked")
+    assert unlinked.startswith("A rank, no link (2)\n<@3> · reminded 1 time, last <t:")
+    assert unlinked.endswith("<@4> · reminders off")
+    goes = clock.now + timedelta(days=90)
+    assert await shown("unranked") == f"Linked, no rank (1)\n<@2> · Bob · {BOB} · the link goes <t:{int(goes.timestamp())}:R>"
+    assert await shown("muted") == "Reminders off (1)\n<@4>"
+    assert await shown("remarks") == "Own remark (1)\n<@1> · Anna · Dowódca · instead of the roles"
+
+
+async def test_a_long_list_comes_as_a_file_too(stack, guild):
+    for n in range(1, 200):
+        person(guild, n, f"member_{n:03}", RANK)
+    asked = staff_asking(stack, guild)
+    cog = LinkCog(stack)
+    await invoke(cog.list_links, cog, asked, show="unlinked")
+    reply_ = asked.replies[0]
+    assert len(reply_.kwargs["embed"].description) <= 4002 and reply_.kwargs["embed"].description.endswith("…")
+    listed = reply_.kwargs["file"].fp.read().decode("utf-8-sig")
+    assert "member_199 (199) · not reminded yet" in listed and len(listed.splitlines()) == 199
+
+
+async def test_remind_now_and_reminders_off(stack, guild):
+    await stack.links.mark_rollout([])
+    cog = LinkCog(stack)
+    cid = person(guild, 3, "cid_dc", RANK)
+    sent = staff_asking(stack, guild)
+    await invoke(cog.remind, cog, sent, member=cid)
+    assert sent.replies[-1].content == "Reminder sent to <@3> by DM." and len(cid.dms) == 1
+    assert (await stack.links.reminders())[3].count == 1
+    linked = person(guild, 1, "anna_dc", RANK)
+    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    already = staff_asking(stack, guild)
+    await invoke(cog.remind, cog, already, member=linked)
+    assert already.replies[0].content == "<@1> is linked already."
+    no_rank = staff_asking(stack, guild)
+    await invoke(cog.remind, cog, no_rank, member=person(guild, 2, "bob_dc", MEMBER))
+    assert no_rank.replies[0].content == "<@2> has no rank role, so squad.xml doesn't need them."
+
+    dan = person(guild, 4, "dan_dc", MEMBER)
+    off = staff_asking(stack, guild)
+    await invoke(cog.reminders, cog, off, member=dan, on=False)
+    assert off.replies[0].content.startswith("Reminders for <@4> are off")
+    dan.roles = [FakeRole(RANK)]
+    await stack.link_watch.member_changed(dan, frozenset({MEMBER}))  # gaining the rank: no DM
+    assert dan.dms == []
+    assert await stack.links.due_reminders({3, 4}, timedelta(0), 10) == [3]
+    assert await stack.links.ask_at_signup(4) is False
+    on = staff_asking(stack, guild)
+    await invoke(cog.reminders, cog, on, member=dan, on=True)
+    assert await stack.links.due_reminders({4}, timedelta(0), 10) == [4]
+    await stack.links.mute(4, True)
+    await stack.links.link(4, BOB, "Dan", 4, has_rank=True)  # linking ends it
+    assert not await stack.links.muted(4)
+
+
 def test_the_startup_check_names_a_missing_squad_xml_folder(guild, tmp_path):
     from app.startup_checks import check
 

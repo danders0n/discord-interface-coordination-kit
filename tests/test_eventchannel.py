@@ -1,7 +1,8 @@
 """The event channel (docs/PLAN.md, *Event channel*, *Draft and publish*, *Cancelling*), on the Discord fakes."""
 
 import asyncio
-from datetime import timedelta
+from types import SimpleNamespace
+from datetime import UTC, datetime, timedelta
 
 import discord
 import pytest
@@ -39,6 +40,22 @@ def test_a_late_preset_reposts_the_orbat_after_it():
         ("send", "preset"), ("send", "orbat:0"), ("send", "orbat:1")]
 
 
+async def test_discords_thread_card_stands_for_the_link_until_something_goes_after_it():
+    from fakes import FakeGuild
+    channel = FakeChannel(1, "18-11-ibc")
+    FakeGuild(9, channels=[channel])
+    pages = {k: render.Message(content=k) for k in ("info", "orbat:0")}
+    stored = await sync.apply(channel, {}, pages)
+    await channel.create_thread(name="Dyskusja", type=discord.ChannelType.public_thread, auto_archive_duration=10080)
+    stored[sync.CARD] = channel.messages[-1].id
+    with_link = pages | {"discussion": render.Message(content="link")}
+    assert await sync.apply(channel, stored, with_link) == stored  # edited in place, the card kept
+    assert [m.content for m in channel.messages] == ["info", "orbat:0", None]
+    stored = await sync.apply(channel, stored, with_link | {"orbat:1": render.Message(content="orbat:1")})
+    assert [m.content for m in channel.messages] == ["info", "orbat:0", "orbat:1", "link"]  # the card is gone
+    assert sync.CARD not in stored
+
+
 async def test_apply_keeps_the_order_even_when_a_message_was_deleted_by_hand():
     from fakes import FakeGuild
     channel = FakeChannel(1, "18-11-ibc")
@@ -57,17 +74,58 @@ async def test_apply_keeps_the_order_even_when_a_message_was_deleted_by_hand():
 
 # ------------------------------------------------------------------ drawing
 
-def test_the_orbat_splits_before_discords_limits():
+EVENT = SimpleNamespace(title="Op", status="published", signup_opens_at=None,
+                        start_at=datetime(2026, 11, 20, 18, 30, tzinfo=UTC))
+CTX = render.Context("en", datetime(2026, 11, 10, tzinfo=UTC))
+
+
+def test_the_orbat_is_text_split_between_squads_before_discords_limit():
     squads = [(Squad(id=i, event_id=1, position=i, name=f"Squad {i}"),
                [Slot(id=i * 100 + j, event_id=1, squad_id=i, position=j, name="Rifleman", holder_id=None, locked=False,
-                     required_role_id=None) for j in range(8)]) for i in range(14)]
-    pages = render.orbat(Board(squads=squads), "en")
-    assert len(pages) == 2 and len(pages[0].embeds) == 10
-    assert all(len(p.embeds) <= 10 and p.size() <= 6000 for p in pages)
+                     required_role_id=None) for j in range(8)]) for i in range(30)]
+    pages = render.orbat(EVENT, Board(squads=squads), CTX)
+    assert len(pages) > 1 and all(len(p.content) <= 2000 and not p.embeds for p in pages)
+    assert pages[0].content.startswith(f"{render.SPACER}## Sign-up: Op\nStart: ")  # an empty line above
+    assert "\n\n**Squad 0**\n`1.` Rifleman — *free*\n`2.` Rifleman" in pages[0].content
+    assert all(p.content.startswith("**Squad") for p in pages[1:])  # a squad that fits isn't cut
+    assert sum(p.content.count("**Squad") for p in pages) == 30
+    assert pages[-1].content.endswith("Taking another slot moves your sign-up.")  # the hint, by the slot lists
     big = [(Squad(id=1, event_id=1, position=0, name="Big"),
             [Slot(id=j, event_id=1, squad_id=1, position=j, name="R" * 90, holder_id=10 ** 17 + j, locked=False,
                   required_role_id=None) for j in range(40)]) for _ in range(3)]
-    assert all(p.size() <= 6000 for p in render.orbat(Board(squads=big), "en"))
+    assert all(len(p.content) <= 2000 for p in render.orbat(EVENT, Board(squads=big), CTX))
+
+
+def test_slots_show_their_state_in_words_and_the_zeus_list_one_member_per_line():
+    from app.db.models import Signup
+
+    squad = Squad(id=1, event_id=1, position=0, name="1st *Squad*")
+    slots = [Slot(id=1, event_id=1, squad_id=1, position=0, name="SL", holder_id=5, locked=True, required_role_id=7),
+             Slot(id=2, event_id=1, squad_id=1, position=1, name="Zeus", holder_id=None, locked=True, required_role_id=None),
+             Slot(id=3, event_id=1, squad_id=1, position=2, name="Medic", holder_id=None, locked=False, required_role_id=None)]
+    board = Board(squads=[(squad, slots)], offered={3}, signups=[Signup(event_id=1, member_id=9, status="maybe")])
+    polish = render.Context("pl", CTX.now)
+    (page,) = render.orbat(EVENT, board, polish)
+    head, squad_block, maybe, hint = page.content.removeprefix(render.SPACER).split("\n\n")
+    assert hint.startswith("-# Wybierz drużynę z listy poniżej")
+    assert head.split("\n")[1].endswith("• Zajęte sloty: **1/3** • \U0001F512 1")
+    assert head.split("\n")[2].startswith("\U0001F7E2 **Zapisy otwarte** – zamknięcie <t:")
+    assert squad_block.split("\n") == ["**1st \\*Squad\\***", "`1.` SL (<@&7>) — <@5> \U0001F512",
+                                        "`2.` Zeus — \U0001F512 *zamknięty*", "`3.` Medic — *zaoferowany*"]
+    assert maybe.startswith("**Może** (1)\n<@9>")
+    zeus = Board(signups=[Signup(event_id=1, member_id=n, status="coming") for n in (1, 2)])
+    (listed,) = render.zeus_list(SimpleNamespace(**vars(EVENT), signup_limit=20), zeus, polish)
+    assert listed.content.removeprefix(render.SPACER).split("\n\n")[1:] == ["**Będę** (2/20)\n<@1>\n<@2>", "**Nie będę** (0)\n—"]
+    assert "• Będę: **2/20**" in listed.content
+
+
+def test_a_long_briefing_continues_in_further_messages():
+    event = SimpleNamespace(briefing_situation="S" * 1500, briefing_mission="M" * 1500, briefing_notes="x\n" * 400,
+                            briefing_image=None)
+    pages = render.briefing(event, "en")
+    assert len(pages) == 3 and all(len(p.content) <= 2000 for p in pages)
+    assert pages[0].content.startswith(f"{render.SPACER}## Briefing\n\n**Situation**") and pages[1].content.startswith("**Mission**")
+    assert render.texts(["y" * 4500]) == ["y" * 2000, "y" * 2000, "y" * 500]  # one line too long: cut
 
 
 def test_mentions_split_into_messages_discord_takes():
@@ -109,7 +167,7 @@ async def world(services, fake, guild, clock):
 async def make(world, clock, days=5):
     channels, events, signups = world
     start = clock.now + timedelta(days=days)
-    event = await events.create(Draft("internal", "Operation X", "Coop", Times(start, start + timedelta(minutes=30), 180)),
+    event = await events.create(Draft("internal", "Operation X", Times(start, start + timedelta(minutes=30), 180)),
                                 MAKER)
     channel = await channels.open_draft(event.id)
     return event, channel
@@ -129,14 +187,38 @@ async def test_a_draft_gets_a_hidden_channel_with_its_thread_and_messages(world,
     assert channel.overwrites[guild.default_role].view_channel is False
     assert discord.Object(id=MAKER.id) in channel.overwrites  # the creator
     assert discord.Object(id=ADMIN) in channel.overwrites and discord.Object(id=MODERATOR) in channel.overwrites
-    thread = next(iter(guild.threads.values()))
-    assert thread.parent_id == channel.id
-    titles = [m.embeds[0].title for m in channel.messages]
-    assert titles == ["SZKIC · Operation X", "Briefing", "ORBAT"]
+    assert not guild.threads  # the thread comes with publishing
+    info, briefing, orbat = channel.messages
+    assert info.embeds[0].title == "SZKIC · Operation X"
+    assert briefing.text.startswith(f"{render.SPACER}## Briefing")
+    assert orbat.text.startswith(f"{render.SPACER}## Zapisy: Operation X")
     stored = (await world[1].get(event.id)).messages
     assert list(stored) == ["info", "briefing", "orbat:0"]
     (reservation,) = fake.reservations.values()
     assert reservation["link"] == f"https://discord.com/channels/{guild.id}/{channel.id}"
+
+
+async def test_a_drafts_pings_go_by_dm_as_it_has_no_thread_yet(world, clock, guild):
+    from fakes import FakeMember
+
+    maker = guild.members[MAKER.id] = FakeMember(MAKER.id)
+    event, _channel = await make(world, clock)
+    await world[0].stale(event.id)
+    assert "Operation X" in maker.dms[-1].content
+
+
+async def test_the_thread_and_the_kinds_are_named_as_configured(world, clock, guild):
+    from app.settings import KindNames
+
+    store = world[0].store
+    store.current = store.current.model_copy(update={"events": store.current.events.model_copy(update={
+        "discussion": "Pytania i ustalenia", "kind_names": KindNames(internal="Misja klanowa")})})
+    event, channel = await make(world, clock)
+    await ready_and_publish(world, event)
+    assert guild.threads[(await world[1].get(event.id)).thread_id].name == "Pytania i ustalenia"
+    kind = next(f.value for f in channel.messages[0].embeds[0].fields if f.name == "Rodzaj")
+    assert kind == "Misja klanowa" and "Misja klanowa" in channel.topic
+    assert render.kind_label("zeus", "pl", store.current.events.kind_names) == "Zeus"  # not set: the bot's own
 
 
 async def test_publishing_moves_the_channel_and_announces(world, clock, guild):
@@ -145,6 +227,12 @@ async def test_publishing_moves_the_channel_and_announces(world, clock, guild):
     assert channel.category_id == EVENTS
     assert channel.overwrites[guild.default_role].send_messages is False  # the category's: read-only
     assert discord.Object(id=MAKER.id) in channel.overwrites  # the organisers still post
+    thread = next(iter(guild.threads.values()))
+    assert thread.parent_id == channel.id and thread.name == "Dyskusja"
+    *_, orbat, card = channel.messages
+    assert "Leader" in orbat.text
+    assert card.type == discord.MessageType.thread_created and card.kwargs["thread"] == thread.id  # Discord's, last
+    assert list((await world[1].get(event.id)).messages) == ["info", "briefing", "orbat:0", "card"]
     (notice,) = guild.get_channel(ANNOUNCE).messages
     assert notice.content == f"<@&{ANNOUNCEMENT}>"
     assert [r.id for r in notice.kwargs["allowed_mentions"].roles] == [ANNOUNCEMENT]
@@ -161,15 +249,17 @@ async def test_sign_ups_are_edited_in_place_and_continuations_appended(world, cl
     await signups.take(event.id, slot.id, Member(30, frozenset({MEMBER})))
     await channels.redrawer.settle()
     assert len(channel.messages) == before
-    assert "<@30>" in channel.messages[-1].embeds[0].description
-    big = "".join(f"# Squad {i}\nRifleman x3\n" for i in range(12))
+    assert "<@30>" in channel.messages[-2].text
+    big = "".join(f"# Squad {i}\nRifleman x5\n" for i in range(25))
     await signups.set_orbat(event.id, parse(big, []))
     await channels.redrawer.settle()
-    assert [m.embeds[0].title.split(" (")[0] for m in channel.messages][:3] == ["Operation X", "Briefing", "Squad 0"]
-    assert len(channel.messages) == 4  # info, briefing, two ORBAT pages
+    texts = [m.text for m in channel.messages]
+    assert len(texts) == 5 and texts[2].startswith(f"{render.SPACER}## Zapisy") and texts[3].startswith("**Squad")
+    assert texts[4].startswith("💬")  # the card was last: now the link is, after the new page
+    assert all(m.type == discord.MessageType.default for m in channel.messages)
     await signups.set_orbat(event.id, parse("# Alpha\nLeader\n", []))
     await channels.redrawer.settle()
-    assert len(channel.messages) == 3
+    assert len(channel.messages) == 4
 
 
 async def test_a_new_date_renames_the_channel(world, clock):
@@ -206,7 +296,7 @@ async def test_a_cancelled_event_loses_its_buttons(world, clock):
     event, channel = await make(world, clock)
     await ready_and_publish(world, event)
     await events.cancel(event.id, MAKER, "x")
-    info, orbat = channel.messages[0], channel.messages[-1]
+    info, orbat = channel.messages[0], channel.messages[-2]
     assert info.edits[-1]["view"] is None and orbat.edits[-1]["view"] is None  # None removes them on Discord
 
 
@@ -229,13 +319,13 @@ async def test_sign_up_buttons_follow_the_sign_up_state(world, clock, services):
     event, channel = await make(world, clock)
     await events.set_signup_start(event.id, MAKER, clock.now + timedelta(days=1))
     await ready_and_publish(world, event)
-    orbat = channel.messages[-1]
+    orbat = channel.messages[-2]
 
     def disabled():
         view = orbat.edits[-1]["view"] if orbat.edits else orbat.kwargs["view"]
         return [b.custom_id.split(":")[-1] for b in view.children if b.item.disabled]
 
-    assert disabled() == ["take", "reserve"]  # Maybe, Can't come and Leave work before it opens
+    assert disabled() == ["0", "reserve"]  # the slot list off; Maybe, Can't come and Leave work before it opens
     clock.now += timedelta(days=1)
     await services.scheduler.run_due()
     await channels.redrawer.settle()
@@ -243,13 +333,13 @@ async def test_sign_up_buttons_follow_the_sign_up_state(world, clock, services):
     clock.now = (await events.get(event.id)).start_at
     await services.scheduler.run_due()  # sign-up closes at the start: drawn again
     await channels.redrawer.settle()
-    assert disabled() == ["take", "reserve", "maybe", "cant", "leave"]
+    assert disabled() == ["0", "reserve", "maybe", "cant", "leave"]
 
 
 async def test_a_full_zeus_event_turns_coming_off(world, clock):
     channels, events, signups = world
     start = clock.now + timedelta(days=5)
-    event = await events.create(Draft("zeus", "Zeus night", "Zeus", Times(start, start + timedelta(minutes=30), 180)),
+    event = await events.create(Draft("zeus", "Zeus night", Times(start, start + timedelta(minutes=30), 180)),
                                 MAKER)
     channel = await channels.open_draft(event.id)
     await events.set_limit(event.id, MAKER, 1)
@@ -257,7 +347,7 @@ async def test_a_full_zeus_event_turns_coming_off(world, clock):
     await events.publish(event.id, MAKER)
     await signups.coming(event.id, Member(30, frozenset({MEMBER})))
     await channels.redrawer.settle()
-    view = channel.messages[-1].edits[-1]["view"]
+    view = channel.messages[-2].edits[-1]["view"]
     assert [b.custom_id.split(":")[-1] for b in view.children if b.item.disabled] == ["coming"]
 
 
@@ -265,7 +355,7 @@ async def test_a_members_zeus_server_is_confirmed_only_by_a_moderator(world, clo
     channels, events, _ = world
     member = Member(10, frozenset({MEMBER}))
     start = clock.now + timedelta(days=5)
-    event = await events.create(Draft("zeus", "Zeus night", "Zeus", Times(start, start + timedelta(minutes=30), 180)),
+    event = await events.create(Draft("zeus", "Zeus night", Times(start, start + timedelta(minutes=30), 180)),
                                 member)
     channel = await channels.open_draft(event.id)
     await events.set_briefing(event.id, member, "x", "", "")

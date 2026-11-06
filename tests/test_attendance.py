@@ -69,7 +69,7 @@ def asking(stack, guild, who) -> FakeInteraction:
 
 async def published(stack, clock, kind="internal", orbat="# Alpha\nLeader\nMedic\nRifleman\n", host=None):
     start = clock.now + timedelta(days=2)
-    event = await stack.events.create(Draft(kind, "Operation X", "Coop", Times(start, start + timedelta(minutes=30), 180),
+    event = await stack.events.create(Draft(kind, "Operation X", Times(start, start + timedelta(minutes=30), 180),
                                             host_group_id=host), MAKER)
     await stack.channels.open_draft(event.id)
     await stack.events.set_briefing(event.id, MAKER, "Night", "Bridge", "")
@@ -188,7 +188,7 @@ async def test_a_finished_mission_ends_the_event_and_the_report_follows(stack, g
     assert entries == {(1, "Anna"): "attended", (2, ""): "not_linked", (3, "Bob"): "walk_in",
                        (None, "Stranger"): "walk_in"}
     channel = guild.get_channel(event.channel_id)
-    report = channel.messages[-1]
+    report = channel.messages[-2]  # (the discussion link follows)
     fields = {f.name: f.value for f in report.kwargs["embeds"][0].fields}
     assert fields["Obecni (1)"] == "<@1>" and "prawdopodobnie m2" in fields["Bez linku Steam (1)"]
     assert report.kwargs["view"].children[-1].custom_id == f"attendance:{event.id}:edit"
@@ -230,7 +230,7 @@ async def test_unreadable_stats_are_retried_until_the_deadline(stack, guild, clo
     at(clock, fake, booked.ends_at + timedelta(hours=25))
     await run(stack)
     assert (await stack.events.get(event.id)).attendance_state == "unavailable"
-    report = guild.get_channel(event.channel_id).messages[-1]
+    report = guild.get_channel(event.channel_id).messages[-2]
     assert "Nie udało się odczytać statystyk" in report.kwargs["embeds"][0].description
 
 

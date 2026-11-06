@@ -1,7 +1,8 @@
 """The event channel on Discord (docs/PLAN.md, *Event channel*, *Draft and publish*, *Notifications*, *Cancelling*).
 
 - A draft gets a channel in the hidden drafts category, seen by its organisers, *manage any event* and *approve
-  events*, with its discussion thread made at once (every ping goes there, never between the bot's messages).
+  events*. Its discussion thread is made at publishing, after the messages, so Discord's thread card is last.
+  Every ping goes to the thread, never between the bot's messages; before publishing, by DM.
 - The bot's messages are redrawn from the database. Requests are **batched**: at most one redraw per event every
   ``interval`` seconds, however many sign-ups arrive at once. A redraw also follows a new name (date, host),
   renaming in the background because Discord allows two renames per ten minutes.
@@ -35,6 +36,7 @@ from app.i18n import t
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
+from app.signup.service import COMING
 
 ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, with the sign-up buttons off
@@ -118,6 +120,7 @@ class EventChannels:
         self.roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
         self.redrawer = Redrawer(self.redraw_now, interval)
         self._renames: dict[int, asyncio.Task] = {}
+        self._drawing: dict[int, asyncio.Lock] = {}  # one redraw (or the thread's making) per event at a time
         scheduler.register(ARCHIVE_KIND, self._archive_action)
         scheduler.register(CLOSE_KIND, self._close_action)
         scheduler.register(RATING_CLOSE_KIND, self._rating_close_action)
@@ -144,7 +147,8 @@ class EventChannels:
 
     async def _topic(self, event: Event) -> str:
         local = event.assembly_at.astimezone(self.store.current.tz)
-        return f"{event.title} · {render.kind_label(event.kind, self.language)} · {local:%d.%m %H:%M}"
+        kind = render.kind_label(event.kind, self.language, self.store.current.events.kind_names)
+        return f"{event.title} · {kind} · {local:%d.%m %H:%M}"
 
     async def _context(self, event: Event) -> render.Context:
         host = None
@@ -157,7 +161,7 @@ class EventChannels:
                 Signup.event_id == event.id, Signup.status == "coming"))).all())
         booked = await self.events.reservations.get(event.id) if self.events else None
         confirmed = booked is not None and booked.state == "booked"
-        if confirmed and event.kind == "zeus":  # a member's request holds the host, but a moderator confirms it
+        if confirmed and event.kind in COMING:  # a member's request holds the host, but a moderator confirms it
             confirmed = not await self.events.server_pending(event.id)
         entries = []
         if event.attendance_state is not None:
@@ -167,7 +171,7 @@ class EventChannels:
         rating = await self.feedback.summary(event.id) if self.feedback is not None and entries else (None, 0)
         return render.Context(self.language, self.clock(), host, guests, coming, server_confirmed=confirmed,
                               attendance=entries, min_minutes=self.store.current.attendance.min_minutes,
-                              rating=rating)
+                              rating=rating, kind_names=self.store.current.events.kind_names)
 
     def _organiser_overwrites(self, guild: Any, event: Event, organisers: set[int]) -> dict:
         overwrites: dict = {guild.me: BOT}
@@ -227,13 +231,30 @@ class EventChannels:
         channel = await guild.create_text_channel(await self.events.channel_name(event), category=category,
                                                   overwrites=await self._overwrites(guild, event),
                                                   topic=await self._topic(event))
-        thread = await channel.create_thread(name=t("Discussion", self.language), type=discord.ChannelType.public_thread,
-                                             auto_archive_duration=10080)
-        await self._save(event_id, channel_id=channel.id, thread_id=thread.id)
+        await self._save(event_id, channel_id=channel.id)
         await self.redraw_now(event_id)
         await self.events.refresh_reservation(event_id)  # now it can link to the channel
         self._warn_room()
         return channel
+
+    async def _open_thread(self, event_id: int, channel: Any) -> None:
+        """The discussion thread, made at publishing after the messages: Discord's "started a thread" card is last
+        and stands in for the link (decided 2026-11-02)."""
+        async with self._lock(event_id):  # a redraw in between would save the messages without the card
+            thread = await channel.create_thread(
+                name=self.store.current.events.discussion or t("Discussion", self.language),
+                type=discord.ChannelType.public_thread, auto_archive_duration=10080)
+            messages = dict((await self._event(event_id)).messages or {})
+            try:
+                async for message in channel.history(limit=5):
+                    if message.type == discord.MessageType.thread_created:
+                        messages[sync.CARD] = message.id
+                        break
+            except discord.HTTPException as exc:
+                log.warning("Finding the thread card in #%s failed: %s", channel.name, exc)
+            await self._save(event_id, thread_id=thread.id, messages=messages)
+        if sync.CARD not in messages:
+            await self.redraw_now(event_id)  # the link instead
 
     def link(self, event: Event) -> str | None:
         guild = self.guild()
@@ -241,7 +262,14 @@ class EventChannels:
             return None
         return f"https://discord.com/channels/{guild.id}/{event.channel_id}"
 
+    def _lock(self, event_id: int) -> asyncio.Lock:
+        return self._drawing.setdefault(event_id, asyncio.Lock())
+
     async def redraw_now(self, event_id: int) -> None:
+        async with self._lock(event_id):
+            await self._redraw(event_id)
+
+    async def _redraw(self, event_id: int) -> None:
         event = await self._event(event_id)
         channel = self._channel(event) if event is not None else None
         if channel is None:
@@ -254,13 +282,15 @@ class EventChannels:
             view = discord.ui.View(timeout=None)
             view.add_item(PanelButton(event_id, t("Organiser panel", self.language)))
             messages["info"].view = view
-            if event.status == "published" and "orbat:0" in messages:
+            last = max((key for key in messages if key.startswith("orbat:")), default=None, key=sync.order)
+            if event.status == "published" and last is not None:  # under the last page, by the hint
                 from app.signup.ui import buttons
                 now = self.clock()
-                messages["orbat:0"].view = buttons(
-                    event_id, event.kind == "zeus", self.language, closed=now >= event.start_at,
+                messages[last].view = buttons(
+                    event_id, event.kind in COMING, self.language, closed=now >= event.start_at,
                     not_open=event.signup_opens_at is not None and now < event.signup_opens_at,
-                    full=event.kind == "zeus" and bool(event.signup_limit) and ctx.coming >= event.signup_limit)
+                    full=event.kind in COMING and bool(event.signup_limit) and ctx.coming >= event.signup_limit,
+                    board=board)
             if "report" in messages:
                 from app.attendance.ui import report_buttons
                 rate = None
@@ -317,6 +347,8 @@ class EventChannels:
         await channel.edit(category=guild.get_channel(self.ids().events_category),
                            overwrites=await self._overwrites(guild, event))
         await self.redraw_now(event_id)
+        if not event.thread_id:
+            await self._open_thread(event_id, channel)
         ann = guild.get_channel(self.ids().announcements)
         if ann is not None:
             roles = [r for r in (self.ids().announcement, event.climate_role_id) if r]
@@ -685,7 +717,18 @@ class EventChannels:
             await thread.send(content, allowed_mentions=mentions, **kwargs)
 
     async def _ping(self, event: Event, text: str, member_ids: list[int], **kwargs: Any) -> None:
-        """In the event's thread, split before Discord's 2000 characters; buttons go on the first message."""
+        """In the event's thread, split before Discord's 2000 characters; buttons go on the first message. A draft
+        has no thread yet: by DM instead."""
+        if not event.thread_id:
+            guild = self.guild()
+            for member_id in dict.fromkeys(member_ids):
+                member = guild.get_member(member_id) if guild is not None else None
+                try:
+                    if member is not None:
+                        await member.send(text, **kwargs)
+                except discord.HTTPException as exc:
+                    log.info("A DM to %s about event %s failed: %s", member_id, event.id, exc)
+            return
         for index, content in enumerate(mention_chunks(text, member_ids)):
             await self._thread_send(event, content, discord.AllowedMentions(users=True, roles=False, everyone=False),
                                     **(kwargs if index == 0 else {}))

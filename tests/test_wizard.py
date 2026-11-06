@@ -49,7 +49,6 @@ async def create(stack, guild, clock, who, kind="internal", date_days=5) -> tupl
     await ui.CreateEvent().callback(start)
     choices = start.replies[0].kwargs["view"]
     await choices._chosen(asking(stack, guild, who), "kind", [kind])
-    await choices._chosen(asking(stack, guild, who), "type", ["Coop"])
     go = asking(stack, guild, who)
     await choices._go(go)
     modal = go.response.modals[0]
@@ -73,6 +72,15 @@ async def test_the_wizard_makes_a_draft_and_its_channel(stack, guild, clock):
     assert (local.hour, local.minute) == (19, 0) and event.duration_minutes == 180
 
 
+async def test_the_wizard_keeps_showing_what_was_picked(stack, guild):
+    start = asking(stack, guild, person(20, MEMBER, MISSION_MAKER))
+    await ui.CreateEvent().callback(start)
+    choices = start.replies[0].kwargs["view"]
+    await choices._chosen(asking(stack, guild, person(20)), "kind", ["hosted"])
+    (kind,) = [c for c in choices.children if getattr(c, "custom_id", "").endswith(":kind")]
+    assert [o.value for o in kind.options if o.default] == ["hosted"]
+
+
 async def test_the_wizard_answers_mistakes_and_needs(stack, guild, clock):
     outsider = asking(stack, guild, person(5))
     await ui.CreateEvent().callback(outsider)
@@ -81,10 +89,10 @@ async def test_the_wizard_answers_mistakes_and_needs(stack, guild, clock):
     await ui.CreateEvent().callback(start)
     choices = start.replies[0].kwargs["view"]
     kinds = [o.value for o in choices.children[0].options]
-    assert kinds == ["internal", "hosted", "zeus"]  # a member can't make a guest event
+    assert kinds == ["internal", "hosted", "zeus", "training"]  # a member can't make a guest event
     early = asking(stack, guild, person(10, MEMBER))
     await choices._go(early)
-    assert early.replies[0].content == "Pick the kind and the mission type first."
+    assert early.replies[0].content == "Pick the kind first."
     _, submit = await create(stack, guild, clock, person(10, MEMBER), date_days=400)
     assert submit.replies[0].content == "That date is too far ahead."
 
@@ -223,10 +231,10 @@ async def test_reload_names_the_events_still_using_a_removed_item(stack, guild, 
     from app.settings import ReloadResult
 
     event, _ = await create(stack, guild, clock, person(20, MEMBER, MISSION_MAKER))
+    async with stack.db.session() as session, session.begin():
+        (await session.get(Event, event.id)).climate_role_id = 999  # a climate role no longer in the settings
 
     def reload():
-        stack.store.current = stack.settings.model_copy(update={"events": stack.settings.events.model_copy(
-            update={"mission_types": ["TvT"]})})
         return ReloadResult(ok=True)
 
     monkeypatch.setattr(stack.store, "reload", reload)
@@ -278,7 +286,7 @@ async def test_the_panel_is_for_organisers_and_guides_to_publishing(stack, guild
     text.text._value = "# Alpha\nLeader\nRifleman x2\n"
     saved = asking(stack, guild, maker)
     await text.on_submit(saved)
-    assert saved.replies[0].content == "Saved."
+    assert saved.replies[0].content == "Saved: 1 squad: Alpha (3)."  # a squad missing its # shows here
     published = asking(stack, guild, maker)
     await buttons["publish"].callback(published)
     assert published.replies[0].content == "Published."

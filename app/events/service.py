@@ -1,13 +1,12 @@
 """Events (docs/PLAN.md, *Event kinds*, *Creating an event*, *Draft and publish*, *Approval*, *Cancelling*,
 *Scheduled actions and downtime*), with no discord.py.
 
-- **Create** a draft: the four kinds, who may create which, the mission type and climate from the config (stored by
-  value). Someone who may publish without approval gets the host reservation at once; a member's internal or
-  hosted event gets it when sent for approval, a member's Zeus event when it asks for the server.
+- **Create** a draft: the five kinds, who may create which, the climate from the config (stored by value). Someone who may publish without approval gets the host reservation at once; a member's internal or
+  hosted event gets it when sent for approval, a member's Zeus or training event when it asks for the server.
 - **Edit**: the kind only in a draft; times are locked once the reservation's quiet period has begun; a member's
   new times for a published event are a *proposal* for the moderators, and nothing moves until one approves.
 - **Publish**: refused until the checklist is complete. The roles of whoever presses decide: a mission maker,
-  moderator or *manage any event* publishes, a member sends it for approval (a Zeus event is always published).
+  moderator or *manage any event* publishes, a member sends it for approval (a Zeus or training event is always published).
 - **Approve / reject** a request; approving is refused while its reservation failed.
 - **Cancel** before the start (a draft is deleted), **end** after it (the attendance service takes over).
 - **Timed actions**: sign-up opening, reminders, stale-draft ping and cancel, a guest event's end. After downtime
@@ -38,10 +37,10 @@ from app.reservations.service import Frozen, ReservationService, Window
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
-from app.signup.service import Member
+from app.signup.service import COMING, Member
 
-KINDS = ("internal", "guest", "hosted", "zeus")
-RESERVED = ("internal", "hosted", "zeus")  # on our server: they get a host reservation
+KINDS = ("internal", "guest", "hosted", "zeus", "training")
+RESERVED = ("internal", "hosted", "zeus", "training")  # on our server: they get a host reservation
 MAX_BRIEFING = 4000
 UNSET: object = object()  # update(): a detail not being changed
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -54,7 +53,6 @@ class Problem(StrEnum):
     NOT_ALLOWED = "not_allowed"
     KIND_NOT_ALLOWED = "kind_not_allowed"  # a member can't make a guest event
     NEEDS_HOST = "needs_host"  # a guest event needs its host group
-    UNKNOWN_TYPE = "unknown_type"
     UNKNOWN_CLIMATE = "unknown_climate"
     NOT_DRAFT = "not_draft"
     PENDING = "pending"  # locked while waiting for approval
@@ -83,7 +81,6 @@ class Draft:
 
     kind: str
     title: str
-    mission_type: str
     times: Times
     climate_role_id: int | None = None
     host_group_id: int | None = None  # guest
@@ -186,21 +183,20 @@ class EventService:
         return event
 
     async def server_pending(self, event_id: int) -> bool:
-        """A member's Zeus event whose server request waits for a moderator."""
+        """A member's Zeus or training event whose server request waits for a moderator."""
         async with self.db.session() as session:
             return (await session.execute(select(ApprovalRequest.id).where(
                 ApprovalRequest.event_id == event_id, ApprovalRequest.kind == "server",
                 ApprovalRequest.state == "pending").limit(1))).first() is not None
 
     async def affected_by_config(self) -> list[Event]:
-        """Events not over yet whose mission type or climate is no longer in the configuration (after /reload):
-        they keep showing it, stored by value, but it can't be picked again."""
-        types, climates = set(self.store.current.events.mission_types), self.ids().climates
+        """Events not over yet whose climate is no longer in the configuration (after /reload): they keep showing
+        it, stored by value, but it can't be picked again."""
+        climates = self.ids().climates
         async with self.db.session() as session:
             events = (await session.execute(select(Event).where(Event.status.in_(("draft", "pending", "published")))
                                             .order_by(Event.assembly_at))).scalars().all()
-        return [e for e in events if (e.mission_type and e.mission_type not in types)
-                or (e.climate_role_id is not None and e.climate_role_id not in climates)]
+        return [e for e in events if e.climate_role_id is not None and e.climate_role_id not in climates]
 
     async def channel_name(self, event: Event) -> str:
         """``dd-mm-xxx``: the event date and the acronym of the group whose server it is."""
@@ -216,7 +212,7 @@ class EventService:
         missing = []
         if not (event.briefing_situation or event.briefing_mission or event.briefing_notes).strip():
             missing.append("briefing")
-        if event.kind != "zeus":
+        if event.kind not in COMING:
             async with self.db.session() as session:
                 if (await session.execute(select(Slot.id).where(Slot.event_id == event.id).limit(1))).first() is None:
                     missing.append("orbat")
@@ -236,15 +232,13 @@ class EventService:
             raise EventError(Problem.KIND_NOT_ALLOWED)
         if draft.kind == "guest" and draft.host_group_id is None:
             raise EventError(Problem.NEEDS_HOST)
-        if draft.mission_type not in self.store.current.events.mission_types:
-            raise EventError(Problem.UNKNOWN_TYPE)
         climates = self.ids().climates
         if draft.climate_role_id is not None and draft.climate_role_id not in climates:
             raise EventError(Problem.UNKNOWN_CLIMATE)
         times = draft.times
         if times.assembly_at <= self.clock():
             raise EventError(Problem.STARTED)
-        event = Event(kind=draft.kind, title=draft.title.strip()[:100], status="draft", mission_type=draft.mission_type,
+        event = Event(kind=draft.kind, title=draft.title.strip()[:100], status="draft",
                       climate=climates.get(draft.climate_role_id, ""), climate_role_id=draft.climate_role_id,
                       assembly_at=times.assembly_at, start_at=times.start_at, duration_minutes=times.duration_minutes,
                       created_by=member.id, author_id=member.id,
@@ -261,7 +255,7 @@ class EventService:
 
     # ---------------------------------------------------------------- editing
 
-    async def update(self, event_id: int, member: Member, *, title: str | None = None, mission_type: str | None = None,
+    async def update(self, event_id: int, member: Member, *, title: str | None = None,
                      climate_role_id: int | None | object = UNSET, kind: str | None = None,
                      host_group_id: int | None | object = UNSET, guest_group_ids: list[int] | None = None,
                      times: Times | None = None) -> ApprovalRequest | None:
@@ -273,8 +267,6 @@ class EventService:
                 raise EventError(Problem.NOT_DRAFT)
             if kind not in KINDS or (kind == "guest" and not self.access(member).publishes_without_approval):
                 raise EventError(Problem.KIND_NOT_ALLOWED)
-        if mission_type is not None and mission_type not in self.store.current.events.mission_types:
-            raise EventError(Problem.UNKNOWN_TYPE)
         climates = self.ids().climates
         if climate_role_id is not UNSET and climate_role_id is not None and climate_role_id not in climates:
             raise EventError(Problem.UNKNOWN_CLIMATE)
@@ -284,15 +276,13 @@ class EventService:
         if new_times:
             await self._check_times(event, times)
             if event.status == "published" and not self.access(member).publishes_without_approval and \
-                    (event.kind != "zeus" or await self.reservations.get(event.id) is not None):
+                    (event.kind not in COMING or await self.reservations.get(event.id) is not None):
                 proposal, new_times = times, False  # nothing moves until a moderator approves
         old_kind = event.kind
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             if title is not None:
                 row.title = title.strip()[:100]
-            if mission_type is not None:
-                row.mission_type = mission_type
             if climate_role_id is not UNSET:
                 row.climate_role_id, row.climate = climate_role_id, climates.get(climate_role_id, "")
             if kind is not None:
@@ -386,7 +376,7 @@ class EventService:
 
     async def set_limit(self, event_id: int, member: Member, limit: int | None) -> None:
         event = await self._organiser(event_id, member)
-        if event.kind != "zeus":
+        if event.kind not in COMING:
             raise EventError(Problem.NOT_ZEUS)
         await self._set(event_id, member, signup_limit=limit if limit and limit > 0 else None)
 
@@ -431,7 +421,7 @@ class EventService:
         if missing:
             raise EventError(Problem.INCOMPLETE, missing)
         access = self.access(member)
-        if access.publishes_without_approval or event.kind == "zeus":
+        if access.publishes_without_approval or event.kind in COMING:
             if event.kind in RESERVED and access.publishes_without_approval and await self.reservations.get(event.id) is None:
                 await self._book(event)
             await self._publish(event, by=member.id)
@@ -443,10 +433,10 @@ class EventService:
         return "pending"
 
     async def request_server(self, event_id: int, member: Member) -> ApprovalRequest:
-        """A member's Zeus event asks for the host: the reservation is made now (so a clash shows) and waits for
+        """A member's Zeus or training event asks for the host: the reservation is made now (so a clash shows) and waits for
         a moderator."""
         event = await self._organiser(event_id, member)
-        if event.kind != "zeus":
+        if event.kind not in COMING:
             raise EventError(Problem.NOT_ZEUS)
         if event.status not in ("draft", "published"):
             raise EventError(Problem.NOT_DRAFT)

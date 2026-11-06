@@ -117,13 +117,27 @@ class Times(BaseModel):
     archive_hours: int = Field(48, ge=0, description="After the attendance report (at the latest start + duration + "
                                                      "this), the channel moves to the archive")
     calendar_days: int = Field(14, ge=1, le=60, description="The header's calendar shows the events of this many days")
+    reply_seconds: int = Field(60, ge=0, le=840, description="The bot's private replies without buttons disappear "
+                                                             "after this long; 0: they stay (Discord allows 15 min)")
+
+
+class KindNames(BaseModel):
+    """The kinds' names as members see them, in every language; empty: the bot's own (Internal / Wewnętrzny ...)."""
+
+    internal: str | None = Field(None, max_length=50)
+    guest: str | None = Field(None, max_length=50, description="Another group hosts")
+    hosted: str | None = Field(None, max_length=50, description="Ours, with invited groups")
+    zeus: str | None = Field(None, max_length=50)
+    training: str | None = Field(None, max_length=50)
 
 
 class Events(BaseModel):
     """What the wizard offers (docs/PLAN.md, *Creating an event*)."""
 
-    mission_types: list[str] = Field(default_factory=lambda: ["Coop", "TvT", "Zeus", "Training"], min_length=1)
     climate_roles: list[Ref] = Field(default_factory=list, description="Interest roles such as @WW2 and @Modern")
+    kind_names: KindNames = Field(default_factory=KindNames)
+    discussion: str | None = Field(None, min_length=1, max_length=100,
+                                   description="Name of each event's discussion thread; default: Discussion / Dyskusja")
 
 
 class Attendance(BaseModel):

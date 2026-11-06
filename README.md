@@ -81,8 +81,10 @@ folder.
 
 The bot writes only `squad.xml`, into `BOT_SQUAD_XML__OUTPUT_DIR`; IIS serves that folder, with `squad.dtd`,
 `squad.xsl` and the logo kept there by hand. Members are those with a `BOT_ROLES__RANK` role and a Steam link;
-`BOT_ROLES__REMARK` roles make the remark. On the switch-over day, stop the old bot's squad.xml export, then import
-its links before the first start:
+`BOT_ROLES__REMARK` roles make the remark. Staff with *manage links* check the file with `/links status` (with
+*Write now*), see who is in it or missing with `/links list`, give a member an own remark with `/links remark`,
+and send or turn off the link reminders with `/links remind` and `/links reminders`. On the switch-over day, stop
+the old bot's squad.xml export, then import its links before the first start:
 
 ```powershell
 .venv\Scripts\python.exe -m app import-old-links D:\Workspace\python\IBC_BOT\data\steam_ids.json

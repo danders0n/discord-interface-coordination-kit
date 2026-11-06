@@ -61,6 +61,44 @@ async def test_reload_reports_errors_and_keeps_the_settings(services, tmp_path):
     assert services.settings is before
 
 
+async def test_plain_replies_disappear_and_ones_to_use_or_read_stay(services):
+    from app.discord_util import finish, reply
+
+    interaction = FakeInteraction(services, FakeMember(1), ENGLISH)
+    await reply(interaction, "Saved.")
+    await reply(interaction, "Pick one", view=discord.ui.View())
+    await reply(interaction, embed=discord.Embed(title="Profile"))
+    assert [r.kwargs.get("delete_after") for r in interaction.response.sent] == [60]
+    assert all("delete_after" not in r.kwargs for r in interaction.followup.sent)  # (deleted by delay instead)
+    services.store.current = services.settings.model_copy(update={"times": services.settings.times.model_copy(
+        update={"reply_seconds": 0})})
+    stays = FakeInteraction(services, FakeMember(1), ENGLISH)
+    await reply(stays, "Saved.")
+    assert stays.response.sent[0].kwargs["delete_after"] is None
+    pressed = FakeInteraction(services, FakeMember(1), ENGLISH)
+    await finish(pressed, "Done.")
+    assert pressed.response.edited[0] == {"content": "Done.", "view": None, "delete_after": None}
+    deferred = FakeInteraction(services, FakeMember(1), ENGLISH)
+    await deferred.response.defer()  # slow work first: the pressed message is edited afterwards
+    await finish(deferred, "Done.")
+    assert deferred.original_edits == [{"content": "Done.", "view": None}]
+
+
+async def test_slow_panel_work_answers_thinking_first(services, monkeypatch):
+    """Discord drops an interaction not answered within 3 seconds; cancelling archives the channel, which takes longer."""
+    from app.events import ui
+
+    async def slow_cancel():
+        assert interaction.response.deferred_with == {"ephemeral": True, "thinking": True}  # answered before the work
+        return True
+
+    interaction = FakeInteraction(services, FakeMember(1), ENGLISH)
+    modal = ui.TextModal(interaction, "Cancel event", "", 500, lambda _text: slow_cancel(), done="Cancelled.")
+    modal.text._value = "no Zeus"
+    await modal.on_submit(interaction)
+    assert interaction.followup.sent[0].content == "Cancelled."
+
+
 async def test_a_failing_command_answers_and_logs(services, caplog, monkeypatch):
     cog = AdminCog(services)
     monkeypatch.setattr(services.store, "reload", lambda: 1 / 0)

@@ -20,6 +20,7 @@ from app.eventchannel.service import Redrawer
 from app.i18n import t
 from app.resolve import Ids
 from app.settings import SettingsStore
+from app.signup.service import COMING
 
 KEY = "header"
 log = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class Header:
                 .order_by(Event.assembly_at))).scalars().all()
             lines = []
             for event in events:
-                if event.kind == "zeus":
+                if event.kind in COMING:
                     taken = (await session.execute(select(func.count()).select_from(Signup).where(
                         Signup.event_id == event.id, Signup.status == "coming"))).scalar()
                     places = f"{taken}/{event.signup_limit}" if event.signup_limit else str(taken)
@@ -52,7 +53,7 @@ class Header:
                                                           .where(Slot.event_id == event.id))).one()
                     places = f"{taken}/{total}"
                 link = f" · <#{event.channel_id}>" if event.channel_id else ""
-                lines.append(f"{ts(event.assembly_at, 'f')} · {kind_label(event.kind, self.store.current.language)} · "
+                lines.append(f"{ts(event.assembly_at, 'f')} · {kind_label(event.kind, self.store.current.language, self.store.current.events.kind_names)} · "
                              f"**{event.title}** · {places}{link}")
         return lines
 

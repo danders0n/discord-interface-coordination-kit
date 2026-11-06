@@ -39,7 +39,7 @@ class AdminCog(commands.Cog):
         if self.services.events is not None:  # stored by value, they keep showing it, but nobody can pick it again
             affected = await self.services.events.affected_by_config()
             if affected:
-                text += "\n" + t("These events still use a mission type or climate no longer in the settings:",
+                text += "\n" + t("These events still use a climate no longer in the settings:",
                                  locale) + "\n"
                 text += "\n".join(f"- {e.title}" + (f" (<#{e.channel_id}>)" if e.channel_id else "")
                                   for e in affected[:15])

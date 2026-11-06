@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Discord bot for one Arma 3 group's Discord server. Other groups have their own infrastructure and appear in the
 bot only by name. Events are *internal* (ours, on our server), *guest* (another group hosts; we get some of its
-slots), *hosted* (ours, on our server, with invited groups) or *Zeus* (ours, on our server, no ORBAT, just
-*Coming* / *Not coming*). Members' events, except Zeus events, need a moderator's approval before they are
+slots), *hosted* (ours, on our server, with invited groups), *Zeus* (ours, on our server, no ORBAT, just
+*Coming* / *Not coming*) or *training* (Zeus's rules, another name). Members' events, except Zeus and training events, need a moderator's approval before they are
 published. It runs events (missions) with ORBAT slot sign-ups, reserves the game host
 for them on **arma-server-supervisor** and builds each event's server profile there (mods from the preset, the
 mission), reports attendance from the supervisor's player stats, and generates the
@@ -68,7 +68,9 @@ exactly the settings.
 
 - `app/__main__.py`: the CLI; `run` wires everything (settings store, logging, database, scheduler, services, bot).
 - `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
-- `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()`, the command error handler.
+- `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()` (plain text
+  replies disappear after `times.reply_seconds`), `finish()` (a last word replacing a pressed message), the
+  command error handler.
 - `app/settings.py`: `.env` model and `SettingsStore` (`/reload`; restart-only values keep their old value).
   Channels and roles are `Ref`s: an id or a name.
 - `app/resolve.py`: turns the `Ref`s into `Ids` on the server (start-up, `/reload`); code reads `services.ids`,
@@ -91,16 +93,17 @@ exactly the settings.
   `xN`; `!` only for slots locked closed, never for assignments). `app/orbat/templates.py`: shared templates.
 - `app/signup/service.py`: `SignupService`, the sign-up rules (see its docstring): atomic claims, the partial
   unique index, offers with expiry actions, Zeus's limit in one statement, `set_orbat` matching after sign-ups,
-  role changes. It talks to Discord only through the `Notifier` protocol and `roles_of`; refusals are `Refusal`
+  role changes. `COMING` lists the kinds without an ORBAT (Zeus, training): check `kind in COMING`, never `== "zeus"`. It talks to Discord only through the `Notifier` protocol and `roles_of`; refusals are `Refusal`
   codes for the Discord layer to word. Only one instance per scheduler (it registers the offer-expiry handler).
 - `app/events/`: `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next
-  day, aware UTC out), `groups.py` (other groups), `service.py` (`EventService`: create, update with proposals
+  day, aware UTC out), `groups.py` (other groups), `service.py` (`EventService`: the kinds, create, update with proposals
   for members' new times, publish or send for approval, approve / reject / withdraw, cancel, end, and the timed
   actions; refusals are `Problem` codes; the Discord side listens through `EventNotifier`).
-- `app/eventchannel/`: `render.py` (pure: event + board -> `Message`s keyed `info`, `briefing`, `preset`,
-  `orbat:N`), `sync.py` (keeps them in order: edit in place, append / delete continuations at the end, re-post
-  after a late preset or a message deleted by hand; edits always pass `view`, as leaving it out keeps old buttons),
-  `service.py` (`EventChannels`: the draft's hidden channel and thread, overwrites that follow the co-organisers,
+- `app/eventchannel/`: `render.py` (pure: event + board -> `Message`s keyed `info` (embed), `briefing[:N]`,
+  `preset`, `orbat:N` (plain text, split by `texts()` at 2000 characters), `report` (embed), `discussion` (the
+  thread link, last); `kind_label` takes the configured names), `sync.py` (keeps them in order: edit in place,
+  append / delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always pass `view`, as leaving it out keeps old buttons),
+  `service.py` (`EventChannels`: the draft's hidden channel, the thread at publishing (Discord's card last, stored as `card`; a draft's pings by DM), overwrites that follow the co-organisers,
   batched redraws via `Redrawer`, background renames, publish + announcement, a redraw at the start (sign-up
   closes) and the archive, both moved with the event's times, cancel + thread ping, archive by quarter with
   overflow categories, the 45 / 50 channel room of the categories; it is the notifier of `EventService` and
@@ -122,11 +125,14 @@ exactly the settings.
   reservation* while Approve is off (`approval:<id>:<action>`).
 - `app/links/`: `service.py` (`LinkService`: Steam ID parsing, one Steam ID per member, `rank_lost_at` and the
   deletion after N days, reminder bookkeeping, the rollout flag; `import_old` for `python -m app import-old-links`),
-  `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link`, the modal and `/links set`), `cog.py`
-  (`/link`, `/unlink`, staff `/links set | remove`), `watch.py` (`LinkWatch`: role changes, departures, renames,
-  the hourly `link_reminders` action with DMs or a reminder-channel ping, the first-run announcement).
-  `app/squadxml/service.py`: `render` (the old bot's layout) and `SquadXml` (debounced atomic writes, only when
-  changed, never while `roster()` is None). Both get the server's members through `EventBot.roster`.
+  `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link`, the modal and `/links set`; the
+  `/links status` embed and *Write now* `squadxml:write`), `cog.py` (`/link`, `/unlink`, staff `/links set |
+  remove | status | list | remark | remind | reminders`), `watch.py` (`LinkWatch`: role changes, departures,
+  renames, the hourly `link_reminders` action with DMs or a reminder-channel ping, skipping `muted` members, the
+  first-run announcement). `app/squadxml/service.py`: `render` (the old bot's layout) and `SquadXml` (debounced
+  atomic writes, only when changed, never while `roster()` is None; `remark_of` puts a link's own remark before
+  the role remarks; `status()` for `/links status`, the last failure in memory). Both get the server's members
+  through `EventBot.roster`.
 - `app/attendance/`: `stats.py` (`StatsReader`: plays and mission time from `/api/stats/attendance`, or the plays
   fallback), `service.py` (`AttendanceService`: the `attendance_watch` action every minute from the assembly,
   `finished_at` and `compute` as pure rules, `attendance_read` with retries until the deadline, guest events'
@@ -162,14 +168,14 @@ These rules span many features; read them before writing any handler.
   the plan).
 - **Every button survives a restart:** the header's *Create event*, the event messages' buttons, offers and
   reminders use persistent views / `DynamicItem` with ids in `custom_id`.
-- **The event channel is a set of bot-owned messages** (info embed, briefing, ORBAT plus continuation messages,
-  preset), kept in order and edited in place by stored message ids. Edits are batched to stay within rate
+- **The event channel is a set of bot-owned messages** (info embed, briefing and ORBAT as plain text with
+  continuation messages, preset, report, the thread link last), kept in order and edited in place by stored message ids. Edits are batched to stay within rate
   limits. Members talk in the thread, and **every ping goes to the thread** too, so nothing lands between the
   bot's messages; the channel is read-only for members.
 - **Reservations under way are frozen:** from the quiet period on, the supervisor ignores new times and refuses
   `DELETE` (409). Lock the times in the panel then, and end by id before deleting.
 - **Slot claims are atomic** ("take it if still free" in one update), because sign-up opening causes a rush.
-- **Events store config items by value** (mission type, climate), so `/reload` can remove an item without
+- **Events store config items by value** (the climate), so `/reload` can remove an item without
   breaking existing events. Other groups are database rows that are renamed, never deleted.
 - **Guest events never touch the supervisor:** no reservation, no profile, attendance by hand.
 - **Permissions:** the config's role mapping, plus each event's creator and co-organisers. Every Discord user acts

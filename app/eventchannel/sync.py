@@ -1,10 +1,14 @@
 """Keeping the channel's messages in order (docs/PLAN.md, *Event channel*, *Order kept*).
 
-The bot stores every message id by key and edits in place. The ORBAT is last, so a new continuation is simply
-posted at the end and one no longer needed is deleted from the end. The one case that re-posts is a message that
-must go *before* messages already posted (a preset added after the ORBAT): everything after it is deleted and
-posted again. A message someone deleted by hand is treated the same way: it and everything after it are posted
-again, so the order holds."""
+The bot stores every message id by key and edits in place. A continuation follows its first message (``briefing:1``
+after ``briefing``, ``orbat:1`` after ``orbat:0``); the report and the discussion link come last. A message that
+must go *before* messages already posted (a preset added after the ORBAT, a new ORBAT continuation before the
+discussion link) is the one case that re-posts: everything after it is deleted and posted again. A message someone deleted by hand is treated the same way: it and everything after it are posted
+again, so the order holds.
+
+The thread is made after the other messages, so Discord's own "started a thread" card is last; stored as ``card``,
+it stands in for the discussion link (decided 2026-11-02). Discord can't post that card again, so once a message
+must go after it (a late preset, an ORBAT continuation, the report), the card is deleted and the link is posted."""
 
 from __future__ import annotations
 
@@ -17,8 +21,10 @@ import discord
 
 from app.eventchannel.render import Message
 
-FIXED = {"info": 0, "briefing": 1, "preset": 2}
-LAST = {"report": 10_000}  # the attendance report: after the ORBAT, which no longer changes by then
+FIXED = {"info": 0, "briefing": 10, "preset": 100}
+PAGED = {"briefing": 10, "orbat": 1000}  # key:N is the first message's place + N
+LAST = {"report": 100_000, "discussion": 200_000, "card": 200_000}  # the report comes once the ORBAT is final
+CARD, DISCUSSION = "card", "discussion"
 log = logging.getLogger(__name__)
 
 
@@ -28,8 +34,7 @@ def order(key: str) -> int:
     if key in LAST:
         return LAST[key]
     kind, _, number = key.partition(":")
-    assert kind == "orbat", key
-    return len(FIXED) + int(number)
+    return PAGED[kind] + int(number)
 
 
 def _view(message: Message) -> dict[str, Any]:
@@ -62,14 +67,16 @@ async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Mes
     """Bring the channel to ``messages``; returns the new key -> id map (save it even after an error)."""
     stored = dict(stored)
     for _attempt in range(2):
+        wanted = dict(messages)
+        if CARD in stored:
+            if DISCUSSION in wanted and all(key in stored for key in wanted if key != DISCUSSION):
+                del wanted[DISCUSSION]  # the card is still last: it is the link
+            else:
+                await _delete(channel, stored.pop(CARD))
         missing = None
-        for op in plan(stored, list(messages)):
+        for op in plan({key: id_ for key, id_ in stored.items() if key != CARD}, list(wanted)):
             if op.action == "delete":
-                try:
-                    await channel.get_partial_message(stored[op.key]).delete()
-                except discord.NotFound:
-                    pass
-                del stored[op.key]
+                await _delete(channel, stored.pop(op.key))
             elif op.action == "edit":
                 message = messages[op.key]
                 try:
@@ -91,9 +98,13 @@ async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Mes
         log.info("Message %s of #%s was deleted; posting it and the ones after it again", missing, channel.name)
         for key in [k for k in stored if order(k) >= order(missing)]:
             if key != missing:
-                try:
-                    await channel.get_partial_message(stored[key]).delete()
-                except discord.NotFound:
-                    pass
+                await _delete(channel, stored[key])
             del stored[key]
     return stored
+
+
+async def _delete(channel: Any, message_id: int) -> None:
+    try:
+        await channel.get_partial_message(message_id).delete()
+    except discord.NotFound:
+        pass

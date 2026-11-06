@@ -15,6 +15,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from app.eventchannel.render import kind_label
 from app.i18n import t
 
 MODES = ("inline", "zip", "listed")
@@ -50,14 +51,15 @@ def _attachment(item: dict[str, Any], mode: str, language: str) -> str:
 
 
 def render(event: Any, board: Any, entries: list, messages: list, names: Mapping[int, str], mode: str,
-           language: str, tz: tzinfo) -> str:
+           language: str, tz: tzinfo, kinds: Any = None) -> str:
+    """``kinds``: settings.events.kind_names."""
     def when(value) -> str:
         return value.astimezone(tz).strftime("%d.%m.%Y %H:%M")
 
     parts = [f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_text(event.title)}</title>"
              f"<style>{STYLE}</style></head><body>",
              f"<h1>{_text(event.title)}</h1>",
-             f"<p class=\"meta\">{_text(event.mission_type)} · {t('Assembly', language)} {when(event.assembly_at)} · "
+             f"<p class=\"meta\">{_text(kind_label(event.kind, language, kinds))} · {t('Assembly', language)} {when(event.assembly_at)} · "
              f"{t('Start', language)} {when(event.start_at)} · {event.duration_minutes} min · "
              f"{t('Author', language)}: {_text(_name(event.author_id, names))}</p>"]
     if event.status == "cancelled":

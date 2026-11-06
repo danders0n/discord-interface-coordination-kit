@@ -21,7 +21,6 @@ def event_problem(problem: Problem, locale: Any, missing: list[str] | None = Non
         Problem.NOT_ALLOWED: t("You don't have the permission for this.", locale),
         Problem.KIND_NOT_ALLOWED: t("Only mission makers and above make guest events.", locale),
         Problem.NEEDS_HOST: t("A guest event needs its host group.", locale),
-        Problem.UNKNOWN_TYPE: t("That mission type is not in the list.", locale),
         Problem.UNKNOWN_CLIMATE: t("That climate is not in the list.", locale),
         Problem.NOT_DRAFT: t("That works only for a draft.", locale),
         Problem.PENDING: t("The event waits for approval; withdraw the request to change it.", locale),
@@ -31,7 +30,7 @@ def event_problem(problem: Problem, locale: Any, missing: list[str] | None = Non
         Problem.NOT_PENDING: t("Nothing waits for approval.", locale),
         Problem.NO_RESERVATION: t("The server isn't reserved for this time; resolve the clash and retry the reservation first.", locale),
         Problem.TOO_LONG: t("That is too long.", locale),
-        Problem.NOT_ZEUS: t("That works only for a Zeus event.", locale),
+        Problem.NOT_ZEUS: t("That works only for a Zeus or training event.", locale),
         Problem.NOT_A_NUMBER: t("Type a whole number, or leave it empty.", locale),
         Problem.NOT_AN_IMAGE: t("Send a PNG, JPG, WEBP or GIF image.", locale),
     }[problem]

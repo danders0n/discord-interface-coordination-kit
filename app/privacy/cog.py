@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.discord_util import reply, require
+from app.discord_util import finish, reply, require
 from app.i18n import language_of, t
 from app.permissions import Perm
 from app.privacy import service
@@ -62,5 +62,5 @@ class ConfirmErase(discord.ui.View):
         # The staff log keeps that it ran, not whom it was about.
         s.staff.post(t("{admin} ran a data erasure; the member is now former:{number}.", s.settings.language,
                        admin=interaction.user.mention, number=done.number))
-        await interaction.response.edit_message(content=t("Erased: the member is now former:{number}.",
-                                                          interaction.locale, number=done.number), view=None)
+        await finish(interaction, t("Erased: the member is now former:{number}.", interaction.locale,
+                                    number=done.number))
