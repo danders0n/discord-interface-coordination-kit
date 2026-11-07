@@ -262,6 +262,60 @@ async def test_sign_ups_are_edited_in_place_and_continuations_appended(world, cl
     assert len(channel.messages) == 4
 
 
+def test_the_order_puts_the_top_channels_first_and_the_events_by_start():
+    from app.eventchannel.order import wanted
+
+    c = {name: SimpleNamespace(id=n, name=name) for n, name in enumerate(["late", "chat", "header", "early", "rules"])}
+    day = datetime(2026, 11, 20, tzinfo=UTC)
+    starts = {c["late"].id: (day + timedelta(days=2), 1), c["early"].id: (day, 2)}
+    order = wanted(list(c.values()), [c["rules"].id, c["header"].id, 99], starts)
+    assert [ch.name for ch in order] == ["rules", "header", "chat", "early", "late"]
+    same_start = {c["late"].id: (day, 3), c["early"].id: (day, 2)}  # then the older event first
+    assert [ch.name for ch in wanted(list(c.values()), [], same_start)] == ["chat", "header", "rules", "early", "late"]
+
+
+async def test_the_categories_are_kept_in_date_order(world, clock, guild, services):
+    import dataclasses
+    from conftest import HEADER
+
+    channels, events, _ = world
+    rules, chat = FakeChannel(901, "instrukcja-strefy", category_id=EVENTS, position=4), \
+        FakeChannel(902, "pogadanki", category_id=EVENTS, position=0)
+    guild.add(rules), guild.add(chat)
+    guild.get_channel(HEADER).category_id, guild.get_channel(HEADER).position = EVENTS, 2
+    services.ids = dataclasses.replace(services.ids, top=(rules.id, HEADER))
+
+    made = {}
+    for days in (9, 3, 6):  # created, and published, out of order
+        event, channel = await make(world, clock, days=days)
+        made[days] = (event, channel)
+        await channels.sorter.settle()
+        assert [ch.id for ch in guild.get_channel(DRAFTS).channels] == \
+            [made[d][1].id for d in sorted(made)]  # the drafts by start too
+    for days in (9, 3, 6):
+        await ready_and_publish(world, made[days][0])
+        await channels.sorter.settle()
+    names = lambda category: [ch.id for ch in guild.get_channel(category).channels]  # noqa: E731
+    assert names(EVENTS) == [rules.id, HEADER, chat.id, made[3][1].id, made[6][1].id, made[9][1].id]
+
+    requests = len(guild.reorders)
+    await channels.refresh_all()  # already in order: nothing is sent
+    await channels.redrawer.settle(), await channels.sorter.settle()
+    assert len(guild.reorders) == requests
+
+    later = clock.now + timedelta(days=12)  # the earliest event moves to the end
+    await events.update(made[3][0].id, MAKER, times=Times(later, later + timedelta(minutes=30), 180))
+    await channels.redrawer.settle(), await channels.sorter.settle()
+    assert names(EVENTS)[3:] == [made[6][1].id, made[9][1].id, made[3][1].id]
+
+    made[6][1].position = 40  # a moved channel keeps its number, wherever that puts it
+    for days in (9, 6):  # the archive is by date all the same
+        await channels.archive(made[days][0].id)
+    await channels.sorter.settle()
+    archive = guild.get_channel(made[9][1].id).category
+    assert [ch.id for ch in archive.channels] == [made[6][1].id, made[9][1].id]
+
+
 async def test_a_new_date_renames_the_channel(world, clock):
     channels, events, _ = world
     event, channel = await make(world, clock)

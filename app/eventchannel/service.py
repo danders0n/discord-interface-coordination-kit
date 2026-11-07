@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from app.db import Database
 from app.db.models import AttendanceEntry, Event, Signup, Slot
-from app.eventchannel import render, sync
+from app.eventchannel import order, render, sync
 from app.i18n import t
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
@@ -119,6 +119,7 @@ class EventChannels:
         self.feedback: Any = None  # FeedbackService: the report's average and its Rate button
         self.roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
         self.redrawer = Redrawer(self.redraw_now, interval)
+        self.sorter = Redrawer(self._sort, interval)  # by category id: the channels in date order
         self._renames: dict[int, asyncio.Task] = {}
         self._drawing: dict[int, asyncio.Lock] = {}  # one redraw (or the thread's making) per event at a time
         scheduler.register(ARCHIVE_KIND, self._archive_action)
@@ -222,6 +223,28 @@ class EventChannels:
                 self._staff(t("The category {category} holds {count} of {limit} channels.", self.language,
                               category=name, count=count, limit=CATEGORY_LIMIT))
 
+    # ---------------------------------------------------------------- order of the channels
+
+    def _sort_later(self, *category_ids: int | None) -> None:
+        for category_id in category_ids:
+            if category_id:
+                self.sorter.request(category_id)
+
+    async def _sort(self, category_id: int) -> None:
+        guild = self.guild()
+        category = guild.get_channel(category_id) if guild is not None else None
+        if category is None:
+            return
+        async with self.db.session() as session:
+            rows = (await session.execute(select(Event.channel_id, Event.start_at, Event.id).where(
+                Event.channel_id.in_([c.id for c in category.channels])))).all()
+        ids = self.ids()
+        top = ids.top if category_id in (ids.drafts_category, ids.events_category) else ()
+        try:
+            await order.apply(guild, category, top, {channel: (start, event) for channel, start, event in rows})
+        except discord.HTTPException as exc:
+            log.warning("Putting %s in date order failed: %s", category.name, exc)
+
     # ---------------------------------------------------------------- the channel's life
 
     async def open_draft(self, event_id: int) -> Any:
@@ -307,6 +330,7 @@ class EventChannels:
         tags = {key: message.tag for key, message in messages.items() if message.files}
         await self._save(event_id, messages=stored, attached=tags)
         await self._announcement(event, ctx)
+        self._sort_later(channel.category_id)  # a new channel, or new times
         if event.archived_at is None and event.status != "cancelled":
             self._rename(event, channel, await self.events.channel_name(event), await self._topic(event))
 
@@ -360,6 +384,7 @@ class EventChannels:
                                                                            users=False, everyone=False))
             await self._save(event_id, announcement_id=sent.id)
         await self._schedule(event)
+        self._sort_later(self.ids().events_category)  # (the redraw may still have seen the drafts category)
         self._warn_room()
 
     async def _schedule(self, event: Event) -> None:
@@ -413,7 +438,8 @@ class EventChannels:
             return
         category = await self._archive_category(guild, event)
         await channel.edit(category=category, overwrites=dict(category.overwrites) | {guild.me: BOT})
-        thread = guild.get_thread(event.thread_id) if event.thread_id else None
+        self._sort_later(category.id)
+        thread =guild.get_thread(event.thread_id) if event.thread_id else None
         if thread is None and event.thread_id:
             try:
                 thread = await guild.fetch_channel(event.thread_id)
@@ -450,7 +476,9 @@ class EventChannels:
     # ---------------------------------------------------------------- start-up
 
     async def refresh_all(self) -> None:
-        """After a restart: redraw every channel not archived yet (sign-up states, missed changes)."""
+        """After a restart: redraw every channel not archived yet (sign-up states, missed changes), and put the
+        categories in order (channels moved by hand)."""
+        self._sort_later(self.ids().drafts_category, self.ids().events_category)
         async with self.db.session() as session:
             ids = (await session.execute(select(Event.id).where(Event.channel_id.is_not(None),
                                                                 Event.archived_at.is_(None)))).scalars().all()

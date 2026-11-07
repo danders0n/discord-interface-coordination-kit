@@ -30,6 +30,7 @@ class Ids:
     announcements: int | None = None
     staff: int | None = None
     link_reminder: int | None = None
+    top: tuple[int, ...] = ()  # channels above the events, in order (the header first unless listed)
     member: frozenset[int] = frozenset()
     mission_maker: int | None = None
     announcement: int | None = None
@@ -100,9 +101,14 @@ def resolve(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
                 for name in CATEGORY_CHANNELS}
     channels |= {name: r.channel(getattr(settings.channels, name), f"channels.{name}", False)
                  for name in TEXT_CHANNELS}
+    top = tuple(dict.fromkeys(i for ref in settings.channels.top
+                              if (i := r.channel(ref, "channels.top", False)) is not None))
+    if channels["header"] is not None and channels["header"] not in top:
+        top = (channels["header"], *top)
     roles = settings.roles
     ids = Ids(
         **channels,
+        top=top,
         member=r.roles(roles.member, "roles.member"),
         mission_maker=r.role(roles.mission_maker, "roles.mission_maker"),
         announcement=r.role(roles.announcement, "roles.announcement"),

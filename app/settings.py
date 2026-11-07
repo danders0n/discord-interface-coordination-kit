@@ -47,6 +47,9 @@ class Channels(BaseModel):
     events_category: Ref = Field(description="Category of published events")
     header: Ref = Field(description="Channel with the Create event button and the calendar")
     announcements: Ref
+    top: list[Ref] = Field(default_factory=list,
+                           description="Channels kept at the top of the events and drafts categories, above the "
+                                       "events, in this order; the header goes first unless listed")
     staff: Ref = Field(description="Staff-only channel: the bot keeps the staff log and moderation threads in it")
     staff_log_thread: str = Field("Staff log", min_length=1, max_length=100)
     moderation_thread: str = Field("Moderacja", min_length=1, max_length=100, description="Approval requests")

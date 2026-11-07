@@ -98,6 +98,7 @@ async def settle(channels) -> None:
     """Let an event stack's background work finish (redraws, renames) before the database closes."""
     for _ in range(3):  # (a redraw may ask for another)
         await channels.redrawer.settle()
+        await channels.sorter.settle()
         if channels.header is not None:
             await channels.header.redrawer.settle()
         await asyncio.gather(*channels._renames.values(), return_exceptions=True)

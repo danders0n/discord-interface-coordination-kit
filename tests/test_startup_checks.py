@@ -27,6 +27,20 @@ def test_names_work_like_ids_and_ignore_case(guild, tmp_path):
     assert ids.drafts_category == DRAFTS and ids.staff == STAFF and ids.member == {MEMBER}
 
 
+def test_the_top_channels_put_the_header_first_unless_listed(guild, tmp_path):
+    from conftest import ANNOUNCE, HEADER
+
+    guild.add(FakeChannel(997, "instrukcja-strefy"))
+    base = {"drafts_category": DRAFTS, "events_category": EVENTS, "header": HEADER, "announcements": ANNOUNCE,
+            "staff": STAFF}
+    ids, problems = resolve(guild, make_settings(tmp_path, channels=base | {"top": ["Instrukcja-strefy", ANNOUNCE]}))
+    assert problems == [] and ids.top == (HEADER, 997, ANNOUNCE)
+    ids, _ = resolve(guild, make_settings(tmp_path, channels=base | {"top": [997, ANNOUNCE, HEADER]}))
+    assert ids.top == (997, ANNOUNCE, HEADER)
+    ids, problems = resolve(guild, make_settings(tmp_path, language="en", channels=base | {"top": ["gone"]}))
+    assert ids.top == (HEADER,) and problems == ["BOT_CHANNELS__TOP: gone not found on this server"]
+
+
 def test_missing_ambiguous_and_wrong_kind(guild, tmp_path):
     guild.add(FakeRole(999, "Klanowicz"))
     guild.add(FakeChannel(998, "Eventy"))  # a text channel named like the category: not a clash for a category

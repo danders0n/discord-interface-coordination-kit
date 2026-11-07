@@ -178,6 +178,7 @@ class FakeChannel:
     overwrites: dict[Any, Any] = field(default_factory=dict)
     topic: str | None = None
     posts: list[FakeMessage] = field(default_factory=list)  # what members wrote
+    position: int = 0  # Discord's order within the category; a moved channel keeps its number
 
     def history(self, limit: int | None = None, oldest_first: bool = False):
         return _history(_bot_messages(self.sent) + self.posts, oldest_first)
@@ -208,8 +209,8 @@ class FakeChannel:
 
     @property
     def channels(self) -> list[FakeChannel]:
-        """A category's channels."""
-        return [c for c in self.guild.channels if c.category_id == self.id]
+        """A category's channels, in Discord's order."""
+        return sorted((c for c in self.guild.channels if c.category_id == self.id), key=lambda c: (c.position, c.id))
 
     async def edit(self, **changes: Any) -> FakeChannel:
         if "category" in changes:
@@ -240,8 +241,15 @@ class FakeGuild:
         self.members: dict[int, FakeMember] = {}
         self.me = me or FakeMember(BOT_ID, "bot")
         self.default_role = FakeRole(id, "@everyone")
+        self.reorders: list[list[int]] = []  # each bulk position update: the channel ids in their new order
+        self._state = SimpleNamespace(http=SimpleNamespace(bulk_channel_update=self._bulk_channel_update))
         for channel in channels:
             channel.guild = self
+
+    async def _bulk_channel_update(self, guild_id: int, payload: list[dict], reason: str | None = None) -> None:
+        for item in payload:
+            self.channel_map[item["id"]].position = item["position"]
+        self.reorders.append([item["id"] for item in sorted(payload, key=lambda item: item["position"])])
 
     @property
     def categories(self) -> list[FakeChannel]:
@@ -249,8 +257,9 @@ class FakeGuild:
 
     async def create_text_channel(self, name: str, *, category: FakeChannel | None = None,
                                   overwrites: dict | None = None, topic: str | None = None, **_: Any) -> FakeChannel:
+        bottom = max((c.position for c in category.channels), default=-1) + 1 if category else 0  # as Discord
         channel = FakeChannel(next(_ids), name, category_id=category.id if category else None,
-                              overwrites=dict(overwrites or {}), topic=topic)
+                              overwrites=dict(overwrites or {}), topic=topic, position=bottom)
         self.add(channel)
         return channel
 
