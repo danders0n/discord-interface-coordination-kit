@@ -167,7 +167,10 @@ These rules span many features; read them before writing any handler.
 - **Nothing timed lives in memory.** Sign-up opening, reminders, reserve offers, stale drafts, reservation
   retries, attendance and archiving are rows in a `scheduled_action` table, run by one loop. After downtime,
   actions that change state run late, and pings run only while still useful (*Scheduled actions and downtime* in
-  the plan).
+  the plan). The loop starts in `on_ready`, once the guild and the ids are there; a handler that can't do its
+  work (no guild) raises, so it is retried, never returns as if done.
+- **Nothing typed goes into a supervisor URL unchecked.** Autocomplete only suggests: a slug is checked against
+  the supervisor's list, and the client quotes every outside path segment (`_segment`).
 - **Every button survives a restart:** the header's *Create event*, the event messages' buttons, offers and
   reminders use persistent views / `DynamicItem` with ids in `custom_id`.
 - **The event channel is a set of bot-owned messages** (info embed, briefing and ORBAT as plain text with

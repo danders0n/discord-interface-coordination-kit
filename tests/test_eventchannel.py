@@ -479,3 +479,42 @@ async def test_after_a_restart_every_open_channel_is_redrawn(world, clock):
     await channels.refresh_all()
     await channels.redrawer.settle()
     assert channel.messages[0].embeds[0].title.endswith("Renamed while down")
+
+
+async def test_without_the_guild_the_archive_waits_rather_than_passing_for_done(world, clock, services, guild):
+    """A scheduled action run while the bot isn't connected must be tried again, not marked done."""
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    await ready_and_publish(world, event)
+    channels.guild = lambda: None
+    clock.now = event.start_at + timedelta(minutes=180, hours=48)
+    await services.scheduler.run_due()
+    assert await services.scheduler.exists(f"archive:{event.id}")
+    assert (await events.get(event.id)).archived_at is None
+    channels.guild = lambda: guild
+    clock.now += timedelta(minutes=5)  # (after the scheduler's first backoff)
+    await services.scheduler.run_due()
+    assert (await events.get(event.id)).archived_at is not None
+
+
+async def test_without_the_guild_a_cancelled_draft_keeps_its_channel_id(world, clock, guild):
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    channels.guild = lambda: None
+    with pytest.raises(RuntimeError):
+        await channels.delete(event.id)
+    assert (await events.get(event.id)).channel_id == channel.id
+
+
+async def test_a_lost_archive_action_is_scheduled_again_after_a_restart(world, clock, services, guild):
+    """Before the fix the archive could be marked done without archiving: the start-up redraw repairs it."""
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    await ready_and_publish(world, event)
+    await services.scheduler.cancel(f"archive:{event.id}")
+    clock.now = event.start_at + timedelta(minutes=180, hours=48, seconds=1)
+    await channels.refresh_all()
+    await channels.redrawer.settle()
+    assert await services.scheduler.exists(f"archive:{event.id}")
+    await services.scheduler.run_due()
+    assert (await events.get(event.id)).archived_at is not None

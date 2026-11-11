@@ -146,11 +146,16 @@ class EventBot(commands.Bot):
                     LinkCog(self.services), AttendanceCog(self.services), ArchiveCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
+        # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before
+        # them would be marked done having done nothing (an archive, a stale draft's channel, a ping).
         self._tasks = [
-            asyncio.create_task(self.services.scheduler.run(), name="scheduler"),
             asyncio.create_task(self.services.staff.run(self._send_staff), name="staff-log"),
             asyncio.create_task(heartbeat.run(self.services.supervisor), name="heartbeat"),
         ]
+
+    def start_scheduler(self) -> None:
+        if not any(task.get_name() == "scheduler" for task in self._tasks):
+            self._tasks.append(asyncio.create_task(self.services.scheduler.run(), name="scheduler"))
 
     def staff_channel(self) -> tuple[discord.Guild, discord.TextChannel]:
         guild = self.get_guild(self.services.settings.guild_id)
@@ -172,7 +177,7 @@ class EventBot(commands.Bot):
         settings = self.services.settings
         guild = self.get_guild(settings.guild_id)
         if guild is None:
-            log.error("The bot is not on the server %s (BOT_GUILD_ID)", settings.guild_id)
+            log.error("The bot is not on the server %s (BOT_GUILD_ID); no scheduled action runs", settings.guild_id)
             return
         self.services.ids, problems = startup_checks.check(guild, settings)
         for problem in problems:
@@ -189,13 +194,16 @@ class EventBot(commands.Bot):
             text += "\n" + t("Problems with the configuration:", settings.language) + "\n"
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
-        await self.services.channels.refresh_all()  # whatever changed while the bot was down
-        self.services.channels.header.request()
         try:
-            await self.services.link_watch.start()  # ranks lost meanwhile, the rollout, squad.xml rebuilt
-        except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
-            log.exception("Starting the Steam links failed")
-        await self.services.exporter.start()  # the daily move of the oldest quarter into the database
+            await self.services.channels.refresh_all()  # whatever changed while the bot was down
+            self.services.channels.header.request()
+            try:
+                await self.services.link_watch.start()  # ranks lost meanwhile, the rollout, squad.xml rebuilt
+            except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
+                log.exception("Starting the Steam links failed")
+            await self.services.exporter.start()  # the daily move of the oldest quarter into the database
+        finally:
+            self.start_scheduler()  # now: the guild is there and the ids resolved; what was due meanwhile runs late
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

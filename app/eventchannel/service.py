@@ -146,6 +146,14 @@ class EventChannels:
         guild = self.guild()
         return guild.get_channel(event.channel_id) if guild is not None and event.channel_id else None
 
+    def _connected(self) -> Any:
+        """The guild, for work that must not pass for done without it (deleting, archiving): raises, so a scheduled
+        action is tried again rather than marked done."""
+        guild = self.guild()
+        if guild is None:
+            raise RuntimeError("Not connected to the Discord server")
+        return guild
+
     async def _topic(self, event: Event) -> str:
         local = event.assembly_at.astimezone(self.store.current.tz)
         kind = render.kind_label(event.kind, self.language, self.store.current.events.kind_names)
@@ -401,6 +409,7 @@ class EventChannels:
             await self._schedule(event)
 
     async def delete(self, event_id: int) -> None:
+        self._connected()  # (without it the channel would be forgotten, not deleted)
         event = await self._event(event_id)
         channel = self._channel(event)
         if channel is not None:
@@ -432,14 +441,14 @@ class EventChannels:
     # ---------------------------------------------------------------- archive
 
     async def archive(self, event_id: int) -> None:
-        guild, event = self.guild(), await self._event(event_id)
+        guild, event = self._connected(), await self._event(event_id)
         channel = self._channel(event)
         if channel is None or event.archived_at is not None:
             return
         category = await self._archive_category(guild, event)
         await channel.edit(category=category, overwrites=dict(category.overwrites) | {guild.me: BOT})
         self._sort_later(category.id)
-        thread =guild.get_thread(event.thread_id) if event.thread_id else None
+        thread = guild.get_thread(event.thread_id) if event.thread_id else None
         if thread is None and event.thread_id:
             try:
                 thread = await guild.fetch_channel(event.thread_id)
@@ -480,10 +489,26 @@ class EventChannels:
         categories in order (channels moved by hand)."""
         self._sort_later(self.ids().drafts_category, self.ids().events_category)
         async with self.db.session() as session:
-            ids = (await session.execute(select(Event.id).where(Event.channel_id.is_not(None),
+            events = (await session.execute(select(Event).where(Event.channel_id.is_not(None),
                                                                 Event.archived_at.is_(None)))).scalars().all()
-        for event_id in ids:
-            self.redrawer.request(event_id)
+        for event in events:
+            self.redrawer.request(event.id)
+            await self._repair_archive(event)
+
+    async def _repair_archive(self, event: Event) -> None:
+        """A channel left out of the archive: its action ran while the bot wasn't connected (before 2026-11) and
+        was marked done. A published, ended or cancelled event not archived yet always has one waiting."""
+        if event.status not in ("published", "ended", "cancelled"):
+            return
+        key = f"{ARCHIVE_KIND}:{event.id}"
+        if await self.scheduler.exists(key):
+            return
+        due = self.clock() if event.status == "cancelled" else event.start_at + timedelta(
+            minutes=event.duration_minutes) + timedelta(hours=self.store.current.times.archive_hours)
+        if event.reported_at is not None:
+            due = event.reported_at + timedelta(hours=self.store.current.times.archive_hours)
+        await self.scheduler.schedule(ARCHIVE_KIND, due, key=key, event_id=event.id)
+        log.info("Event %s had no archive action: archived at %s", event.id, due)
 
     # ---------------------------------------------------------------- the notifiers
 
