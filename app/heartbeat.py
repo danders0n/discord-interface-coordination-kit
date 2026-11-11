@@ -32,7 +32,9 @@ async def run(client: SupervisorClient) -> None:
             sent = await beat_once(client, refresh)
             if unreachable:
                 log.info("The supervisor answers again")
-            refresh, unreachable = False, False
+            # Without the capability, read the capabilities again at the next check: the supervisor may have been
+            # updated meanwhile.
+            refresh, unreachable = not sent, False
             delay = INTERVAL if sent else RECHECK
         except SupervisorError as exc:
             if not unreachable:

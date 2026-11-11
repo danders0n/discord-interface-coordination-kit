@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db import Database
 from app.db.models import ScheduledAction
@@ -101,6 +101,13 @@ class Scheduler:
             for row in gone:
                 await session.delete(row)
             return len(gone)
+
+    async def prune(self, older_than: timedelta = timedelta(days=30)) -> int:
+        """Delete the actions done longer ago than that (the table would grow for ever); returns how many."""
+        async with self.db.session() as session, session.begin():
+            done = await session.execute(delete(ScheduledAction).where(
+                ScheduledAction.done_at.is_not(None), ScheduledAction.done_at < self.clock() - older_than))
+        return done.rowcount
 
     async def run_due(self) -> int:
         """Run every action that is due, oldest first. Returns how many ran (failed ones included)."""

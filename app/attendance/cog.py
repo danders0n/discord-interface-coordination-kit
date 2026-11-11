@@ -52,6 +52,11 @@ def sees_details(interaction: discord.Interaction, member_id: int) -> bool:
     return member_id == interaction.user.id or access(interaction).is_administration
 
 
+def cell(text: str) -> str:
+    """A spreadsheet reads a cell starting with = + - @ as a formula: a display name stays text."""
+    return f"'{text}" if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
 def percent(rate: float | None) -> str:
     return f"{rate:.0%}" if rate is not None else "—"
 
@@ -125,7 +130,7 @@ class AttendanceCog(commands.Cog):
         writer = csv.writer(out)
         writer.writerow(["member_id", "name", "attended", "no_show", "excused", "rate"])
         for member_id, r in rows:
-            writer.writerow([member_id, self._name(interaction.guild, member_id), r.attended, r.no_show, r.excused,
+            writer.writerow([member_id, cell(self._name(interaction.guild, member_id)), r.attended, r.no_show, r.excused,
                              f"{r.rate:.3f}" if r.rate is not None else ""])
         await reply(interaction, embed=embed, file=discord.File(io.BytesIO(out.getvalue().encode("utf-8-sig")),
                                                                 "attendance.csv"))

@@ -13,7 +13,7 @@ from discord.ext import commands
 
 from app import heartbeat, startup_checks
 from app.admin.cog import AdminCog
-from app.discord_util import NO_MENTIONS, on_app_command_error
+from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
 from app.i18n import Translator, t
 from app.privacy.cog import PrivacyCog
 from app.servers.cog import ServerCog
@@ -142,6 +142,7 @@ class EventBot(commands.Bot):
         self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, SquadList, OfferAction,  # outlive a restart
                                ApprovalAction, LinkNow, WriteNow, ReportAction)
         self.tree.on_error = on_app_command_error
+        install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
                     LinkCog(self.services), AttendanceCog(self.services), ArchiveCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)

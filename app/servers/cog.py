@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.discord_util import access, finish, reply, require
+from app.discord_util import access, finish, reply, require, thinking
 from app.i18n import t
 from app.permissions import Perm
 from app.services import Services
@@ -101,6 +101,7 @@ class ServerCog(commands.Cog):
 
     async def confirm(self, interaction: discord.Interaction, action: str, slug: str) -> None:
         """Stop and restart: say how many players are on, and act on the button."""
+        await thinking(interaction)  # (the supervisor may take a moment)
         if not await self.known(interaction, slug):
             return
         try:
@@ -118,6 +119,7 @@ class ServerCog(commands.Cog):
     async def run(self, interaction: discord.Interaction, action: str, slug: str, *, override: bool = False,
                   message: str | None = None) -> None:
         client, locale = self.services.supervisor, interaction.locale
+        await thinking(interaction)  # (a start can take the supervisor a while; after a button: done already)
         if not await self.known(interaction, slug):
             return
         try:

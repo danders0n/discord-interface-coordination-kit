@@ -580,3 +580,21 @@ async def test_publishing_that_fails_part_way_is_finished_later_without_doubles(
     assert len(announcements.messages) == 1 and len(guild.threads) == 1
     assert (await events.get(event.id)).announcement_id == announcements.messages[0].id
     assert await services.scheduler.exists(f"signup_close:{event.id}")  # (the channel's own actions too)
+
+
+async def test_the_archive_is_seen_by_whoever_sees_the_events_and_read_only(world, clock, guild):
+    """It used to be made with only a write ban for @everyone: on a server whose events are for members only, the
+    archive was open to all."""
+    channels, events, _ = world
+    member_role = discord.Object(id=MEMBER, type=discord.Role)
+    guild.get_channel(EVENTS).overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        member_role: discord.PermissionOverwrite(view_channel=True, send_messages_in_threads=True)}
+    event, channel = await make(world, clock)
+    await ready_and_publish(world, event)
+    await events.cancel(event.id, MAKER, "x")
+    archive = guild.get_channel(channel.category_id)
+    assert archive.overwrites[guild.default_role].view_channel is False
+    assert archive.overwrites[member_role].view_channel is True
+    assert archive.overwrites[member_role].send_messages_in_threads is False
+    assert archive.overwrites[guild.me].send_messages is True

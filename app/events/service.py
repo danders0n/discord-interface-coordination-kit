@@ -68,6 +68,7 @@ class Problem(StrEnum):
     NOT_ZEUS = "not_zeus"
     NOT_A_NUMBER = "not_a_number"
     NOT_AN_IMAGE = "not_an_image"
+    SIGNUP_AFTER_START = "signup_after_start"
 
 
 class EventError(Exception):
@@ -104,6 +105,7 @@ class EventNotifier(Protocol):
     async def stale(self, event_id: int) -> None: ...  # still a draft: ping the creator, tell staff
     async def approval_requested(self, request_id: int) -> None: ...
     async def approval_decided(self, request_id: int) -> None: ...
+    async def requests_withdrawn(self, request_ids: list[int]) -> None: ...  # redraw them, without buttons
 
 
 class EventService:
@@ -372,6 +374,9 @@ class EventService:
         await self._set(event_id, member, how_to_join=text.strip())
 
     async def set_signup_start(self, event_id: int, member: Member, opens_at: datetime | None) -> None:
+        current = await self.editable(event_id, member)
+        if opens_at is not None and opens_at >= current.start_at:
+            raise EventError(Problem.SIGNUP_AFTER_START)
         event = await self._set(event_id, member, signup_opens_at=opens_at)
         if event.status == "published":
             await self._schedule_signup_open(event)
@@ -430,7 +435,10 @@ class EventService:
             return "published"
         await self._book(event)  # a member's internal or hosted event: the clash shows in the request
         async with self.db.session() as session, session.begin():
-            (await session.get(Event, event_id)).status = "pending"
+            done = await session.execute(update(Event).where(Event.id == event_id, Event.status == "draft")
+                                         .values(status="pending"))
+        if done.rowcount != 1:  # (pressed twice at once: the other press sent it)
+            raise EventError(Problem.NOT_DRAFT)
         await self._request(event, "publish", member)
         return "pending"
 
@@ -458,21 +466,33 @@ class EventService:
         event = await self._organiser(event_id, member)
         if event.status != "pending":
             raise EventError(Problem.NOT_PENDING)
+        closed = await self._withdraw_requests(event_id, "publish")
         async with self.db.session() as session, session.begin():
             (await session.get(Event, event_id)).status = "draft"
-            await session.execute(update(ApprovalRequest).where(
-                ApprovalRequest.event_id == event_id, ApprovalRequest.state == "pending",
-                ApprovalRequest.kind == "publish").values(state="withdrawn"))
         await self.reservations.cancel(event_id)
+        await self.notifier.requests_withdrawn(closed)
         await self.notifier.changed(event_id)
 
-    async def _request(self, event: Event, kind: str, member: Member, proposed: dict | None = None) -> ApprovalRequest:
+    async def _withdraw_requests(self, event_id: int, kind: str | None = None) -> list[int]:
+        """Mark the event's pending requests (of ``kind``) withdrawn; returns their ids, for their messages."""
         async with self.db.session() as session, session.begin():
-            await session.execute(update(ApprovalRequest).where(  # one open request of a kind at a time
-                ApprovalRequest.event_id == event.id, ApprovalRequest.kind == kind,
-                ApprovalRequest.state == "pending").values(state="withdrawn"))
+            query = select(ApprovalRequest.id).where(ApprovalRequest.event_id == event_id,
+                                                     ApprovalRequest.state == "pending")
+            if kind is not None:
+                query = query.where(ApprovalRequest.kind == kind)
+            ids = list((await session.execute(query)).scalars())
+            if ids:
+                await session.execute(update(ApprovalRequest).where(ApprovalRequest.id.in_(ids))
+                                      .values(state="withdrawn"))
+        return ids
+
+    async def _request(self, event: Event, kind: str, member: Member, proposed: dict | None = None) -> ApprovalRequest:
+        superseded = await self._withdraw_requests(event.id, kind)  # one open request of a kind at a time
+        async with self.db.session() as session, session.begin():
             request = ApprovalRequest(event_id=event.id, kind=kind, requested_by=member.id, proposed=proposed or {})
             session.add(request)
+        if superseded:
+            await self.notifier.requests_withdrawn(superseded)
         await self.notifier.approval_requested(request.id)
         return request
 
@@ -489,13 +509,17 @@ class EventService:
         event = await self.get(request.event_id)
         if await self.approval_blocked(request):
             raise EventError(Problem.NO_RESERVATION)
+        await self._decide(request_id, moderator, "approved")  # first: a second moderator pressing too is refused
         if request.kind == "times":
             p = request.proposed
             times = Times(datetime.fromisoformat(p["assembly_at"]), datetime.fromisoformat(p["start_at"]),
                           int(p["duration_minutes"]))
-            await self._check_times(event, times)
-            await self._move(event, times)
-        await self._decide(request_id, moderator, "approved")
+            try:
+                await self._check_times(event, times)
+                await self._move(event, times)
+            except EventError:
+                await self._undecide(request_id)
+                raise
         if request.kind == "publish":
             await self._publish(await self.get(request.event_id))
         await self.notifier.approval_decided(request_id)
@@ -533,15 +557,28 @@ class EventService:
         return request
 
     async def _decide(self, request_id: int, moderator: Member, state: str, reason: str | None = None) -> None:
+        """Only a request still pending, in one statement: two moderators deciding at once can't both act."""
         async with self.db.session() as session, session.begin():
-            request = await session.get(ApprovalRequest, request_id)
-            request.state, request.decided_by, request.reason, request.decided_at = state, moderator.id, reason, self.clock()
+            done = await session.execute(update(ApprovalRequest).where(
+                ApprovalRequest.id == request_id, ApprovalRequest.state == "pending").values(
+                state=state, decided_by=moderator.id, reason=reason, decided_at=self.clock()))
+        if done.rowcount != 1:
+            raise EventError(Problem.NOT_PENDING)
+
+    async def _undecide(self, request_id: int) -> None:
+        """An approval whose work was refused (the new times): back to pending, for the moderator to reject."""
+        async with self.db.session() as session, session.begin():
+            await session.execute(update(ApprovalRequest).where(ApprovalRequest.id == request_id).values(
+                state="pending", decided_by=None, reason=None, decided_at=None))
 
     async def _publish(self, event: Event, by: int | None = None) -> None:
         """``by``: who pressed *Publish* (None when a moderator's approval published it)."""
         async with self.db.session() as session, session.begin():
+            done = await session.execute(update(Event).where(
+                Event.id == event.id, Event.status.in_(("draft", "pending"))).values(status="published"))
             row = await session.get(Event, event.id)
-            row.status = "published"
+        if done.rowcount != 1:  # (pressed twice at once: the other press published it)
+            return
         for kind in (self.STALE_PING, self.STALE_CANCEL):
             await self.scheduler.cancel(f"{kind}:{event.id}")
         await self._schedule_signup_open(row)
@@ -617,8 +654,8 @@ class EventService:
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             row.status, row.cancel_reason = "cancelled", reason
-            await session.execute(update(ApprovalRequest).where(
-                ApprovalRequest.event_id == event_id, ApprovalRequest.state == "pending").values(state="withdrawn"))
+        closed = await self._withdraw_requests(event_id)
+        await self.notifier.requests_withdrawn(closed)
         await self.reservations.cancel(event_id)
         for kind in (self.SIGNUP_OPEN, self.STALE_PING, self.STALE_CANCEL, self.GUEST_END):
             await self.scheduler.cancel(f"{kind}:{event_id}")

@@ -79,3 +79,21 @@ async def test_an_unknown_kind_fails_instead_of_vanishing(services, clock):
     await services.scheduler.run_due()
     (row,) = await rows(services.db)
     assert row.attempts == 1 and "No handler" in row.last_error
+
+
+async def test_actions_done_long_ago_are_pruned(services, clock):
+    async def once(action, now):
+        return None
+
+    services.scheduler.register("once", once)
+    await services.scheduler.schedule("once", clock.now, key="old")
+    await services.scheduler.run_due()
+    clock.now += timedelta(days=10)
+    await services.scheduler.schedule("once", clock.now, key="recent")
+    await services.scheduler.run_due()
+    await services.scheduler.schedule("once", clock.now + timedelta(days=100), key="waiting")
+    clock.now += timedelta(days=25)
+    assert await services.scheduler.prune() == 1
+    async with services.db.session() as session:
+        keys = set((await session.execute(select(ScheduledAction.key))).scalars())
+    assert keys == {"recent", "waiting"}

@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
 from app.db.models import Event, Signup, Slot
-from app.discord_util import reply
+from app.discord_util import reply, thinking
 from app.eventchannel.render import kind_label, ts
 from app.events.service import EventError
 from app.events.ui import member_of
@@ -26,6 +28,7 @@ from app.signup import ui as signup_ui
 
 MAX_PRESET = 2 * 1024 * 1024
 MAX_IMAGE = 8 * 1024 * 1024
+MISSIONS_SECONDS = 30  # autocomplete asks at every key: the supervisor's list is read at most this often
 
 
 class EventCog(commands.Cog):
@@ -35,6 +38,7 @@ class EventCog(commands.Cog):
 
     def __init__(self, services: Services) -> None:
         self.services = services
+        self._missions: tuple[float, list] = (0.0, [])
 
     async def _here(self, interaction: discord.Interaction) -> Event | None:
         event = await self.services.events.by_channel(getattr(interaction.channel, "id", None))
@@ -51,6 +55,7 @@ class EventCog(commands.Cog):
         if not file.filename.lower().endswith(".html") or file.size > MAX_PRESET:
             await reply(interaction, t("Send the .html preset exported from the Arma 3 Launcher.", interaction.locale))
             return
+        await thinking(interaction)  # (the file is downloaded, and the event's messages redrawn)
         try:
             preset = await self.services.events.set_preset(event.id, member_of(interaction), await file.read())
         except EventError as exc:
@@ -71,6 +76,7 @@ class EventCog(commands.Cog):
         if file.size > MAX_IMAGE:
             await reply(interaction, t("That is too long.", interaction.locale))
             return
+        await thinking(interaction)  # (the file is downloaded, and the event's messages redrawn)
         try:
             await self.services.events.set_image(event.id, member_of(interaction), await file.read(),
                                                  Path(file.filename).suffix)
@@ -118,10 +124,15 @@ class EventCog(commands.Cog):
 
     @mission.autocomplete("on_server")
     async def mission_choices(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        try:
-            found = await self.services.profiles.missions()
-        except Exception:  # noqa: BLE001 - autocomplete stays quiet when the supervisor doesn't answer
-            return []
+        if not self.services.profiles.may_manage(member_of(interaction)):
+            return []  # (the server's missions are for those who set them)
+        fetched, found = self._missions
+        if time.monotonic() - fetched > MISSIONS_SECONDS:
+            try:
+                found = await self.services.profiles.missions()
+            except Exception:  # noqa: BLE001 - autocomplete stays quiet when the supervisor doesn't answer
+                return []
+            self._missions = (time.monotonic(), found)
         typed = current.casefold()
         return [app_commands.Choice(name=(f"{m['name']} · {m['title']}" if m.get("title") else m["name"])[:100],
                                     value=m["name"]) for m in found if typed in m["name"].casefold()][:25]
@@ -129,6 +140,7 @@ class EventCog(commands.Cog):
     @slot.command(name="take", description="Take a free slot in this channel's event")
     @app_commands.describe(slot="The slot (start typing its name or squad)")
     async def take(self, interaction: discord.Interaction, slot: str) -> None:
+        await thinking(interaction)
         event = await self._here(interaction)
         if event is None:
             return
@@ -153,6 +165,7 @@ class EventCog(commands.Cog):
 
     @slot.command(name="leave", description="Leave your slot (or the lists) in this channel's event")
     async def leave(self, interaction: discord.Interaction) -> None:
+        await thinking(interaction)
         event = await self._here(interaction)
         if event is None:
             return

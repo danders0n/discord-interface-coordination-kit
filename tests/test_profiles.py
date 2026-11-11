@@ -59,6 +59,7 @@ async def test_a_mission_is_uploaded_with_its_report_and_warnings(stack, profile
     assert any("Misja Operation X (tiny.Stratis.pbo):" in n for n in await notes(stack))
     choices = await EventCog(stack).mission_choices(picked, "tiny")
     assert [c.value for c in choices] == ["tiny.Stratis.pbo"]
+    assert await EventCog(stack).mission_choices(asking(stack, guild, member), "") == []  # not a mission maker
 
 
 async def test_a_file_name_another_profile_uses_is_refused(stack, profiles, guild, clock, fake):

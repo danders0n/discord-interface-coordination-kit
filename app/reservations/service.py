@@ -112,9 +112,11 @@ class ReservationService:
         return await self._push(event_id)
 
     async def retry(self, event_id: int) -> HostReservation | None:
-        """*Retry reservation*: try again with what was asked last."""
-        if await self.get(event_id) is None:
-            return None
+        """*Retry reservation*: try again with what was asked last, only for one that failed or is retrying (an old
+        button after a withdrawal or a cancel must not book the host again)."""
+        row = await self.get(event_id)
+        if row is None or row.state not in ("failed", "retrying"):
+            return row
         row = await self._push(event_id)
         await self._changed(event_id)
         return row

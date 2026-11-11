@@ -62,6 +62,9 @@ async def register(scheduler: Scheduler, store: SettingsStore) -> None:
     async def run(action: Action, now: datetime) -> datetime:
         settings = store.current
         await backup(settings.database_path, settings.data_dir / "backups", settings.backup.keep, now)
+        pruned = await scheduler.prune()  # (after the copy: the backup still holds them)
+        if pruned:
+            log.info("Deleted %d scheduled actions done over 30 days ago", pruned)
         return next_run(now, settings.tz)
 
     scheduler.register(KIND, run)

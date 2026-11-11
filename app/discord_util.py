@@ -80,6 +80,29 @@ async def finish(interaction: discord.Interaction, content: str) -> None:
         await message.delete(delay=seconds)
 
 
+async def _sorry(interaction: discord.Interaction, error: Exception, where: str) -> None:
+    log.error("%s failed: %s", where, error, exc_info=error)
+    try:
+        await reply(interaction, t("Something went wrong. Staff can find the details in the log.", interaction.locale))
+    except discord.HTTPException:  # (the interaction expired meanwhile)
+        pass
+
+
+async def on_view_error(view: Any, interaction: discord.Interaction, error: Exception, item: Any) -> None:
+    """Buttons and lists (the persistent ones too): the member hears that it failed, as after a command."""
+    await _sorry(interaction, error, f"{type(item).__name__} in {type(view).__name__}")
+
+
+async def on_modal_error(modal: Any, interaction: discord.Interaction, error: Exception) -> None:
+    await _sorry(interaction, error, f"Modal {type(modal).__name__}")
+
+
+def install_error_handlers() -> None:
+    """discord.py's views and modals only log a failure; every one of them answers instead (set once, at start)."""
+    discord.ui.view.BaseView.on_error = on_view_error  # type: ignore[method-assign]
+    discord.ui.Modal.on_error = on_modal_error  # type: ignore[method-assign]
+
+
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     if isinstance(error, NotAllowed):
         await reply(interaction, str(error))

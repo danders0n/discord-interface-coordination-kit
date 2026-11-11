@@ -33,6 +33,7 @@ def event_problem(problem: Problem, locale: Any, missing: list[str] | None = Non
         Problem.NOT_ZEUS: t("That works only for a Zeus or training event.", locale),
         Problem.NOT_A_NUMBER: t("Type a whole number, or leave it empty.", locale),
         Problem.NOT_AN_IMAGE: t("Send a PNG, JPG, WEBP or GIF image.", locale),
+        Problem.SIGNUP_AFTER_START: t("Sign-up must open before the event starts.", locale),
     }[problem]
 
 

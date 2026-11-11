@@ -506,3 +506,24 @@ def test_the_startup_check_names_a_missing_squad_xml_folder(guild, tmp_path):
     _, problems = check(guild, settings)
     assert any("BOT_SQUAD_XML__OUTPUT_DIR" in p for p in problems)
     assert any("BOT_ROLES__RANK" in p for p in problems)
+
+
+async def test_one_failed_reminder_doesnt_stop_the_others_and_is_tried_again(stack, guild, clock, monkeypatch):
+    from types import SimpleNamespace
+
+    import discord
+
+    await stack.links.mark_rollout([])
+    clock.now += timedelta(days=15)
+    closed = person(guild, 1, "anna_dc", RANK)
+    closed.dms_closed = True  # (so the reminder channel is pinged, and it refuses)
+    open_ = person(guild, 2, "bob_dc", RANK)
+
+    async def refused(*_args, **_kwargs):
+        raise discord.HTTPException(SimpleNamespace(status=429, reason="Too Many Requests"), "rate limited")
+
+    monkeypatch.setattr(guild.get_channel(REMINDERS), "send", refused)
+    await stack.link_watch._hourly(None, clock.now)
+    assert len(open_.dms) == 1
+    reminders = await stack.links.reminders()
+    assert 2 in reminders and 1 not in reminders  # asked again next hour

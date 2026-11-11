@@ -107,3 +107,25 @@ async def test_a_failing_command_answers_and_logs(services, caplog, monkeypatch)
     assert interaction.replies[0].kwargs["ephemeral"] is True
     assert any(r.levelname == "ERROR" and "reload" in r.getMessage() for r in caplog.records)
     await asyncio.sleep(0)
+
+
+async def test_a_failing_button_or_modal_answers_the_member(services, caplog):
+    import discord as d
+
+    from app.discord_util import install_error_handlers
+
+    install_error_handlers()
+    view, modal = d.ui.View(), d.ui.Modal(title="x")
+    pressed = FakeInteraction(services, FakeMember(1), d.Locale.british_english)
+    await view.on_error(pressed, RuntimeError("boom"), d.ui.Button(label="b"))
+    assert pressed.replies[0].content == "Something went wrong. Staff can find the details in the log."
+    submitted = FakeInteraction(services, FakeMember(1), d.Locale.british_english)
+    await modal.on_error(submitted, RuntimeError("boom"))
+    assert submitted.replies[0].content.startswith("Something went wrong")
+    assert "boom" in caplog.text
+
+
+def test_a_display_name_never_becomes_a_spreadsheet_formula():
+    from app.attendance.cog import cell
+
+    assert cell("=HYPERLINK(\"x\")") == "'=HYPERLINK(\"x\")" and cell("@cmd") == "'@cmd" and cell("Anna") == "Anna"

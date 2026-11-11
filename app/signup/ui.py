@@ -13,7 +13,7 @@ from typing import Any
 
 import discord
 
-from app.discord_util import fleeting, reply, services
+from app.discord_util import fleeting, reply, services, thinking
 from app.events.words import refusal
 from app.i18n import t
 from app.links.ui import link_view
@@ -120,6 +120,7 @@ class SquadList(discord.ui.DynamicItem[discord.ui.Select], template=r"squad:(?P<
 
     async def callback(self, interaction: discord.Interaction) -> None:
         values = (interaction.data or {}).get("values") or ["0"]
+        await thinking(interaction)  # (a rush at sign-up opening slows the database: answer within Discord's 3 s)
         await pick(interaction, self.event_id, int(values[0]))
 
 
@@ -135,6 +136,7 @@ class SignupAction(discord.ui.DynamicItem[discord.ui.Button], template=r"signup:
 
     async def callback(self, interaction: discord.Interaction) -> None:
         signups, member, locale = services(interaction).signups, member_of(interaction), interaction.locale
+        await thinking(interaction)  # (a rush at sign-up opening slows the database: answer within Discord's 3 s)
         if self.action == "take":
             await pick(interaction, self.event_id)
         elif self.action == "reserve":
@@ -237,6 +239,7 @@ class OfferAction(discord.ui.DynamicItem[discord.ui.Button], template=r"offer:(?
         signups, locale = services(interaction).signups, interaction.locale
         roles = services(interaction).channels.roles_of(interaction.user.id)  # (in a DM the user is no Member)
         member = Member(interaction.user.id, roles if roles is not None else frozenset())
+        await thinking(interaction)
         if self.action == "take":
             await answer(interaction, await signups.accept(self.offer_id, member),
                          t("You have the slot. See you there!", locale), ask_link=True)

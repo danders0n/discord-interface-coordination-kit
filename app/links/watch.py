@@ -127,11 +127,18 @@ class LinkWatch:
         if guild is not None and self.roster() is not None and await self.s.links.rollout_done():
             due = await self.s.links.due_reminders(self.ranked(), timedelta(days=settings.links.reminder_days),
                                                    settings.links.dms_per_hour)
+            tried = []
             for member_id in due:
                 member = guild.get_member(member_id)
-                if member is not None:
+                if member is None:
+                    continue
+                try:
                     await self.remind(member)
-            await self.s.links.reminded(due)
+                except discord.HTTPException as exc:  # (the reminder channel refused): the next run tries them again
+                    log.warning("Reminding %s to link Steam failed: %s", member_id, exc)
+                    continue
+                tried.append(member_id)
+            await self.s.links.reminded(tried)  # (not the failed ones: the next hour asks them again)
         for link in await self.s.links.expire(settings.links.delete_after_days):
             self.s.staff.post(t("Steam link of {member} deleted after {days} days without a rank: {steam} ({nick}).",
                                 self.language, member=f"<@{link.member_id}>", days=settings.links.delete_after_days,

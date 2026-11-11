@@ -159,3 +159,12 @@ async def test_a_reservation_deleted_in_the_console_is_made_again(services, fake
     fake.reservations.clear()
     row = await services.reservations.book(7, window(clock, days=4))
     assert row.state == "booked" and row.reservation_id == 2
+
+
+async def test_an_old_retry_button_doesnt_book_a_cancelled_reservation(services, fake, clock):
+    start = clock.now + timedelta(days=2)
+    await services.reservations.book(9, Window("20-11-ibc Op", start, start + timedelta(hours=3)))
+    await services.reservations.cancel(9)
+    assert fake.reservations == {}
+    row = await services.reservations.retry(9)
+    assert row.state == "cancelled" and fake.reservations == {}

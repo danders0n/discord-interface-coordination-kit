@@ -450,3 +450,47 @@ async def test_other_groups_are_added_once_and_corrected(services):
     await groups.add("XYZ", "X-ray", 1)
     fixed = await groups.correct(first.id, "AB", "Alpha Bravo Company")
     assert fixed.acronym == "AB" and [g.acronym for g in await groups.search("x")] == ["XYZ"]
+
+
+async def test_withdrawn_and_cancelled_requests_lose_their_buttons(events, clock):
+    """Their messages in the moderation thread used to keep Approve and Reject."""
+    event = await events.create(draft(clock), MEMBER_A)
+    await ready(events, event, MEMBER_A)
+    await events.publish(event.id, MEMBER_A)
+    first = events.recorder.calls[-1][1]
+    await events.withdraw(event.id, MEMBER_A)
+    assert ("requests_withdrawn", [first]) in events.recorder.calls
+    await events.publish(event.id, MEMBER_A)
+    second = events.recorder.calls[-1][1]
+    await events.cancel(event.id, MEMBER_A, "no")
+    assert ("requests_withdrawn", [second]) in events.recorder.calls
+
+
+async def test_a_request_is_decided_once_even_when_two_moderators_press(events, clock):
+    event = await events.create(draft(clock), MEMBER_A)
+    await ready(events, event, MEMBER_A)
+    await events.publish(event.id, MEMBER_A)
+    request_id = events.recorder.calls[-1][1]
+    await events._decide(request_id, MOD, "approved")  # the other moderator, a moment earlier
+    with pytest.raises(EventError) as caught:
+        await events._decide(request_id, ADMIN_, "rejected", "late")
+    assert caught.value.problem == Problem.NOT_PENDING
+    assert (await events.request(request_id)).decided_by == MOD.id
+
+
+async def test_publishing_twice_at_once_publishes_once(events, clock):
+    event = await events.create(draft(clock), MAKER)
+    await ready(events, event, MAKER)
+    stale = await events.get(event.id)  # what the second press read, before the first one published
+    await events.publish(event.id, MAKER)
+    await events._publish(stale, by=MAKER.id)
+    assert events.recorder.names().count("published") == 1
+
+
+async def test_sign_up_must_open_before_the_start(events, clock):
+    event = await events.create(draft(clock), MAKER)
+    with pytest.raises(EventError) as caught:
+        await events.set_signup_start(event.id, MAKER, event.start_at + timedelta(minutes=1))
+    assert caught.value.problem == Problem.SIGNUP_AFTER_START
+    await events.set_signup_start(event.id, MAKER, event.start_at - timedelta(days=1))
+    assert (await events.get(event.id)).signup_opens_at == event.start_at - timedelta(days=1)

@@ -61,3 +61,24 @@ async def test_a_slug_is_one_path_segment_whatever_it_holds(supervisor):
             await client.say(slug, "hi")
         assert caught.value.status == 404
     assert state.server("event")["state"] == "running"
+
+
+async def test_the_heartbeat_notices_a_supervisor_updated_meanwhile(supervisor, monkeypatch):
+    """Without the capability it used to keep the first answer until a restart."""
+    import asyncio
+
+    state, client = supervisor
+    state.capabilities = ["reservations"]
+    rounds = []
+
+    async def sleep(_delay):
+        rounds.append(1)
+        if len(rounds) == 1:
+            state.capabilities = ["reservations", "heartbeat"]  # updated during the hour's wait
+        else:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(heartbeat.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await heartbeat.run(client)
+    assert state.heartbeats == [{"name": "discord-bot", "interval_s": 60}]

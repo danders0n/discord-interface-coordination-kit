@@ -435,13 +435,10 @@ class EventChannels:
     async def cancel(self, event_id: int) -> None:
         event = await self._event(event_id)
         await self.redraw_now(event_id)
-        thread = self.guild().get_thread(event.thread_id) if event.thread_id else None
-        if thread is not None:
+        if event.thread_id:  # (_ping finds a thread Discord archived after a quiet week too)
             text = t("{title} is cancelled: {reason}", self.language, title=event.title,
                      reason=event.cancel_reason or "—")
-            for content in mention_chunks(text, await self._signed_up(event_id)):
-                await thread.send(content, allowed_mentions=discord.AllowedMentions(users=True, roles=False,
-                                                                                   everyone=False))
+            await self._ping(event, text, await self._signed_up(event_id))
         await self.scheduler.cancel(f"{ARCHIVE_KIND}:{event_id}")
         await self.scheduler.cancel(f"{CLOSE_KIND}:{event_id}")
         await self.archive(event_id)
@@ -482,11 +479,23 @@ class EventChannels:
         for name in names:
             category = existing.get(name)
             if category is None:
-                overwrites = {guild.default_role: READ_ONLY, guild.me: BOT}
-                return await guild.create_category(name, overwrites=overwrites, reason="Event archive")
+                return await guild.create_category(name, overwrites=self._archive_overwrites(guild),
+                                                   reason="Event archive")
             if len(category.channels) < CATEGORY_LIMIT:
                 return category
         raise RuntimeError(f"No room left in the archive categories of {base}")
+
+    def _archive_overwrites(self, guild: Any) -> dict:
+        """The events category's (who sees the events sees their archive, nobody else), every one read-only."""
+        events = guild.get_channel(self.ids().events_category)
+        found: dict = {}
+        for target, overwrite in dict(getattr(events, "overwrites", None) or {}).items():
+            allow, deny = overwrite.pair()
+            found[target] = discord.PermissionOverwrite.from_pair(allow, deny)
+        found.setdefault(guild.default_role, discord.PermissionOverwrite())
+        for overwrite in found.values():
+            overwrite.update(**{name: False for name, value in READ_ONLY if value is False})
+        return found | {guild.me: BOT}
 
     async def _publish_action(self, action: Action, now: datetime) -> None:
         await self.publish(action.event_id)  # type: ignore[arg-type]  (raises again: the scheduler retries)
@@ -667,6 +676,14 @@ class EventChannels:
         except discord.NotFound:
             pass
         return request
+
+    async def requests_withdrawn(self, request_ids: list[int]) -> None:
+        """Withdrawn, superseded, or their event cancelled: drawn again, without the buttons."""
+        for request_id in request_ids:
+            try:
+                await self._redraw_request(request_id)
+            except discord.HTTPException as exc:
+                log.warning("Redrawing the request %s failed: %s", request_id, exc)
 
     async def approval_decided(self, request_id: int) -> None:
         request = await self._redraw_request(request_id)
