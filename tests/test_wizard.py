@@ -352,3 +352,17 @@ async def test_the_header_lists_the_coming_events_and_keeps_one_message(stack, g
     await header.draw()
     assert len(channel.messages) == 1  # edited in place
     assert "Operation X" in message.edits[-1]["embed"].fields[0].value and "0/2" in message.edits[-1]["embed"].fields[0].value
+
+
+async def test_a_header_the_database_doesnt_know_is_adopted_and_extras_deleted(stack, guild, clock):
+    channel = guild.get_channel(HEADER)
+    embed, view = await stack.channels.header.message()
+    older = await channel.send(embed=embed, view=view)  # left by a copy of the bot with other data
+    newer = await channel.send(embed=embed, view=view)
+    await channel.send("something else")
+    fresh = Header(stack.db, stack.store, lambda: stack.ids, lambda: guild, clock, interval=0)  # empty bot_state
+    await fresh.draw()
+    assert [m.id for m in channel.messages if m.kwargs.get("view")] == [newer.id] and older.deleted
+    assert newer.edits  # redrawn in place
+    await fresh.draw()
+    assert len(channel.messages) == 2  # still one header (and the other message)

@@ -92,6 +92,7 @@ class FakeMessage:
     id: int = field(default_factory=lambda: next(_ids))
     type: discord.MessageType = discord.MessageType.default
     channel: Any = None  # set for a message the bot may delete from ``posts``
+    components: list[Any] = field(default_factory=list)  # action rows with ``children``
 
     async def delete(self) -> None:
         self.channel.posts.remove(self)
@@ -102,9 +103,14 @@ async def _history(messages: list[Any], oldest_first: bool):
         yield message
 
 
+def _components(message: Sent) -> list[Any]:
+    view = next((edit["view"] for edit in reversed(message.edits) if "view" in edit), message.kwargs.get("view"))
+    return [SimpleNamespace(children=list(view.children))] if view is not None and view.children else []
+
+
 def _bot_messages(sent: list[Sent]) -> list[FakeMessage]:
     return [FakeMessage(SimpleNamespace(id=BOT_ID, name="bot", display_name="bot"), m.content or "", id=m.id,
-                        type=m.type) for m in sent if not m.deleted]
+                        type=m.type, components=_components(m)) for m in sent if not m.deleted]
 
 
 def _not_found(what: str) -> discord.NotFound:
@@ -145,6 +151,7 @@ class FakeThread:
     sent: list[Sent] = field(default_factory=list)
     edits: list[dict[str, Any]] = field(default_factory=list)
     posts: list[FakeMessage] = field(default_factory=list)  # what members wrote
+    owner_id: int = BOT_ID  # who made it
 
     def history(self, limit: int | None = None, oldest_first: bool = False):
         return _history(_bot_messages(self.sent) + self.posts, oldest_first)
@@ -185,6 +192,16 @@ class FakeChannel:
 
     def permissions_for(self, _member: Any) -> discord.Permissions:
         return self.permissions
+
+    @property
+    def threads(self) -> list[FakeThread]:
+        """Its open threads, as in Discord's cache."""
+        return [t for t in self.guild.threads.values() if t.parent_id == self.id and not t.archived]
+
+    async def archived_threads(self, limit: int | None = 100):
+        for thread in sorted(self.guild.threads.values(), key=lambda t: t.id, reverse=True):
+            if thread.parent_id == self.id and thread.archived:
+                yield thread
 
     @property
     def mention(self) -> str:

@@ -33,6 +33,24 @@ async def test_a_deleted_thread_is_made_again(services, guild):
     assert (await state.get(services.db, "thread:moderation")) == {"id": fresh.id}
 
 
+async def test_a_thread_the_database_doesnt_know_is_taken_over(services, guild):
+    staff = guild.get_channel(STAFF)
+    older = await staff.create_thread(name="Staff log", type=None, auto_archive_duration=10080)  # other data's
+    await staff.create_thread(name="Staff log", type=None, auto_archive_duration=10080)
+    theirs = await staff.create_thread(name="Moderacja", type=None, auto_archive_duration=10080)
+    theirs.owner_id = 1  # a member's thread of the same name stays theirs
+    older.archived = True
+    found = await services.threads.get(guild, staff, "staff_log")
+    assert found.id != older.id and len(guild.threads) == 3  # an open one first
+    assert (await state.get(services.db, "thread:staff_log")) == {"id": found.id}
+    for thread in guild.threads.values():
+        thread.archived = thread.name == "Staff log"
+    await state.put(services.db, "thread:staff_log", {})
+    assert (await services.threads.get(guild, staff, "staff_log")).id == older.id  # the oldest archived one
+    moderation = await services.threads.get(guild, staff, "moderation")
+    assert moderation.id != theirs.id and len(guild.threads) == 4
+
+
 async def test_a_new_staff_channel_or_name_from_env(services, guild, settings):
     staff = guild.get_channel(STAFF)
     thread = await services.threads.get(guild, staff, "staff_log")
