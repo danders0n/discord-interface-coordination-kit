@@ -203,9 +203,12 @@ class EventService:
         return [e for e in events if e.climate_role_id is not None and e.climate_role_id not in climates]
 
     async def channel_name(self, event: Event) -> str:
-        """``dd-mm-xxx``: the event date and the acronym of the group whose server it is."""
+        """``dd-mm-xxx``: the event date and the acronym of the group whose server it is; ``zeus`` or ``training``
+        in its place for those kinds."""
         acronym = self.store.current.group.acronym
-        if event.kind == "guest" and event.host_group_id is not None:
+        if event.kind in ("zeus", "training"):
+            acronym = event.kind
+        elif event.kind == "guest" and event.host_group_id is not None:
             async with self.db.session() as session:
                 host = await session.get(OtherGroup, event.host_group_id)
             acronym = host.acronym if host is not None else acronym

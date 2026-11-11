@@ -112,6 +112,15 @@ async def test_a_guest_event_is_named_after_its_host_and_never_reserves(events, 
     assert (await events.channel_name(ours)).endswith("-ibc")
 
 
+async def test_zeus_and_training_events_are_named_after_their_kind(events, clock):
+    zeus = await events.create(draft(clock, "zeus", days=8), MAKER)
+    training = await events.create(draft(clock, "training", days=9), MAKER)
+    assert (await events.channel_name(zeus)) == f"{zeus.assembly_at.astimezone(events.store.current.tz):%d-%m}-zeus"
+    assert (await events.channel_name(training)).endswith("-training")
+    await events.update(zeus.id, MAKER, kind="internal")  # the name follows a change of kind
+    assert (await events.channel_name(await events.get(zeus.id))).endswith("-ibc")
+
+
 async def test_stale_actions_only_when_still_ahead(events, clock, services):
     far = await events.create(draft(clock, days=5), MAKER)
     near = await events.create(draft(clock, days=0, hours=20), MAKER)  # inside both windows already
