@@ -8,8 +8,10 @@
 - **Publish**: refused until the checklist is complete. The roles of whoever presses decide: a mission maker,
   moderator or *manage any event* publishes, a member sends it for approval (a Zeus or training event is always published).
 - **Approve / reject** a request; approving is refused while its reservation failed.
-- **Cancel** before the start (a draft is deleted), **end** after it (the attendance service takes over).
-- **Timed actions**: sign-up opening, reminders, stale-draft ping and cancel, a guest event's end. After downtime
+- **Cancel** a published event before the start, a draft or pending one at any time (it is deleted); **end** a
+  published one after the start (the attendance service takes over).
+- **Timed actions**: sign-up opening, reminders, stale-draft ping and cancel (at the latest at the start, so a
+  draft never outlives it), a guest event's end. After downtime
   state changes run late; the sign-up ping is dropped when more than an hour late, a reminder when a later one or
   the assembly has passed.
 
@@ -606,8 +608,8 @@ class EventService:
         event = await self.get(event_id) if member is None else await self._organiser(event_id, member)
         if event.status in ("cancelled", "ended"):
             raise EventError(Problem.NOT_DRAFT)
-        if self.clock() >= event.start_at:
-            raise EventError(Problem.STARTED)
+        if event.status == "published" and self.clock() >= event.start_at:
+            raise EventError(Problem.STARTED)  # (a draft or pending event never started: it can always go)
         was = event.status
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
@@ -646,14 +648,26 @@ class EventService:
     # ---------------------------------------------------------------- timed actions
 
     async def _schedule_stale(self, event: Event) -> None:
-        """Only what is still ahead: a draft made inside the window is neither pinged nor cancelled at once."""
+        """Only what is still ahead: a draft made inside the window is neither pinged nor cancelled at once. It is
+        cancelled at its start instead, so no unpublished event outlives it."""
         times, now = self.store.current.times, self.clock()
         for kind, hours in ((self.STALE_PING, times.stale_ping_hours), (self.STALE_CANCEL, times.stale_cancel_hours)):
             due = event.assembly_at - timedelta(hours=hours)
-            if due > now:
+            if due <= now and kind == self.STALE_CANCEL:
+                due = max(event.start_at, now)
+            if due > now or kind == self.STALE_CANCEL:
                 await self.scheduler.schedule(kind, due, key=f"{kind}:{event.id}", event_id=event.id)
             else:
                 await self.scheduler.cancel(f"{kind}:{event.id}")
+
+    async def resume(self) -> None:
+        """At start-up: a draft or pending event without its cancel action (made before 2026-11-11, when one made
+        inside the window got none) gets it; one past its start goes at once."""
+        async with self.db.session() as session:
+            events = (await session.execute(select(Event).where(Event.status.in_(("draft", "pending"))))).scalars().all()
+        for event in events:
+            if not await self.scheduler.exists(f"{self.STALE_CANCEL}:{event.id}"):
+                await self._schedule_stale(event)
 
     async def _schedule_signup_open(self, event: Event) -> None:
         """At publishing, sign-up opens with it (the announcement says so); a later start gets its own action."""
@@ -712,7 +726,7 @@ class EventService:
             await self.notifier.stale(event.id)
 
     async def _stale_cancel(self, action: Action, now: datetime) -> None:
-        if (event := await self._live(action, "draft", "pending")) is not None and now < event.start_at:
+        if (event := await self._live(action, "draft", "pending")) is not None:
             await self.cancel(event.id, None, "stale")
 
     async def _guest_end(self, action: Action, now: datetime) -> None:

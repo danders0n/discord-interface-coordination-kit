@@ -27,7 +27,7 @@ def make_settings(data_dir: Path, **overrides) -> Settings:
     values = {
         "discord_token": "token", "guild_id": GUILD, "data_dir": data_dir,
         "group": {"acronym": "IBC", "name": "Test group"},
-        "channels": {"drafts_category": DRAFTS, "events_category": EVENTS, "header": HEADER,
+        "channels": {"events_category": EVENTS, "header": HEADER,
                      "announcements": ANNOUNCE, "staff": STAFF},
         "roles": {"member": [MEMBER], "mission_maker": MISSION_MAKER, "announcement": ANNOUNCEMENT,
                   "signup": [MEMBER, KADET]},
@@ -42,7 +42,8 @@ def make_settings(data_dir: Path, **overrides) -> Settings:
 def make_guild() -> FakeGuild:
     """The server as `make_settings` describes it."""
     category = discord.ChannelType.category
-    channels = [FakeChannel(DRAFTS, "Szkice", category), FakeChannel(EVENTS, "Eventy", category),
+    channels = [FakeChannel(DRAFTS, "Szkice", category), FakeChannel(EVENTS, "Eventy", category),  # (Szkice: the old
+                # hidden drafts category, before 2026-11-11)
                 FakeChannel(HEADER, "eventy"), FakeChannel(ANNOUNCE, "ogloszenia"), FakeChannel(STAFF, "staff")]
     names = {MEMBER: "Klanowicz", MISSION_MAKER: "Mission Maker", KADET: "Kadet", ANNOUNCEMENT: "Ogloszenia",
              ADMIN: "Admin", MODERATOR: "Moderator"}

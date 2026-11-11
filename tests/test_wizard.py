@@ -67,7 +67,7 @@ async def test_the_wizard_makes_a_draft_and_its_channel(stack, guild, clock):
     event, submit = await create(stack, guild, clock, person(20, MEMBER, MISSION_MAKER))
     assert event is not None and event.title == "Operation X" and event.kind == "internal"
     channel = guild.get_channel(event.channel_id)
-    assert channel.category_id == DRAFTS and channel.mention in submit.replies[0].content
+    assert channel.category_id == EVENTS and channel.mention in submit.replies[0].content
     local = event.assembly_at.astimezone(stack.settings.tz)
     assert (local.hour, local.minute) == (19, 0) and event.duration_minutes == 180
 
@@ -99,10 +99,10 @@ async def test_the_wizard_answers_mistakes_and_needs(stack, guild, clock):
 
 async def test_the_wizard_refuses_while_a_category_is_full(stack, guild):
     for n in range(50):
-        await guild.create_text_channel(f"old-{n}", category=guild.get_channel(DRAFTS))
+        await guild.create_text_channel(f"old-{n}", category=guild.get_channel(EVENTS))
     start = asking(stack, guild, person(20, MEMBER, MISSION_MAKER))
     await ui.CreateEvent().callback(start)
-    assert start.replies[0].content.startswith("The category Szkice is full")
+    assert start.replies[0].content.startswith("The category Eventy is full")
     assert "view" not in start.replies[0].kwargs
 
 

@@ -181,10 +181,11 @@ async def ready_and_publish(world, event):
     await channels.redrawer.settle()
 
 
-async def test_a_draft_gets_a_hidden_channel_with_its_thread_and_messages(world, clock, guild, fake):
+async def test_a_draft_gets_its_channel_in_the_events_category_marked_draft(world, clock, guild, fake):
     event, channel = await make(world, clock)
-    assert channel.category_id == DRAFTS and channel.name == f"{event.assembly_at.astimezone(world[0].store.current.tz):%d-%m}-ibc"
-    assert channel.overwrites[guild.default_role].view_channel is False
+    assert channel.category_id == EVENTS and channel.name == f"{event.assembly_at.astimezone(world[0].store.current.tz):%d-%m}-ibc"
+    assert channel.overwrites[guild.default_role].send_messages is False  # the category's: seen, read-only
+    assert channel.overwrites[guild.default_role].view_channel is not False
     assert discord.Object(id=MAKER.id) in channel.overwrites  # the creator
     assert discord.Object(id=ADMIN) in channel.overwrites and discord.Object(id=MODERATOR) in channel.overwrites
     assert not guild.threads  # the thread comes with publishing
@@ -221,7 +222,7 @@ async def test_the_thread_and_the_kinds_are_named_as_configured(world, clock, gu
     assert render.kind_label("zeus", "pl", store.current.events.kind_names) == "Zeus"  # not set: the bot's own
 
 
-async def test_publishing_moves_the_channel_and_announces(world, clock, guild):
+async def test_publishing_opens_the_thread_and_announces(world, clock, guild):
     event, channel = await make(world, clock)
     await ready_and_publish(world, event)
     assert channel.category_id == EVENTS
@@ -290,8 +291,8 @@ async def test_the_categories_are_kept_in_date_order(world, clock, guild, servic
         event, channel = await make(world, clock, days=days)
         made[days] = (event, channel)
         await channels.sorter.settle()
-        assert [ch.id for ch in guild.get_channel(DRAFTS).channels] == \
-            [made[d][1].id for d in sorted(made)]  # the drafts by start too
+        assert [ch.id for ch in guild.get_channel(EVENTS).channels][3:] == \
+            [made[d][1].id for d in sorted(made)]  # the drafts by start too, after the top and the rest
     for days in (9, 3, 6):
         await ready_and_publish(world, made[days][0])
         await channels.sorter.settle()
@@ -438,17 +439,17 @@ async def test_a_co_organiser_added_later_sees_the_draft(world, clock):
 async def test_crowded_categories_warn_staff_and_a_full_one_is_named(world, clock, guild, services):
     channels, events, _ = world
     channels.staff = services.staff
-    drafts = guild.get_channel(DRAFTS)
+    events_category = guild.get_channel(EVENTS)
     for n in range(44):
-        await guild.create_text_channel(f"old-{n}", category=drafts)
+        await guild.create_text_channel(f"old-{n}", category=events_category)
     services.staff.drain()
     await make(world, clock)
     await asyncio.sleep(0)  # (posting is queued for the next loop round)
     assert any("45 z 50" in note for note in services.staff.drain())
     assert channels.full() is None
     for n in range(5):
-        await guild.create_text_channel(f"more-{n}", category=drafts)
-    assert channels.full() == "Szkice" and channels.full("events_category") is None
+        await guild.create_text_channel(f"more-{n}", category=events_category)
+    assert channels.full() == "Eventy"
 
 
 async def test_a_cancelled_draft_loses_its_channel(world, clock, guild):
@@ -518,3 +519,16 @@ async def test_a_lost_archive_action_is_scheduled_again_after_a_restart(world, c
     assert await services.scheduler.exists(f"archive:{event.id}")
     await services.scheduler.run_due()
     assert (await events.get(event.id)).archived_at is not None
+
+
+async def test_an_old_hidden_draft_moves_to_the_events_category_at_start_up(world, clock, guild):
+    """Drafts made before 2026-11-11 live in the old hidden drafts category; after the update they are seen."""
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    channel.category_id = DRAFTS  # as the old version made it
+    channel.overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+    await channels.refresh_all()
+    await channels.redrawer.settle()
+    assert channel.category_id == EVENTS
+    assert channel.overwrites[guild.default_role].view_channel is not False
+    assert discord.Object(id=MAKER.id) in channel.overwrites

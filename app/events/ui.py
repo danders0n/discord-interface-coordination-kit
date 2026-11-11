@@ -419,7 +419,9 @@ async def panel(interaction: discord.Interaction, event: Any) -> tuple[str, disc
         shown.append("autoend")  # an evening of several missions: a finished one doesn't end it
     if event.attendance_state is not None and (event.kind != "guest" or access.is_administration):
         shown.append("ratings")  # a guest event's cooperation ratings are for staff only
-    if event.status in ("draft", "pending", "published"):
+    if event.status in ("draft", "pending"):
+        shown.append("cancel")  # (never started: it can always go)
+    elif event.status == "published":
         shown.append("end" if s.events.clock() >= event.start_at else "cancel")
     publish_label = t("Publish", locale) if access.publishes_without_approval or event.kind in COMING else t("Send for approval", locale)
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "briefing": t("Briefing", locale),
@@ -522,12 +524,6 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button], template=r"event:ac
         await reply(interaction, t("Co-organisers", interaction.locale), view=Organisers(interaction, event))
 
     async def _publish(self, interaction, event, member) -> None:
-        s = services(interaction)
-        full = s.channels.full("events_category")  # publishing moves the channel there
-        if full is not None and (s.events.access(member).publishes_without_approval or event.kind in COMING):
-            await reply(interaction, t("The category {category} is full (50 channels): staff must make room before "
-                                       "a new event can be made.", interaction.locale, category=full))
-            return
         state = await guarded(interaction, lambda: services(interaction).events.publish(event.id, member))
         if state == "published":
             await reply(interaction, t("Published.", interaction.locale))

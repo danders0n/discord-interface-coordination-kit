@@ -1,6 +1,6 @@
 """The channels of a category in date order (docs/PLAN.md, *Event channel*, *Order of the channels*).
 
-In the events and drafts categories the channels of ``Ids.top`` come first, in that order (the header first unless
+In the events category the channels of ``Ids.top`` come first, in that order (the header first unless
 ``BOT_CHANNELS__TOP`` lists it), then any other channel that isn't an event's, as it was, then the events by their
 start. An archive category holds events only, by start. Discord puts a new channel at the bottom and keeps a moved
 channel's old number, so the bot puts a category in order after every change: one request for the whole category,

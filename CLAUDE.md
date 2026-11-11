@@ -105,7 +105,7 @@ exactly the settings.
   append / delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always pass `view`, as leaving it out keeps old buttons),
   `order.py` (a category's channels: `Ids.top` first, then the rest, then the events by start; one bulk position
   request, only when the order differs),
-  `service.py` (`EventChannels`: the draft's hidden channel, the thread at publishing (Discord's card last, stored as `card`; a draft's pings by DM), overwrites that follow the co-organisers,
+  `service.py` (`EventChannels`: the channel in the events category from the draft on (marked DRAFT, no sign-up; an old hidden draft moves there at start-up), the thread at publishing (Discord's card last, stored as `card`; a draft's pings by DM), overwrites that follow the co-organisers,
   batched redraws via `Redrawer` (and `sorter`, one by category id, for the order), background renames, publish + announcement, a redraw at the start (sign-up
   closes) and the archive, both moved with the event's times, cancel + thread ping, archive by quarter with
   overflow categories, the 45 / 50 channel room of the categories; it is the notifier of `EventService` and

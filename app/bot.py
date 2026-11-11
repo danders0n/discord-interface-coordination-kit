@@ -195,6 +195,7 @@ class EventBot(commands.Bot):
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
         try:
+            await self.services.events.resume()  # drafts without their cancel action
             await self.services.channels.refresh_all()  # whatever changed while the bot was down
             self.services.channels.header.request()
             try:

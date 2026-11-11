@@ -23,7 +23,7 @@ def check(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
     language = settings.language
     ids, problems = resolve(guild, settings)
     me = guild.me
-    for name in ("drafts_category", "events_category", "header", "announcements", "staff", "link_reminder"):
+    for name in ("events_category", "header", "announcements", "staff", "link_reminder"):
         channel_id = getattr(ids, name)
         if channel_id is None:
             continue

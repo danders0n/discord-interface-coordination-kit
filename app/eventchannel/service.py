@@ -1,13 +1,15 @@
 """The event channel on Discord (docs/PLAN.md, *Event channel*, *Draft and publish*, *Notifications*, *Cancelling*).
 
-- A draft gets a channel in the hidden drafts category, seen by its organisers, *manage any event* and *approve
-  events*. Its discussion thread is made at publishing, after the messages, so Discord's thread card is last.
-  Every ping goes to the thread, never between the bot's messages; before publishing, by DM.
+- A draft gets its channel in the events category at once, with the category's permissions (members read, don't
+  write) plus its organisers, *manage any event* and *approve events*, who may post. It is marked DRAFT (WAITING
+  FOR APPROVAL once sent) and has no sign-up until it is published (decided 2026-11-11: no hidden drafts). Its
+  discussion thread is made at publishing, after the messages, so Discord's thread card is last. Every ping goes
+  to the thread, never between the bot's messages; before publishing, by DM.
 - The bot's messages are redrawn from the database. Requests are **batched**: at most one redraw per event every
   ``interval`` seconds, however many sign-ups arrive at once. A redraw also follows a new name (date, host),
   renaming in the background because Discord allows two renames per ten minutes.
-- Publishing moves the channel to the events category (its permissions, set by hand: members read, write in
-  threads), keeps the organisers' right to post, and posts the announcement, which later edits keep in step.
+- Publishing opens the sign-up, makes the thread and posts the announcement, which later edits keep in step. A
+  channel from before 2026-11-11 still in the old hidden drafts category moves to the events category at start-up.
 - Cancelling marks the messages, pings the members signed up in the thread, edits the announcement and archives
   at once; a draft's channel is deleted instead. A published event is drawn again at its start (sign-up closes)
   and archived ``archive_hours`` after its attendance report (at the latest after its end); both follow the event
@@ -50,7 +52,6 @@ BOT = discord.PermissionOverwrite(view_channel=True, send_messages=True, send_me
                                   manage_roles=True, embed_links=True, attach_files=True, read_message_history=True)
 ORGANISER = discord.PermissionOverwrite(view_channel=True, send_messages=True, send_messages_in_threads=True,
                                         read_message_history=True, attach_files=True, embed_links=True)
-HIDDEN = discord.PermissionOverwrite(view_channel=False)
 READ_ONLY = discord.PermissionOverwrite(send_messages=False, send_messages_in_threads=False,
                                         create_public_threads=False, add_reactions=False)
 
@@ -192,10 +193,8 @@ class EventChannels:
         return overwrites
 
     async def _overwrites(self, guild: Any, event: Event) -> dict:
-        """A draft: hidden from everyone else. Published: the category's, plus the organisers."""
+        """The events category's (drafts too: they are seen, marked DRAFT), plus the organisers."""
         organisers = await self.events.organisers(event.id)
-        if event.status in ("draft", "pending"):
-            return {guild.default_role: HIDDEN} | self._organiser_overwrites(guild, event, organisers)
         category = guild.get_channel(self.ids().events_category)
         base = dict(category.overwrites) if category is not None else {}
         return base | self._organiser_overwrites(guild, event, organisers)
@@ -211,10 +210,10 @@ class EventChannels:
     # ---------------------------------------------------------------- category room
 
     def crowded(self, *keys: str) -> list[tuple[str, int]]:
-        """The categories (``drafts_category``, ``events_category``; both by default) with their channel counts."""
+        """The categories (``events_category`` by default) with their channel counts."""
         guild, ids = self.guild(), self.ids()
         found = []
-        for key in keys or ("drafts_category", "events_category"):
+        for key in keys or ("events_category",):
             category_id = getattr(ids, key)
             category = guild.get_channel(category_id) if guild is not None and category_id else None
             if category is not None:
@@ -247,7 +246,7 @@ class EventChannels:
             rows = (await session.execute(select(Event.channel_id, Event.start_at, Event.id).where(
                 Event.channel_id.in_([c.id for c in category.channels])))).all()
         ids = self.ids()
-        top = ids.top if category_id in (ids.drafts_category, ids.events_category) else ()
+        top = ids.top if category_id == ids.events_category else ()
         try:
             await order.apply(guild, category, top, {channel: (start, event) for channel, start, event in rows})
         except discord.HTTPException as exc:
@@ -258,7 +257,7 @@ class EventChannels:
     async def open_draft(self, event_id: int) -> Any:
         """The draft's channel, thread and messages. Returns the channel."""
         guild, event = self.guild(), await self._event(event_id)
-        category = guild.get_channel(self.ids().drafts_category)
+        category = guild.get_channel(self.ids().events_category)
         channel = await guild.create_text_channel(await self.events.channel_name(event), category=category,
                                                   overwrites=await self._overwrites(guild, event),
                                                   topic=await self._topic(event))
@@ -376,8 +375,7 @@ class EventChannels:
         channel = self._channel(event)
         if channel is None:
             return
-        await channel.edit(category=guild.get_channel(self.ids().events_category),
-                           overwrites=await self._overwrites(guild, event))
+        await self._into_events(guild, event, channel)
         await self.redraw_now(event_id)
         if not event.thread_id:
             await self._open_thread(event_id, channel)
@@ -392,8 +390,16 @@ class EventChannels:
                                                                            users=False, everyone=False))
             await self._save(event_id, announcement_id=sent.id)
         await self._schedule(event)
-        self._sort_later(self.ids().events_category)  # (the redraw may still have seen the drafts category)
         self._warn_room()
+
+    async def _into_events(self, guild: Any, event: Event, channel: Any) -> None:
+        """A channel still in the old hidden drafts category (made before 2026-11-11) moves to the events category,
+        with its permissions."""
+        category = guild.get_channel(self.ids().events_category)
+        if category is None or channel.category_id == category.id:
+            return
+        await channel.edit(category=category, overwrites=await self._overwrites(guild, event))
+        self._sort_later(category.id, channel.category_id)
 
     async def _schedule(self, event: Event) -> None:
         """A published event's own actions: sign-up closing at the start, the archive after the end."""
@@ -487,11 +493,17 @@ class EventChannels:
     async def refresh_all(self) -> None:
         """After a restart: redraw every channel not archived yet (sign-up states, missed changes), and put the
         categories in order (channels moved by hand)."""
-        self._sort_later(self.ids().drafts_category, self.ids().events_category)
+        self._sort_later(self.ids().events_category)
         async with self.db.session() as session:
             events = (await session.execute(select(Event).where(Event.channel_id.is_not(None),
                                                                 Event.archived_at.is_(None)))).scalars().all()
+        guild = self.guild()
         for event in events:
+            if event.status in ("draft", "pending") and (channel := self._channel(event)) is not None:
+                try:
+                    await self._into_events(guild, event, channel)
+                except discord.HTTPException as exc:
+                    log.warning("Moving the draft #%s to the events category failed: %s", channel.name, exc)
             self.redrawer.request(event.id)
             await self._repair_archive(event)
 

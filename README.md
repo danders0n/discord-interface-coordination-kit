@@ -7,8 +7,8 @@ squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
 **Status: all phases of the plan (1–8).** The bot starts, checks its configuration on the server, keeps its database, backups,
 logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
 restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
-(drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: hidden while a
-draft, then published with an announcement, its messages kept in order and redrawn as sign-ups change, archived
+(drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: marked DRAFT
+without sign-up until it is published with an announcement, its messages kept in order and redrawn as sign-ups change, archived
 by quarter. *Create event* in the header channel starts a wizard; *Organiser panel* under an event's info
 edits it, publishes or sends it for approval; moderators decide in the moderation thread. `/event preset` and
 `/event image` attach the launcher preset and the briefing image. Members sign up with the buttons under the
@@ -45,7 +45,7 @@ copy .env.example .env      # then fill it in, see below
    in Threads, Create Public Threads, Manage Threads, Embed Links, Attach Files, Read Message History, Manage
    Channels and Manage Roles, plus *Mention @everyone, @here and All Roles* unless the announcement and climate roles
    are mentionable. At start-up the bot checks this and posts what is missing to the staff log.
-3. Create two categories (drafts: hidden from members; events: members may view and read the history, may not
+3. Create the events category (members may view and read the history, may not
    send messages, and may *send messages in threads*, which is where they talk), the header and
    announcements channels, and one staff-only channel. In the staff channel the bot makes two threads itself,
    *Staff log* and *Moderacja* (names in `.env`). Put each channel and role into `.env` by **name or id**: a name is

@@ -116,7 +116,32 @@ async def test_stale_actions_only_when_still_ahead(events, clock, services):
     far = await events.create(draft(clock, days=5), MAKER)
     near = await events.create(draft(clock, days=0, hours=20), MAKER)  # inside both windows already
     assert await services.scheduler.exists(f"stale_ping:{far.id}") and await services.scheduler.exists(f"stale_cancel:{far.id}")
-    assert not await services.scheduler.exists(f"stale_ping:{near.id}") and not await services.scheduler.exists(f"stale_cancel:{near.id}")
+    assert not await services.scheduler.exists(f"stale_ping:{near.id}")
+    assert await services.scheduler.exists(f"stale_cancel:{near.id}")  # not at once: at its start
+
+
+async def test_an_unpublished_event_never_outlives_its_start(events, clock, services):
+    """A draft made inside the cancel window used to get no cancel action and stay forever (decided 2026-11-11:
+    cancelled at the start at the latest)."""
+    near = await events.create(draft(clock, days=0, hours=20), MAKER)
+    clock.now = near.start_at + timedelta(minutes=1)
+    await services.scheduler.run_due()
+    assert (await events.get(near.id)).status == "cancelled"
+    assert "deleted" in events.recorder.names()
+
+
+async def test_a_draft_can_be_cancelled_by_hand_after_its_start(events, clock):
+    event = await events.create(draft(clock, days=0, hours=20), MAKER)
+    clock.now = event.start_at + timedelta(hours=1)
+    await events.cancel(event.id, MAKER, "never happened")
+    assert (await events.get(event.id)).status == "cancelled"
+
+
+async def test_resume_gives_an_old_draft_its_cancel_action(events, clock, services):
+    event = await events.create(draft(clock, days=0, hours=20), MAKER)
+    await services.scheduler.cancel(f"stale_cancel:{event.id}")  # as a draft made before the fix
+    await events.resume()
+    assert await services.scheduler.exists(f"stale_cancel:{event.id}")
 
 
 # ------------------------------------------------------------------ publishing and approval

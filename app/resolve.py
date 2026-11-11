@@ -16,7 +16,7 @@ from app.i18n import t
 from app.settings import Settings
 
 TEXT_TYPES = (discord.ChannelType.text, discord.ChannelType.news)
-CATEGORY_CHANNELS = ("drafts_category", "events_category")
+CATEGORY_CHANNELS = ("events_category",)
 TEXT_CHANNELS = ("header", "announcements", "staff", "link_reminder")
 
 
@@ -24,7 +24,6 @@ TEXT_CHANNELS = ("header", "announcements", "staff", "link_reminder")
 class Ids:
     """The configuration's channels and roles as ids; None (or left out of a set) when not resolved."""
 
-    drafts_category: int | None = None
     events_category: int | None = None
     header: int | None = None
     announcements: int | None = None

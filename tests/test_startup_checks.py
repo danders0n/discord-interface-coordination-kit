@@ -17,21 +17,21 @@ def test_a_healthy_server_has_no_problems(guild, settings):
 
 
 def test_names_work_like_ids_and_ignore_case(guild, tmp_path):
-    settings = make_settings(tmp_path, channels={"drafts_category": "szkice", "events_category": "Eventy",
+    settings = make_settings(tmp_path, channels={"events_category": "Eventy",
                                                  "header": "#eventy", "announcements": "ogloszenia",
                                                  "staff": "STAFF"},
                              roles={"member": ["klanowicz"], "mission_maker": "@Mission Maker",
                                     "signup": ["Klanowicz", "Kadet"]})
     ids, problems = resolve(guild, settings)
     assert problems == []
-    assert ids.drafts_category == DRAFTS and ids.staff == STAFF and ids.member == {MEMBER}
+    assert ids.events_category == EVENTS and ids.staff == STAFF and ids.member == {MEMBER}
 
 
 def test_the_top_channels_put_the_header_first_unless_listed(guild, tmp_path):
     from conftest import ANNOUNCE, HEADER
 
     guild.add(FakeChannel(997, "instrukcja-strefy"))
-    base = {"drafts_category": DRAFTS, "events_category": EVENTS, "header": HEADER, "announcements": ANNOUNCE,
+    base = {"events_category": EVENTS, "header": HEADER, "announcements": ANNOUNCE,
             "staff": STAFF}
     ids, problems = resolve(guild, make_settings(tmp_path, channels=base | {"top": ["Instrukcja-strefy", ANNOUNCE]}))
     assert problems == [] and ids.top == (HEADER, 997, ANNOUNCE)
@@ -45,11 +45,11 @@ def test_missing_ambiguous_and_wrong_kind(guild, tmp_path):
     guild.add(FakeRole(999, "Klanowicz"))
     guild.add(FakeChannel(998, "Eventy"))  # a text channel named like the category: not a clash for a category
     settings = make_settings(tmp_path, language="en",
-                             channels={"drafts_category": "eventy", "events_category": EVENTS, "header": DRAFTS,
+                             channels={"events_category": "eventy", "header": DRAFTS,
                                        "announcements": "nowhere", "staff": STAFF},
                              roles={"member": ["Klanowicz"], "mission_maker": 12345})
     ids, problems = resolve(guild, settings)
-    assert ids.drafts_category == EVENTS  # matched the category, not the text channel
+    assert ids.events_category == EVENTS  # matched the category, not the text channel
     assert "BOT_CHANNELS__HEADER: Szkice is not a text channel" in problems
     assert "BOT_CHANNELS__ANNOUNCEMENTS: nowhere not found on this server" in problems
     assert any(p.startswith("BOT_ROLES__MEMBER: more than one is called Klanowicz") and "999" in p for p in problems)
@@ -93,7 +93,7 @@ def test_no_sign_up_role_is_a_problem(guild, tmp_path):
 
 
 def test_problems_follow_the_public_language(guild, tmp_path):
-    settings = make_settings(tmp_path, channels={"drafts_category": DRAFTS, "events_category": EVENTS,
+    settings = make_settings(tmp_path, channels={"events_category": EVENTS,
                                                  "header": "brak", "announcements": "ogloszenia", "staff": STAFF})
     (problem,) = check(guild, settings)[1]  # language is pl
     assert problem == "BOT_CHANNELS__HEADER: nie znaleziono „brak” na tym serwerze"
