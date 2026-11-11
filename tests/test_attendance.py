@@ -307,3 +307,35 @@ async def test_organisers_correct_the_report_and_confirm_a_probable_link(stack, 
     assert confirm.replies[0].content == "Linked: <@2> is m2."
     assert (await stack.links.get(2)).steam_id == MATCH
     assert {e.member_id: e.status for e in await stack.attendance.entries(event.id)}[2] == "attended"
+
+
+async def test_end_event_with_the_supervisor_down_still_reports(stack, guild, clock, fake, monkeypatch):
+    """Ending the reservation used to fail after the event was marked ended and before its read was scheduled:
+    no report ever came, and End event was refused from then on."""
+    from app.supervisor_client import SupervisorUnreachable
+
+    event = await published(stack, clock)
+    at(clock, fake, event.start_at + timedelta(minutes=30))
+
+    async def down(_event_id):
+        raise SupervisorUnreachable("down")
+
+    monkeypatch.setattr(stack.reservations, "end", down)
+    await stack.events.end(event.id, MAKER)
+    assert (await stack.events.get(event.id)).status == "ended"
+    assert await stack.scheduler.exists(f"{READ}:{event.id}")
+    monkeypatch.undo()
+    at(clock, fake, clock.now + timedelta(minutes=10))
+    await run(stack)
+    assert (await stack.events.get(event.id)).attendance_state == "reported"
+
+
+async def test_an_ended_event_without_its_read_gets_it_at_start_up(stack, clock, fake):
+    event = await published(stack, clock)
+    at(clock, fake, event.start_at + timedelta(minutes=30))
+    await stack.events.end(event.id, MAKER)
+    await stack.scheduler.cancel(f"{READ}:{event.id}")  # as the old order could leave it
+    await stack.attendance.resume()
+    at(clock, fake, clock.now + timedelta(minutes=1))
+    await run(stack)
+    assert (await stack.events.get(event.id)).attendance_state == "reported"

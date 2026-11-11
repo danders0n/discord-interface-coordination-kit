@@ -182,6 +182,16 @@ class AttendanceService:
         """Cancelled: nothing to watch."""
         await self.scheduler.cancel(f"{WATCH}:{event_id}")
 
+    async def resume(self) -> None:
+        """At start-up: an event ended while its read wasn't scheduled (a failure between the two before
+        2026-11-11) gets the read now, so its report still comes."""
+        async with self.db.session() as session:
+            waiting = (await session.execute(select(Event.id).where(Event.attendance_state == "waiting"))).scalars().all()
+        for event_id in waiting:
+            if not await self.scheduler.exists(f"{READ}:{event_id}"):
+                await self.scheduler.schedule(READ, self.clock(), key=f"{READ}:{event_id}", event_id=event_id)
+                log.info("Event %s was waiting for its attendance with no read scheduled: read now", event_id)
+
     async def _window_start(self, event: Event) -> datetime:
         booked = await self.reservations.get(event.id)
         if booked is not None and booked.state in ("booked", "ended"):
@@ -203,10 +213,14 @@ class AttendanceService:
             row = await session.get(Event, event_id)
             row.status, row.attendance_state, row.attendance_trigger = "ended", "waiting", how
             row.attendance_from, row.attendance_to = start, max(at, start + timedelta(seconds=1))
-        if end_reservation:
-            await self.reservations.end(event_id)
+        # The read is scheduled before anything that can fail: once the event is ended, nothing else brings it back.
         await self.scheduler.cancel(f"{WATCH}:{event_id}")
         await self.scheduler.schedule(READ, read_at, key=f"{READ}:{event_id}", event_id=event_id)
+        if end_reservation:
+            try:
+                await self.reservations.end(event_id)
+            except SupervisorError as exc:  # it ends at its own end time all the same
+                log.warning("Event %s ended, but its reservation could not be ended now: %s", event_id, exc.message)
         await self.notifier.changed(event_id)
         log.info("Event %s ended (%s); attendance read at %s", event_id, how, read_at)
         return True

@@ -196,6 +196,7 @@ class EventBot(commands.Bot):
         self.services.staff.post(text)
         try:
             await self.services.events.resume()  # drafts without their cancel action
+            await self.services.attendance.resume()  # ended events without their attendance read
             await self.services.channels.refresh_all()  # whatever changed while the bot was down
             self.services.channels.header.request()
             try:
