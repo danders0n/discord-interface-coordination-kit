@@ -553,7 +553,10 @@ class EventService:
         if self.attendance is not None:
             await self.attendance.published(row)
         if self.profiles is not None:
-            await self.profiles.published(row)
+            try:
+                await self.profiles.published(row)
+            except Exception:  # noqa: BLE001 - logged as an ERROR; the profile can be built from the panel
+                log.exception("The server profile of event %s wasn't prepared at publishing", event.id)
         await self.notifier.published(event.id, by)
 
     # ---------------------------------------------------------------- reservations

@@ -1,6 +1,7 @@
 """The wizard, the organiser panel and the header (docs/PLAN.md, *Creating an event*, *Organiser panel*), on fakes."""
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 import discord
 import pytest
@@ -366,3 +367,17 @@ async def test_a_header_the_database_doesnt_know_is_adopted_and_extras_deleted(s
     assert newer.edits  # redrawn in place
     await fresh.draw()
     assert len(channel.messages) == 2  # still one header (and the other message)
+
+
+async def test_a_draft_whose_channel_could_not_be_made_is_cancelled(stack, guild, clock, monkeypatch, fake):
+    """A draft without its channel can't be found, and its reservation would hold the host."""
+    async def refused(*_args, **_kwargs):
+        raise discord.HTTPException(SimpleNamespace(status=403, reason="Forbidden"), "Missing Permissions")
+
+    monkeypatch.setattr(guild, "create_text_channel", refused)
+    with pytest.raises(discord.HTTPException):
+        await create(stack, guild, clock, person(20, MEMBER, MISSION_MAKER))
+    async with stack.db.session() as session:
+        (event,) = (await session.execute(select(Event))).scalars().all()
+    assert event.status == "cancelled"
+    assert fake.reservations == {}  # its reservation went with it

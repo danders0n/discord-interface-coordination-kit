@@ -43,6 +43,7 @@ from app.signup.service import COMING
 ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, with the sign-up buttons off
 RATING_CLOSE_KIND = "rating_close"  # the end of the rating window: drawn again, without Rate
+PUBLISH_KIND = "publish_finish"  # publishing's Discord side, when it failed part way: tried again
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 log = logging.getLogger(__name__)
@@ -126,6 +127,7 @@ class EventChannels:
         scheduler.register(ARCHIVE_KIND, self._archive_action)
         scheduler.register(CLOSE_KIND, self._close_action)
         scheduler.register(RATING_CLOSE_KIND, self._rating_close_action)
+        scheduler.register(PUBLISH_KIND, self._publish_action)
 
     # ---------------------------------------------------------------- helpers
 
@@ -375,7 +377,11 @@ class EventChannels:
             await self._save(event.id, announcement_id=None)
 
     async def publish(self, event_id: int) -> None:
-        guild, event = self.guild(), await self._event(event_id)
+        """Every step may run again: one that failed part way is finished by the ``publish_finish`` action, and
+        what was done already (the thread, the announcement) is not done twice."""
+        guild, event = self._connected(), await self._event(event_id)
+        if event is None or event.status != "published":
+            return
         channel = self._channel(event)
         if channel is None:
             return
@@ -384,7 +390,7 @@ class EventChannels:
         if not event.thread_id:
             await self._open_thread(event_id, channel)
         ann = guild.get_channel(self.ids().announcements)
-        if ann is not None:
+        if ann is not None and not event.announcement_id:
             roles = [r for r in (self.ids().announcement, event.climate_role_id) if r]
             ctx = await self._context(event)
             message = render.announcement(event, ctx, event.channel_id)
@@ -482,6 +488,10 @@ class EventChannels:
                 return category
         raise RuntimeError(f"No room left in the archive categories of {base}")
 
+    async def _publish_action(self, action: Action, now: datetime) -> None:
+        await self.publish(action.event_id)  # type: ignore[arg-type]  (raises again: the scheduler retries)
+        self._calendar()
+
     async def _archive_action(self, action: Action, now: datetime) -> None:
         await self.archive(action.event_id)  # type: ignore[arg-type]
 
@@ -551,7 +561,14 @@ class EventChannels:
         self._calendar()
 
     async def published(self, event_id: int, by: int | None = None) -> None:
-        await self.publish(event_id)
+        """The event is published whatever Discord says: a step that fails is finished by a scheduled action, so
+        the channel, the thread and the announcement never stay half done."""
+        try:
+            await self.publish(event_id)
+        except Exception:  # noqa: BLE001 - logged as an ERROR; the action tries again
+            log.exception("Publishing event %s on Discord failed part way; trying again shortly", event_id)
+            await self.scheduler.schedule(PUBLISH_KIND, self.clock() + timedelta(minutes=1),
+                                          key=f"{PUBLISH_KIND}:{event_id}", event_id=event_id)
         self._calendar()
         if by is not None:  # (published by an approval: approval_decided tells staff who decided)
             event = await self._event(event_id)

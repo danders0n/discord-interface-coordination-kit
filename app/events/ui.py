@@ -308,7 +308,12 @@ class DetailsModal(discord.ui.Modal):
                                                 c.host if c.kind == "guest" else None,
                                                 c.guests if c.kind == "hosted" else []), member)
             c.stop()
-            return await s.channels.open_draft(event.id)
+            try:
+                return await s.channels.open_draft(event.id)
+            except Exception:
+                # No draft without its channel: nobody could find it, and its reservation would hold the host.
+                await s.events.cancel(event.id, None, "channel not made")
+                raise
 
         result = await guarded(interaction, save)
         if result is None:

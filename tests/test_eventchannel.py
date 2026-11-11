@@ -555,3 +555,28 @@ async def test_an_old_hidden_draft_moves_to_the_events_category_at_start_up(worl
     assert channel.category_id == EVENTS
     assert channel.overwrites[guild.default_role].view_channel is not False
     assert discord.Object(id=MAKER.id) in channel.overwrites
+
+
+async def test_publishing_that_fails_part_way_is_finished_later_without_doubles(world, clock, guild, services):
+    """Discord refusing the announcement used to leave a published event half done for good."""
+    channels, events, _ = world
+    event, channel = await make(world, clock)
+    announcements = guild.get_channel(ANNOUNCE)
+    send, calls = announcements.send, []
+
+    async def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise discord.HTTPException(SimpleNamespace(status=503, reason="Unavailable"), "try later")
+        return await send(*args, **kwargs)
+
+    announcements.send = flaky
+    await ready_and_publish(world, event)
+    assert (await events.get(event.id)).status == "published" and announcements.messages == []
+    assert await services.scheduler.exists(f"publish_finish:{event.id}")
+    clock.now += timedelta(minutes=2)
+    await services.scheduler.run_due()
+    await channels.redrawer.settle()
+    assert len(announcements.messages) == 1 and len(guild.threads) == 1
+    assert (await events.get(event.id)).announcement_id == announcements.messages[0].id
+    assert await services.scheduler.exists(f"signup_close:{event.id}")  # (the channel's own actions too)
