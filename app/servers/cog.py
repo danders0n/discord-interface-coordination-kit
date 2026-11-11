@@ -81,10 +81,28 @@ class ServerCog(commands.Cog):
             self._servers = (time.monotonic(), servers)
         return servers
 
+    async def known(self, interaction: discord.Interaction, slug: str) -> bool:
+        """Autocomplete only suggests: what was typed must be one of the supervisor's servers before it goes into
+        a request's path (anything else is answered here). A server added in the last half minute is found by
+        reading the list again."""
+        try:
+            slugs = {s["server"]["slug"] for s in await self.servers()}
+            if slug not in slugs:
+                self._servers = (0.0, [])
+                slugs = {s["server"]["slug"] for s in await self.servers()}
+        except SupervisorError as exc:
+            await reply(interaction, t("The supervisor refused: {reason}", interaction.locale, reason=exc.message))
+            return False
+        if slug not in slugs:
+            await reply(interaction, t("Pick a server from the list.", interaction.locale))
+        return slug in slugs
+
     # ---------------------------------------------------------------- doing it
 
     async def confirm(self, interaction: discord.Interaction, action: str, slug: str) -> None:
         """Stop and restart: say how many players are on, and act on the button."""
+        if not await self.known(interaction, slug):
+            return
         try:
             status = await self.services.supervisor.server_status(slug)
         except SupervisorError as exc:
@@ -100,6 +118,8 @@ class ServerCog(commands.Cog):
     async def run(self, interaction: discord.Interaction, action: str, slug: str, *, override: bool = False,
                   message: str | None = None) -> None:
         client, locale = self.services.supervisor, interaction.locale
+        if not await self.known(interaction, slug):
+            return
         try:
             if action == "start":
                 await client.start(slug, override)

@@ -110,3 +110,30 @@ async def test_the_supervisors_refusal_is_shown(services, fake):
     interaction = FakeInteraction(services, member(MODERATOR), discord.Locale.polish)
     await invoke(cog.say, cog, interaction, server="event", message="hi")
     assert interaction.replies[0].content.endswith("event is not running")
+
+
+async def test_only_the_supervisors_servers_reach_a_request(services, fake):
+    """Autocomplete only suggests, so a typed path (``event/stop#`` through ``/server say``) must not be sent."""
+    fake.server("event")["state"] = "running"
+    cog = ServerCog(services)
+    for typed in ("event/stop#", "../reservations/current/end#", "event?x=", "nope"):
+        say = FakeInteraction(services, member(MODERATOR), ENGLISH)
+        await invoke(cog.say, cog, say, server=typed, message="hi")
+        assert say.replies[0].content == "Pick a server from the list."
+        start = FakeInteraction(services, member(ADMIN), ENGLISH)
+        await invoke(cog.start, cog, start, server=typed)
+        assert start.replies[0].content == "Pick a server from the list."
+        stop = FakeInteraction(services, member(ADMIN), ENGLISH)
+        await invoke(cog.stop, cog, stop, server=typed)
+        assert stop.replies[0].content == "Pick a server from the list." and "view" not in stop.replies[0].kwargs
+    assert fake.server("event")["state"] == "running" and await notes(services) == []
+
+
+async def test_a_server_added_since_the_list_was_read_is_found(services, fake):
+    cog = ServerCog(services)
+    await cog.servers()  # (cached)
+    fake.servers.append({"server": {"id": 3, "slug": "training", "name": "Training"}, "state": "stopped",
+                         "players_online": []})
+    interaction = FakeInteraction(services, member(MISSION_MAKER), ENGLISH)
+    await invoke(cog.start, cog, interaction, server="training")
+    assert interaction.replies[0].content == "Starting training."

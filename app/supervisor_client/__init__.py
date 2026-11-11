@@ -118,19 +118,19 @@ class SupervisorClient:
         return await self.request("GET", "/api/servers")
 
     async def server_status(self, slug: str) -> dict[str, Any]:
-        return await self.request("GET", f"/api/servers/{slug}/status", params={"query": "false"})
+        return await self.request("GET", f"/api/servers/{_segment(slug)}/status", params={"query": "false"})
 
     async def start(self, slug: str, override: bool = False) -> dict[str, Any]:
-        return await self.request("POST", f"/api/servers/{slug}/start", json={"override": override})
+        return await self.request("POST", f"/api/servers/{_segment(slug)}/start", json={"override": override})
 
     async def stop(self, slug: str) -> dict[str, Any]:
-        return await self.request("POST", f"/api/servers/{slug}/stop", json={})
+        return await self.request("POST", f"/api/servers/{_segment(slug)}/stop", json={})
 
     async def restart(self, slug: str, override: bool = False) -> dict[str, Any]:
-        return await self.request("POST", f"/api/servers/{slug}/restart", json={"override": override})
+        return await self.request("POST", f"/api/servers/{_segment(slug)}/restart", json={"override": override})
 
     async def say(self, slug: str, message: str) -> None:
-        await self.request("POST", f"/api/servers/{slug}/say", json={"message": message})
+        await self.request("POST", f"/api/servers/{_segment(slug)}/say", json={"message": message})
 
     # ---------------------------------------------------------------- player stats
 
@@ -197,7 +197,7 @@ class SupervisorClient:
         return await self.request("GET", "/api/missions")
 
     async def mission_report(self, name: str) -> dict[str, Any]:
-        return await self.request("GET", f"/api/missions/{quote(name, safe='')}/report")
+        return await self.request("GET", f"/api/missions/{_segment(name)}/report")
 
     async def upload_mission(self, filename: str, content: bytes, overwrite: bool) -> dict[str, Any]:
         """The saved mission with its inspection ``report``."""
@@ -209,7 +209,7 @@ class SupervisorClient:
 
     async def assign_profile(self, slug: str, profile_id: int | None) -> dict[str, Any]:
         """The profile the server starts with (the swap fallback without ``reservation_profile``)."""
-        return await self.request("PATCH", f"/api/servers/{slug}", json={"profile_id": profile_id})
+        return await self.request("PATCH", f"/api/servers/{_segment(slug)}", json={"profile_id": profile_id})
 
     # ---------------------------------------------------------------- reservations
 
@@ -243,6 +243,12 @@ class SupervisorClient:
             if exc.status in (404, 409):
                 return False
             raise
+
+
+def _segment(value: Any) -> str:
+    """One path segment from outside (a slug someone typed, a file name): quoted whole, so ``/``, ``..``, ``?`` and
+    ``#`` in it can't lead the request to another route."""
+    return quote(str(value), safe="")
 
 
 def _message(body: Any, fallback: str | None) -> str:

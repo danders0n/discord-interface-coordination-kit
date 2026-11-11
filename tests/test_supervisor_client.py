@@ -50,3 +50,14 @@ async def test_an_unreachable_supervisor_is_its_own_error():
     with pytest.raises(SupervisorUnreachable):
         await client.refresh_info()
     await client.close()
+
+
+async def test_a_slug_is_one_path_segment_whatever_it_holds(supervisor):
+    """``..``, ``/``, ``?`` and ``#`` in a slug are quoted, so the request can't land on another route."""
+    state, client = supervisor
+    state.server("event")["state"] = "running"
+    for slug in ("event/stop#", "../reservations/current/end#", "event/stop?"):
+        with pytest.raises(SupervisorError) as caught:
+            await client.say(slug, "hi")
+        assert caught.value.status == 404
+    assert state.server("event")["state"] == "running"

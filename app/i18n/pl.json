@@ -57,6 +57,7 @@
   "Message sent to {server}.": "Wiadomość wysłana na {server}.",
   "Nothing was done.": "Nic nie zostało zrobione.",
   "The supervisor refused: {reason}": "Supervisor odmówił: {reason}",
+  "Pick a server from the list.": "Wybierz serwer z listy.",
   "The ORBAT is {length} characters long; at most {limit} fit.": "ORBAT ma {length} znaków; mieści się najwyżej {limit}.",
   "The ORBAT is empty.": "ORBAT jest pusty.",
   "The ORBAT has {count} slots; at most {limit} fit.": "ORBAT ma {count} slotów; mieści się najwyżej {limit}.",
