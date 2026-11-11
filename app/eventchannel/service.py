@@ -333,7 +333,11 @@ class EventChannels:
         attached = dict(event.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
-        stored = await sync.apply(channel, {k: int(v) for k, v in (event.messages or {}).items()}, messages)
+        try:
+            stored = await sync.apply(channel, {k: int(v) for k, v in (event.messages or {}).items()}, messages)
+        except sync.Partial as exc:  # what was sent is kept, so the next redraw edits it rather than sending again
+            await self._save(event_id, messages=exc.stored)
+            raise exc.__cause__ from None
         tags = {key: message.tag for key, message in messages.items() if message.files}
         await self._save(event_id, messages=stored, attached=tags)
         await self._announcement(event, ctx)

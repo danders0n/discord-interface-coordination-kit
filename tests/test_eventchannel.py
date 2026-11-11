@@ -72,6 +72,29 @@ async def test_apply_keeps_the_order_even_when_a_message_was_deleted_by_hand():
     assert [m.content for m in channel.messages] == ["info", "briefing", "preset", "orbat:0", "orbat:1"]
 
 
+async def test_a_failure_part_way_keeps_what_was_sent_so_nothing_is_sent_twice():
+    """Discord refusing the third message used to lose the ids of the first two: the next redraw sent them again."""
+    from fakes import FakeGuild
+    channel = FakeChannel(1, "18-11-ibc")
+    FakeGuild(9, channels=[channel])
+    pages = {k: render.Message(content=k) for k in ("info", "briefing", "orbat:0")}
+    send, calls = channel.send, []
+
+    async def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 3:
+            raise discord.HTTPException(SimpleNamespace(status=429, reason="Too Many Requests"), "rate limited")
+        return await send(*args, **kwargs)
+
+    channel.send = flaky
+    with pytest.raises(sync.Partial) as caught:
+        await sync.apply(channel, {}, pages)
+    assert set(caught.value.stored) == {"info", "briefing"}
+    assert isinstance(caught.value.__cause__, discord.HTTPException)
+    await sync.apply(channel, caught.value.stored, pages)
+    assert [m.content for m in channel.messages] == ["info", "briefing", "orbat:0"]  # no second info or briefing
+
+
 # ------------------------------------------------------------------ drawing
 
 EVENT = SimpleNamespace(title="Op", status="published", signup_opens_at=None,

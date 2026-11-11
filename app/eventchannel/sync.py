@@ -63,20 +63,40 @@ def plan(stored: Mapping[str, int], wanted: Sequence[str]) -> list[Op]:
     return ops
 
 
+class Partial(Exception):
+    """:func:`apply` failed part way (Discord refused, a rate limit): ``stored`` is what the channel holds now, to
+    be saved, or the messages already sent would be sent again by the next redraw and the old ones forgotten."""
+
+    def __init__(self, stored: dict[str, int]) -> None:
+        super().__init__("the channel was brought only part way")
+        self.stored = stored
+
+
 async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Message]) -> dict[str, int]:
-    """Bring the channel to ``messages``; returns the new key -> id map (save it even after an error)."""
+    """Bring the channel to ``messages``; returns the new key -> id map. On a failure part way, raises
+    :class:`Partial` with the map as far as it got (its cause is the original error)."""
     stored = dict(stored)
+    try:
+        return await _apply(channel, stored, messages)
+    except Exception as exc:
+        raise Partial(stored) from exc
+
+
+async def _apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Message]) -> dict[str, int]:
+    """:func:`apply`'s work, keeping ``stored`` (changed in place) true to the channel after every step."""
     for _attempt in range(2):
         wanted = dict(messages)
         if CARD in stored:
             if DISCUSSION in wanted and all(key in stored for key in wanted if key != DISCUSSION):
                 del wanted[DISCUSSION]  # the card is still last: it is the link
             else:
-                await _delete(channel, stored.pop(CARD))
+                await _delete(channel, stored[CARD])
+                del stored[CARD]
         missing = None
         for op in plan({key: id_ for key, id_ in stored.items() if key != CARD}, list(wanted)):
             if op.action == "delete":
-                await _delete(channel, stored.pop(op.key))
+                await _delete(channel, stored[op.key])
+                del stored[op.key]
             elif op.action == "edit":
                 message = messages[op.key]
                 try:
