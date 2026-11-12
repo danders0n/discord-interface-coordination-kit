@@ -40,6 +40,11 @@ class Services:
     links: Any = None
     squadxml: Any = None
     link_watch: Any = None
+    # The supervisor as the owner of members and notices (docs/PLAN-front-end.md), built by the bot:
+    # app.bot.EventBot.build_front_end.
+    roster: Any = None  # app.roster.service.Roster
+    notices: Any = None  # app.notices.service.Notices
+    live: Any = None  # app.live.Live
     # A member's role ids now, or None when they are not on the server.
     roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None
 

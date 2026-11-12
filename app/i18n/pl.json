@@ -698,5 +698,11 @@
   "{member} corrected the attendance of {event}: {members} → {status}.": "{member} poprawia obecność w {event}: {members} → {status}.",
   "{member} confirmed the probable Steam IDs in the attendance of {event}: {members}.": "{member} potwierdza prawdopodobne Steam ID w obecności {event}: {members}.",
   "{member} changed their rating of {event}.": "{member} zmienia swoją ocenę {event}.",
-  "{member} rated {event}.": "{member} ocenia {event}."
+  "{member} rated {event}.": "{member} ocenia {event}.",
+  "Your login link for the {group} app: {url}\nIt works once, until {until}. Don't share it: whoever has it can set your password.": "Twój link logowania do aplikacji {group}: {url}\nDziała raz, do {until}. Nie udostępniaj go: kto go ma, może ustawić Twoje hasło.",
+  "The supervisor held a roster push: it would disable {count} account ({accounts}). Apply or drop it in the app, on the Members page.": {
+    "one": "Supervisor wstrzymał aktualizację listy członków: wyłączyłaby {count} konto ({accounts}). Zatwierdź ją lub odrzuć w aplikacji, na stronie Członkowie.",
+    "few": "Supervisor wstrzymał aktualizację listy członków: wyłączyłaby {count} konta ({accounts}). Zatwierdź ją lub odrzuć w aplikacji, na stronie Członkowie.",
+    "many": "Supervisor wstrzymał aktualizację listy członków: wyłączyłaby {count} kont ({accounts}). Zatwierdź ją lub odrzuć w aplikacji, na stronie Członkowie."
+  }
 }

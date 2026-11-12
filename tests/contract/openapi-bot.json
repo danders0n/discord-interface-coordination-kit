@@ -1,0 +1,1128 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeartbeatIn": {
+        "properties": {
+          "interval_s": {
+            "description": "How often it reports (seconds)",
+            "maximum": 3600.0,
+            "minimum": 10.0,
+            "title": "Interval S",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The program, e.g. discord-bot",
+            "maxLength": 40,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "interval_s"
+        ],
+        "title": "HeartbeatIn",
+        "type": "object"
+      },
+      "MemberPush": {
+        "properties": {
+          "display_name": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "in_guild": {
+            "default": true,
+            "description": "false: the member left the guild",
+            "title": "In Guild",
+            "type": "boolean"
+          },
+          "roles": {
+            "description": "Discord role ids",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Roles",
+            "type": "array"
+          },
+          "username": {
+            "description": "The Discord @username",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "MemberPush",
+        "type": "object"
+      },
+      "NoticeDone": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "failed: why, e.g. dm_closed",
+            "title": "Reason"
+          },
+          "state": {
+            "enum": [
+              "delivered",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "NoticeDone",
+        "type": "object"
+      },
+      "RoleIn": {
+        "properties": {
+          "color": {
+            "default": 0,
+            "title": "Color",
+            "type": "integer"
+          },
+          "id": {
+            "pattern": "^\\d{1,25}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "default": 0,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "RoleIn",
+        "type": "object"
+      },
+      "RolesBody": {
+        "properties": {
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/RoleIn"
+            },
+            "maxItems": 1000,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "title": "RolesBody",
+        "type": "object"
+      },
+      "RosterBody": {
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/RosterMember"
+            },
+            "maxItems": 100000,
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "title": "RosterBody",
+        "type": "object"
+      },
+      "RosterMember": {
+        "properties": {
+          "discord_id": {
+            "pattern": "^\\d{1,25}$",
+            "title": "Discord Id",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "roles": {
+            "description": "Discord role ids",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Roles",
+            "type": "array"
+          },
+          "username": {
+            "description": "The Discord @username",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "discord_id"
+        ],
+        "title": "RosterMember",
+        "type": "object"
+      },
+      "SteamBody": {
+        "properties": {
+          "steam": {
+            "description": "The 17-digit Steam64 ID or steamcommunity.com/profiles/<id>",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Steam",
+            "type": "string"
+          }
+        },
+        "required": [
+          "steam"
+        ],
+        "title": "SteamBody",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Routes marked x-act-as accept the header X-Act-As: discord:<id>.",
+    "title": "Arma 3 Server Supervisor: the Discord bot's routes",
+    "x-api-level": 1
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/auth/me": {
+      "get": {
+        "description": "Who is calling, with what permissions; ``steam_uid`` / ``player_id``: the Steam ID linked to the account and\nthe player with it (the statistics mark it and show it under Me).",
+        "operationId": "me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Me Api Auth Me Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/events/stream": {
+      "get": {
+        "description": "Server-Sent Events: ``hello`` (``boot``, ``last_id``, ``replayed``, ``gap``), the events missed since the\nresume point, then live ones. Each message is ``{kind, seq, server, data}``. A ``server`` event's player data\n(Steam IDs, GUIDs, kick reasons) needs ``players.view``; ``job`` events need ``jobs.view``. Job progress\ncomes at most every 5 s per job and is not replayed; a comment every 15 s keeps the connection open.",
+        "operationId": "stream_api_events_stream_get",
+        "parameters": [
+          {
+            "description": "Comma separated: server, reservation, job, servers, member, notice (default: all)",
+            "in": "query",
+            "name": "kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma separated: server, reservation, job, servers, member, notice (default: all)",
+              "title": "Kinds"
+            }
+          },
+          {
+            "description": "Only this server's events (id or slug) and those about no single server",
+            "in": "query",
+            "name": "server",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this server's events (id or slug) and those about no single server",
+              "title": "Server"
+            }
+          },
+          {
+            "description": "Resume after this event id ('<boot>:<seq>'); the Last-Event-ID header does the same",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resume after this event id ('<boot>:<seq>'); the Last-Event-ID header does the same",
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Stream",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/integrations/heartbeat": {
+      "post": {
+        "description": "Any signed-in caller: \"this program is alive\". Silent for 5 intervals, it gets an ``integration_silent``\nalert in Discord; ``integration_back`` when it reports again. Per account and name.",
+        "operationId": "heartbeat_api_integrations_heartbeat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Heartbeat Api Integrations Heartbeat Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Heartbeat",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/members": {
+      "get": {
+        "description": "Persons from the roster with their account (role, state, last login link), the app role their Discord roles\ngive, and their Steam link's state.",
+        "operationId": "list_members_api_members_get",
+        "parameters": [
+          {
+            "description": "Username, display name or Discord id",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Username, display name or Discord id",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "member",
+              "enum": [
+                "member",
+                "left",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "true: only persons with an account; false: without",
+            "in": "query",
+            "name": "account",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only persons with an account; false: without",
+              "title": "Account"
+            }
+          },
+          {
+            "description": "Only members with a squad.xml rank role and no Steam link (the bot's link reminders)",
+            "in": "query",
+            "name": "unlinked",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only members with a squad.xml rank role and no Steam link (the bot's link reminders)",
+              "title": "Unlinked",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Members Api Members Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Members",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/members/me": {
+      "get": {
+        "description": "The caller's Discord member: the Steam link and its state, the squad.xml nick (through X-Act-As too).",
+        "operationId": "my_person_api_members_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Person Api Members Me Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "My Person",
+        "tags": [
+          "members"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/members/me/steam": {
+      "delete": {
+        "operationId": "unlink_my_steam_api_members_me_steam_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Unlink My Steam Api Members Me Steam Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Unlink My Steam",
+        "tags": [
+          "members"
+        ],
+        "x-act-as": true
+      },
+      "put": {
+        "description": "Link the caller's own Steam ID: unconfirmed until staff confirm it (they get a ``link_request`` notice). 409\n``link_taken``: another member has that ID (staff get a ``link_duplicate`` notice).",
+        "operationId": "link_my_steam_api_members_me_steam_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SteamBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Link My Steam Api Members Me Steam Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Link My Steam",
+        "tags": [
+          "members"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/members/roles": {
+      "put": {
+        "description": "The guild's roles (id, name, position, colour). A role no longer listed is kept, marked gone.",
+        "operationId": "push_roles_api_members_roles_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Push Roles Api Members Roles Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Push Roles",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/members/roster": {
+      "put": {
+        "description": "The whole guild (at the bot's start and daily). Members not in it have left. 409 ``roster_guard``: the push\nwould disable too many accounts, so nothing changed and it waits for staff.",
+        "operationId": "push_roster_api_members_roster_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Push Roster Api Members Roster Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Push Roster",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/members/{discord_id}": {
+      "put": {
+        "description": "One member joined, left (``in_guild: false``), was renamed or changed roles: applied at once.",
+        "operationId": "push_member_api_members__discord_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "discord_id",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{1,25}$",
+              "title": "Discord Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberPush"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Push Member Api Members  Discord Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Push Member",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/notices": {
+      "get": {
+        "description": "New notices after ``after``, oldest first. One past its ``expires_at`` is marked expired and left out.",
+        "operationId": "list_notices_api_notices_get",
+        "parameters": [
+          {
+            "description": "The last id handled",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "The last id handled",
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Notices Api Notices Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Notices",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/notices/{notice_id}/claim": {
+      "post": {
+        "description": "A ``login_link`` notice's URL, once (410 after that). Never log it.",
+        "operationId": "notice_claim_api_notices__notice_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Notice Claim Api Notices  Notice Id  Claim Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Notice Claim",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/notices/{notice_id}/done": {
+      "post": {
+        "operationId": "notice_done_api_notices__notice_id__done_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoticeDone"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Notice Done Api Notices  Notice Id  Done Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Notice Done",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/system/info": {
+      "get": {
+        "description": "Any signed-in caller: the version, ``api_level`` (raised on an incompatible route change), the zone times\nwithout one are read in (``timezone``, ``utc_offset``), and the ``capabilities`` this installation has.",
+        "operationId": "system_info_api_system_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response System Info Api System Info Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "System Info",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

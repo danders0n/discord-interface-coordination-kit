@@ -37,6 +37,12 @@ from app.links.cog import LinkCog
 from app.links.service import LinkService
 from app.links.ui import LinkNow, WriteNow
 from app.links.watch import LinkWatch
+from app.live import Live
+from app.notices.deliver import Delivery
+from app.notices.service import Notices
+from app.roster.service import Member as RosterMember
+from app.roster.service import Role as RosterRole
+from app.roster.service import Roster
 from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.services import Services
 from app.signup.service import Member, SignupService
@@ -55,6 +61,16 @@ def intents() -> discord.Intents:
     return chosen
 
 
+def roster_member(member: discord.Member, guild_id: int) -> RosterMember:
+    """A member as the supervisor's roster takes it (``@everyone``, whose id is the guild's, left out)."""
+    return RosterMember(member.id, member.name, member.display_name,
+                        tuple(r.id for r in member.roles if r.id != guild_id))
+
+
+def roster_role(role: discord.Role) -> RosterRole:
+    return RosterRole(role.id, role.name, role.position, role.color.value)
+
+
 class EventBot(commands.Bot):
     def __init__(self, services: Services) -> None:
         super().__init__(command_prefix=commands.when_mentioned, intents=intents(), help_command=None,
@@ -65,6 +81,7 @@ class EventBot(commands.Bot):
         services.roles_of = self.roles_of
         self.build_links()
         self.build_events()
+        self.build_front_end()
         services.archive = ArchiveService(services.db, services.store, services.scheduler.clock)
         services.exporter = Exporter(services, self.guild)
 
@@ -115,6 +132,50 @@ class EventBot(commands.Bot):
             return None
         return {m.id: Person(frozenset(r.id for r in m.roles), m.name) for m in guild.members if not m.bot}
 
+    def build_front_end(self) -> None:
+        """The roster push, the notices and the live events (docs/PLAN-front-end.md)."""
+        s = self.services
+        s.roster = Roster(s.supervisor, s.scheduler, self.roster_members, self.roster_roles, self.roster_one)
+        s.notices = Notices(s.db, s.supervisor, s.scheduler.clock)
+        Delivery(s, self.guild).install(s.notices)
+        s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake()})
+
+    def roster_members(self) -> list[RosterMember] | None:
+        """The guild's people for the roster push; None until Discord has sent the member list."""
+        guild = self.guild()
+        if guild is None or not guild.chunked:
+            return None
+        return [roster_member(m, guild.id) for m in guild.members if not m.bot]
+
+    def roster_roles(self) -> list[RosterRole] | None:
+        guild = self.guild()
+        return [roster_role(r) for r in guild.roles if r.id != guild.id] if guild is not None else None
+
+    def roster_one(self, member_id: int) -> RosterMember | None:
+        guild = self.guild()
+        member = guild.get_member(member_id) if guild is not None else None
+        return roster_member(member, guild.id) if member is not None and not member.bot else None
+
+    def _ours(self, guild: discord.Guild) -> bool:
+        return guild.id == self.services.settings.guild_id
+
+    async def on_member_join(self, member: discord.Member) -> None:
+        if self._ours(member.guild) and not member.bot:
+            await self.services.roster.member_changed(roster_member(member, member.guild.id))
+
+    async def on_guild_role_create(self, role: discord.Role) -> None:
+        if self._ours(role.guild):
+            await self.services.roster.roles_changed()
+
+    async def on_guild_role_delete(self, role: discord.Role) -> None:
+        if self._ours(role.guild):
+            await self.services.roster.roles_changed()
+
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
+        if self._ours(after.guild) and (before.name, before.position, before.color) != (after.name, after.position,
+                                                                                      after.color):
+            await self.services.roster.roles_changed()
+
     def build_links(self) -> None:
         """Steam links and squad.xml (docs/PLAN.md, phase 5)."""
         s = self.services
@@ -123,23 +184,33 @@ class EventBot(commands.Bot):
         s.link_watch = LinkWatch(s, self.guild, self.roster)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if before.guild.id == self.services.settings.guild_id and before.roles != after.roles:
+        if not self._ours(before.guild):
+            return
+        if before.roles != after.roles:
             previous = frozenset(r.id for r in before.roles)
             await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)),
                                                        previous=previous)
             await self.services.link_watch.member_changed(after, previous)
+        if not after.bot and (before.roles != after.roles or before.display_name != after.display_name):
+            await self.services.roster.member_changed(roster_member(after, after.guild.id))
 
     async def on_user_update(self, before: discord.User, after: discord.User) -> None:
         if before.name != after.name:
             await self.services.link_watch.renamed(after.id)
+        if (before.name, before.display_name) != (after.name, after.display_name):
+            member = self.roster_one(after.id)  # (a nickname on the server wins over the global name)
+            if member is not None:
+                await self.services.roster.member_changed(member)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         await expired(interaction)  # a wizard from before a restart
 
     async def on_member_remove(self, member: discord.Member) -> None:
-        if member.guild.id == self.services.settings.guild_id:
+        if self._ours(member.guild):
             await self.services.signups.member_left(member.id)
             await self.services.link_watch.member_left(member.id)
+            if not member.bot:
+                await self.services.roster.member_left(roster_member(member, member.guild.id))
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
@@ -161,6 +232,13 @@ class EventBot(commands.Bot):
     def start_scheduler(self) -> None:
         if not any(task.get_name() == "scheduler" for task in self._tasks):
             self._tasks.append(asyncio.create_task(self.services.scheduler.run(), name="scheduler"))
+
+    def start_front_end(self) -> None:
+        """The notices worker and the live events: after on_ready, as notices need the guild."""
+        names = {task.get_name() for task in self._tasks}
+        for name, job in (("notices", self.services.notices.run), ("live", self.services.live.run)):
+            if name not in names:
+                self._tasks.append(asyncio.create_task(job(), name=name))
 
     def staff_channel(self) -> tuple[discord.Guild, discord.TextChannel]:
         guild = self.get_guild(self.services.settings.guild_id)
@@ -209,8 +287,10 @@ class EventBot(commands.Bot):
             except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
                 log.exception("Starting the Steam links failed")
             await self.services.exporter.start()  # the daily move of the oldest quarter into the database
+            await self.services.roster.start()  # the whole guild to the supervisor now, then daily
         finally:
             self.start_scheduler()  # now: the guild is there and the ids resolved; what was due meanwhile runs late
+            self.start_front_end()
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

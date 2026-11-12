@@ -7,6 +7,7 @@ own message, which is shown to the Discord user rather than a generic failure. P
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -14,8 +15,16 @@ from urllib.parse import quote
 
 import aiohttp
 
+from app.supervisor_client.sse import SseParser, StreamEvent
+
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=600)  # a mission of a few hundred MB, on the same machine
+# The stream sends a keep-alive every 15 s: a minute of silence means the connection is dead.
+STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
+ACT_AS_HEADER = "X-Act-As"
+
+__all__ = ["ACT_AS_HEADER", "ReservationRefused", "StreamEvent", "SupervisorClient", "SupervisorError",
+           "SupervisorUnreachable", "SystemInfo"]
 
 
 class SupervisorError(Exception):
@@ -24,6 +33,12 @@ class SupervisorError(Exception):
         self.status = status
         self.message = message
         self.body = body
+
+    @property
+    def code(self) -> str | None:
+        """What a program can act on (``unknown_person``, ``account_disabled``, ``roster_guard`` ...), if given."""
+        code = self.body.get("code") if isinstance(self.body, dict) else None
+        return code if isinstance(code, str) else None
 
 
 class SupervisorUnreachable(SupervisorError):
@@ -67,10 +82,18 @@ class SupervisorClient:
         if self._session is not None:
             await self._session.close()
 
-    async def request(self, method: str, path: str, **kwargs: Any) -> Any:
-        session = await self._http()
+    def _headers(self, act_as: int | None, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = dict(extra or {})
         if self.token:
-            kwargs["headers"] = {"Authorization": f"Bearer {self.token}"} | kwargs.get("headers", {})
+            headers["Authorization"] = f"Bearer {self.token}"
+        if act_as is not None:  # docs/PLAN-front-end.md, *Acting for members*
+            headers[ACT_AS_HEADER] = f"discord:{int(act_as)}"
+        return headers
+
+    async def request(self, method: str, path: str, *, act_as: int | None = None, **kwargs: Any) -> Any:
+        """One call; with ``act_as`` (a Discord id) in that member's name, the supervisor checking their rights."""
+        session = await self._http()
+        kwargs["headers"] = self._headers(act_as, kwargs.get("headers"))
         try:
             async with session.request(method, f"{self.url}{path}", **kwargs) as response:
                 text = await response.text()
@@ -110,6 +133,86 @@ class SupervisorClient:
 
     async def heartbeat(self, name: str, interval_s: int) -> None:
         await self.request("POST", "/api/integrations/heartbeat", json={"name": name, "interval_s": interval_s})
+
+    async def me(self, act_as: int | None = None) -> dict[str, Any]:
+        """Who the call runs as: the bot's account, or with ``act_as`` the member (``permissions`` ...)."""
+        return await self.request("GET", "/api/auth/me", act_as=act_as)
+
+    # ---------------------------------------------------------------- the roster (docs/PLAN-front-end.md)
+
+    async def push_roster(self, members: list[dict[str, Any]]) -> dict[str, Any]:
+        """The whole guild (``discord_id``, ``username``, ``display_name``, ``roles``). 409 ``roster_guard``: held
+        for staff, nothing changed."""
+        return await self.request("PUT", "/api/members/roster", json={"members": members})
+
+    async def push_roles(self, roles: list[dict[str, Any]]) -> dict[str, Any]:
+        """The guild's roles (``id``, ``name``, ``position``, ``color``)."""
+        return await self.request("PUT", "/api/members/roles", json={"roles": roles})
+
+    async def push_member(self, discord_id: int, body: dict[str, Any]) -> dict[str, Any]:
+        """One member joined, left (``in_guild: false``), was renamed or changed roles: applied at once."""
+        return await self.request("PUT", f"/api/members/{int(discord_id)}", json=body)
+
+    async def members(self, **params: Any) -> dict[str, Any]:
+        """Persons on the roster (``q``, ``state``, ``account``, ``limit``, ``offset``): ``total``, ``members``."""
+        query = {k: (str(v).lower() if isinstance(v, bool) else str(v)) for k, v in params.items() if v is not None}
+        return await self.request("GET", "/api/members", params=query)
+
+    # ---------------------------------------------------------------- a member's own Steam link (act-as)
+
+    async def my_member(self, act_as: int) -> dict[str, Any]:
+        """The member's person: ``steam_uid``, ``steam_state`` (unconfirmed / confirmed / None), ``nick``,
+        ``squadxml_url`` ..."""
+        return await self.request("GET", "/api/members/me", act_as=act_as)
+
+    async def link_steam(self, act_as: int, steam: str) -> dict[str, Any]:
+        """Link the member's own Steam ID (unconfirmed until staff confirm). 409 ``link_taken``; 400 ``link_invalid``."""
+        return await self.request("PUT", "/api/members/me/steam", act_as=act_as, json={"steam": steam})
+
+    async def unlink_steam(self, act_as: int) -> dict[str, Any]:
+        return await self.request("DELETE", "/api/members/me/steam", act_as=act_as)
+
+    # ---------------------------------------------------------------- notices
+
+    async def notices(self, after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        """New notices after ``after``, oldest first (expired ones left out)."""
+        body = await self.request("GET", "/api/notices", params={"after": str(after), "limit": str(limit)})
+        return body.get("notices", []) if isinstance(body, dict) else []
+
+    async def notice_done(self, notice_id: int, state: str, reason: str | None = None) -> dict[str, Any]:
+        return await self.request("POST", f"/api/notices/{int(notice_id)}/done",
+                                  json={"state": state, "reason": reason})
+
+    async def notice_claim(self, notice_id: int) -> dict[str, Any]:
+        """A ``login_link`` notice's ``url`` (once; 410 after that). Never log it."""
+        return await self.request("POST", f"/api/notices/{int(notice_id)}/claim")
+
+    # ---------------------------------------------------------------- live events
+
+    async def stream(self, kinds: tuple[str, ...], after: str | None = None) -> AsyncIterator[StreamEvent]:
+        """``GET /api/events/stream``: ``hello`` first, then the events missed after ``after`` and live ones. Ends
+        when the connection does; the caller reconnects with the last ``id``."""
+        session = await self._http()
+        params = {"kinds": ",".join(kinds)} | ({"after": after} if after else {})
+        try:
+            async with session.get(f"{self.url}/api/events/stream", params=params, headers=self._headers(None),
+                                   timeout=STREAM_TIMEOUT) as response:
+                if response.status >= 400:
+                    text = await response.text()
+                    try:
+                        body = json.loads(text) if text else None
+                    except ValueError:
+                        body = text
+                    raise SupervisorError(response.status, _message(body, response.reason), body)
+                parser = SseParser()
+                async for raw in response.content:
+                    event = parser.feed(raw.decode("utf-8", "replace"))
+                    if event is not None:
+                        yield event
+        except aiohttp.ClientError as exc:
+            raise SupervisorUnreachable(f"The supervisor's live events at {self.url} broke off: {exc}") from exc
+        except TimeoutError as exc:
+            raise SupervisorUnreachable(f"The supervisor's live events at {self.url} fell silent") from exc
 
     # ---------------------------------------------------------------- servers
 

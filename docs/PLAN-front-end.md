@@ -1,6 +1,6 @@
 # Plan: the bot as the supervisor's Discord front end
 
-Status: planned, nothing built. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
+Status: building on `feature/front-end`; the additive first step is done (*As built*). Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
 (`D:\Workspace\python\arma-server-supervisior`, interviews 2026-11-11 and 2026-11-12), which is the source of
 every rule about operations, people and permissions. This plan says what changes **in this repo**.
 
@@ -240,6 +240,51 @@ phase leaves the tests green.
 
 - The test Discord instance can run against a scratch supervisor.
 - The squad.xml URL shown at `/link` comes from the supervisor's `meta`, so `.env` drops it.
+
+## As built
+
+### Order (2026-11-12)
+
+The supervisor's contract only had its phases 1–2 (members, roster, notices, the member's own Steam link, system
+info, the stream) when building began; the operations, feed, `meta` and file routes come with its phases 3–4. So
+the work goes **additive first**: everything that needs only the existing routes is built next to the old bot,
+which keeps working on the branch. The deletions and the rewiring of phase 1 (and phases 3–4) follow once the
+supervisor publishes the operations routes.
+
+### Step 1: client, contract, roster, notices, live events (2026-11-12)
+
+- **Client** (`app/supervisor_client/`): `request(..., act_as=<discord id>)` sends `X-Act-As: discord:<id>`;
+  `SupervisorError.code` is the refusal's `code`. New calls: `me`, `push_roster`, `push_roles`, `push_member`,
+  `members`, `my_member`, `link_steam`, `unlink_steam`, `notices`, `notice_done`, `notice_claim`, `stream` (SSE,
+  parsed by `sse.py`; a minute of silence ends it, as the supervisor sends a keep-alive every 15 s).
+- **Contract:** `tests/contract/openapi-bot.json`, copied by `python scripts/sync_contract.py [supervisor
+  checkout]`. `tests/contract_check.py` checks a request (query names, JSON body) against it; the fake supervisor
+  runs that check on every contract route and answers 422 `contract: ...`, so a passing test sends only what the
+  real supervisor accepts. `tests/test_contract.py`: the fake serves every contract route and nothing else but the
+  old routes (`LEGACY`, deleted in the clean-up); the copy equals the supervisor's file when its checkout is next to
+  this one (skipped otherwise). The contract's responses are untyped, so their shapes are taken from the
+  supervisor's code; status codes are not checked (FastAPI lists only 200 and 422).
+- **Roster** (`app/roster/service.py`, no discord.py): actions `roster_push` (start-up = scheduled for now, then
+  daily; 15 min retry when down or the member list isn't loaded), `member_push:<id>` (the latest state of one
+  member while the supervisor is down; a later push that gets through drops it), `roles_push`. `as_member()` is
+  the *unknown person* rule. The bot (`app/bot.py`) pushes on join, leave, nickname or role change, a username or
+  global name change, and on role create / rename / delete; bots and `@everyone` are left out.
+- **Notices** (`app/notices/service.py`, `deliver.py`; table `notice_delivery`, migration 0014; cursor in
+  `bot_state` `notices`): as *Notices* and the grilling's *Notice delivery*, plus: a handler that can't start
+  (no guild, supervisor down) raises `Later` and the notice waits, nothing said; another exception is `failed`
+  with `error: ...`; a kind without a handler is `failed` / `unsupported`; the bot's clock past `expires_at` is
+  `failed` / `expired`. Handlers so far: `login_link` (claim, DM; `dm_closed`, `not_in_guild`, `claim: ...`),
+  `roster_guard` (staff note).
+- **Live events** (`app/live.py`): there was no stream client yet (the plan said "existing"); `Live` keeps
+  `GET /api/events/stream` open, reconnects with the last id (1 s doubling to 60 s), and wakes listeners; a `gap`
+  hello or a reconnect after a break wakes all. It listens for `notice` only: the supervisor answers 422 to kinds
+  it doesn't know, so `operation` joins with the operations API. The notices worker also polls every minute.
+- **Decisions taken while building:**
+  - A held roster push (409 `roster_guard`) writes no staff note of the bot's own: the supervisor's `roster_guard`
+    notice is the note (with the count and the accounts), so staff read it once.
+  - A full push refused for another reason (401, 403, 422) raises, so the scheduler's ERROR reaches the staff log;
+    a refused single-member or roles push is only a log warning (the daily push repairs it).
+  - The login-link DM is in the config language (a DM outside an interaction has no locale).
 
 ## Not in this plan
 

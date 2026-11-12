@@ -6,16 +6,37 @@ the supervisor's error shape (``{"detail": ...}``) and the behaviour the plan re
 - overlapping active windows are refused (409);
 - a start of another server while a reservation is under way answers 409 with ``reservation``.
 
+And the front end's routes (docs/PLAN-front-end.md), as the supervisor's phase 1 built them:
+
+- the roster: a full push sets who is in the guild; one that would make more than ``roster_guard`` persons with an
+  account leave answers 409 ``roster_guard``, changes nothing and adds a ``roster_guard`` notice;
+- ``X-Act-As: discord:<id>`` only on the contract's ``x-act-as`` routes (403 ``act_as_route``), for a person on the
+  roster (403 ``unknown_person``) whose account isn't disabled (403 ``account_disabled``);
+- notices: listed oldest first after ``after`` (only ``new`` ones; expired ones marked so), ``done``, and ``claim``
+  of a login link's URL once (410 after that);
+- ``/api/events/stream``: ``hello``, then what :meth:`State.publish` sends.
+
+Every request on a contract route is checked against ``tests/contract/openapi-bot.json`` (``contract_check``):
+unknown query names or a body the real supervisor would refuse answer 422 with ``contract`` in the detail.
+
 Run on its own for the test Discord server: ``python -m tests.fake_supervisor [port]``."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aiohttp import web
+
+try:
+    import contract_check
+except ImportError:  # run as python -m tests.fake_supervisor
+    from tests import contract_check
 
 TOKEN = "test-token"
 ALL = ["reservations", "integration_role", "managed_refs", "reservation_end_by_id", "reservation_profile",
@@ -49,6 +70,55 @@ class State:
     jobs: dict[int, dict[str, Any]] = field(default_factory=dict)
     missions: dict[str, dict[str, Any]] = field(default_factory=dict)
     running_profiles: set[int] = field(default_factory=set)
+    # The front end: persons by Discord id (username, display_name, roles, in_guild, account: None or
+    # {"username", "disabled"}), the guild's roles, the guard (None: off), the notices, the login links' URLs by
+    # notice id (popped when claimed), the act-as calls made (method, path, discord id), and the open streams.
+    persons: dict[str, dict[str, Any]] = field(default_factory=dict)
+    roles: list[dict[str, Any]] = field(default_factory=list)
+    roster_guard: int | None = None
+    notices: list[dict[str, Any]] = field(default_factory=list)
+    link_urls: dict[int, str] = field(default_factory=dict)
+    acted: list[tuple[str, str, str]] = field(default_factory=list)
+    streams: list[asyncio.Queue] = field(default_factory=list)
+    stream_gap: bool = False  # what the next hello says
+    down: bool = False  # True: every route answers 503 (a supervisor that is restarting)
+
+    def person(self, discord_id: Any, username: str = "member", *, account: bool | dict[str, Any] = True,
+               **extra: Any) -> dict[str, Any]:
+        """Put a person on the roster (a test's shortcut for a push); ``account``: False for a guest, or the
+        account as a dict."""
+        if account is True:
+            account = {"username": username, "disabled": False}
+        row = {"discord_id": str(discord_id), "username": username, "display_name": username, "roles": [],
+               "in_guild": True, "account": account or None} | extra
+        self.persons[str(discord_id)] = row
+        return row
+
+    def notice(self, kind: str, *, persons: list[Any] = (), data: dict[str, Any] | None = None,
+               operation_id: int | None = None, expires_at: datetime | None = None) -> dict[str, Any]:
+        """Add a notice, as the supervisor does, and wake the streams."""
+        row = {"id": len(self.notices) + 1, "kind": kind, "operation_id": operation_id,
+               "persons": [str(p) for p in persons], "data": data or {}, "created_at": self.now.isoformat(),
+               "expires_at": (expires_at or self.now + timedelta(days=2)).isoformat(), "state": "new", "reason": None}
+        self.notices.append(row)
+        self.publish("notice", {"id": row["id"], "kind": kind, "operation_id": operation_id})
+        return row
+
+    def login_link(self, discord_id: Any, url: str = "https://app.example/ui/#/set-password/secret") -> dict[str, Any]:
+        row = self.notice("login_link", persons=[discord_id], data={
+            "link_id": len(self.link_urls) + 1, "account": self.persons.get(str(discord_id), {}).get("username"),
+            "expires_at": (self.now + timedelta(hours=24)).isoformat()})
+        self.link_urls[row["id"]] = url
+        return row
+
+    def publish(self, kind: str, data: dict[str, Any]) -> None:
+        self.event_seq = getattr(self, "event_seq", 0) + 1
+        for queue in self.streams:
+            queue.put_nowait((self.event_seq, kind, data))
+
+    def close_streams(self) -> None:
+        for queue in self.streams:
+            queue.put_nowait(None)
 
     def mission_report(self, name: str, playable: int = 10) -> dict[str, Any]:
         """What the supervisor's inspection returns, with nothing wrong."""
@@ -71,6 +141,7 @@ class State:
 
 
 STATE = web.AppKey("state", State)
+PERSON = web.RequestKey("person", dict)
 
 
 def _error(status: int, detail: Any, **extra: Any) -> web.Response:
@@ -95,6 +166,16 @@ def _occurrence(r: dict[str, Any], state: State) -> dict[str, Any]:
             "state": "ended" if r["ended"] else ("active" if state.now >= r["starts_at"] else "quiet")}
 
 
+ACT_AS = re.compile(r"^discord:(\d{1,25})$")
+
+
+def _contract_path(request: web.Request) -> str:
+    """The route as the contract writes it: ``{discord_id:\\d{1,25}}`` -> ``{discord_id}``."""
+    info = request.match_info.route.resource.get_info() if request.match_info.route.resource else {}
+    path = info.get("formatter") or info.get("path") or request.path
+    return re.sub(r"\{(\w+)(:[^}]*)?\}", r"{\1}", path)
+
+
 def make_app(state: State | None = None) -> web.Application:
     state = state or State()
 
@@ -103,6 +184,34 @@ def make_app(state: State | None = None) -> web.Application:
         if request.headers.get("Authorization") != f"Bearer {TOKEN}":
             return _error(401, "Not authenticated")
         state.calls.append((request.method, request.path))
+        if state.down:
+            return _error(503, "The supervisor is restarting")
+        path = _contract_path(request)
+        op = contract_check.operation(request.method, path)
+        if op is not None:  # a front-end route: hold the request to the contract
+            body = None
+            if request.can_read_body:
+                text = await request.text()
+                body = json.loads(text) if text else None
+            found = contract_check.request_problems(request.method, path, dict(request.query), body)
+            if found:
+                return _error(422, f"contract: {'; '.join(found)}")
+        act_as = request.headers.get("X-Act-As")
+        if act_as is not None:
+            if op is None or not op.get("x-act-as"):
+                return _error(403, f"{request.method} {path} can't be done for a member: use the app",
+                              code="act_as_route")
+            match = ACT_AS.match(act_as)
+            if match is None:
+                return _error(400, "X-Act-As must be discord:<id>", code="act_as_invalid")
+            person = state.persons.get(match.group(1))
+            if person is None or not person["in_guild"]:
+                return _error(403, "This member is not on the roster yet: try again in a minute",
+                              code="unknown_person")
+            if person["account"] is not None and person["account"]["disabled"]:
+                return _error(403, "This member's account is disabled", code="account_disabled")
+            state.acted.append((request.method, path, match.group(1)))
+            request[PERSON] = person
         return await handler(request)
 
     async def system_info(_request: web.Request) -> web.Response:
@@ -383,6 +492,150 @@ def make_app(state: State | None = None) -> web.Application:
             if profile_id else None
         return web.json_response(found)
 
+    # ------------------------------------------------------------ the front end: identity, roster, notices, stream
+
+    async def me(request: web.Request) -> web.Response:
+        person = request.get(PERSON)
+        if person is None:
+            return web.json_response({"username": "discord-bot", "role": "integration",
+                                      "permissions": ["integration.act_as"], "via": None})
+        account = person["account"] or {}
+        return web.json_response({"username": account.get("username") or person["username"], "role": "member",
+                                  "permissions": [], "via": "discord-bot", "discord_id": person["discord_id"]})
+
+    def _mine(request: web.Request) -> dict[str, Any]:
+        person = request[PERSON]
+        return {"person_id": int(person["discord_id"]), "discord_id": person["discord_id"],
+                "username": person["username"], "display_name": person["display_name"],
+                "steam_uid": person.get("steam_uid"), "steam_state": person.get("steam_state"),
+                "nick": person.get("nick"), "squadxml_url": "https://app.example/squad/squad.xml"}
+
+    async def my_member(request: web.Request) -> web.Response:
+        if PERSON not in request:
+            return _error(404, "This account has no Discord member")
+        return web.json_response(_mine(request))
+
+    async def link_steam(request: web.Request) -> web.Response:
+        if PERSON not in request:
+            return _error(404, "This account has no Discord member")
+        text = (await request.json())["steam"].strip()
+        match = re.fullmatch(r"(?:https?://steamcommunity\.com/profiles/)?(7656119\d{10})/?", text)
+        if match is None:
+            return _error(400, "Steam ID: the 17-digit Steam64 ID (7656119...) or steamcommunity.com/profiles/<id>",
+                          code="link_invalid")
+        uid, person = match.group(1), request[PERSON]
+        owner = next((p for p in state.persons.values() if p.get("steam_uid") == uid and p is not person), None)
+        if owner is not None:
+            state.notice("link_duplicate", persons=[person["discord_id"]], data={"steam_uid": uid})
+            return _error(409, f"Steam ID {uid} is linked to another member", code="link_taken")
+        if person.get("steam_uid") != uid:
+            person.update(steam_uid=uid, steam_state="unconfirmed")
+            state.notice("link_request", persons=[person["discord_id"]], data={"steam_uid": uid})
+        return web.json_response(_mine(request))
+
+    async def unlink_steam(request: web.Request) -> web.Response:
+        if PERSON not in request:
+            return _error(404, "This account has no Discord member")
+        request[PERSON].update(steam_uid=None, steam_state=None)
+        return web.json_response(_mine(request))
+
+    def _apply(discord_id: str, member: dict[str, Any], in_guild: bool) -> dict[str, Any]:
+        row = state.persons.get(discord_id) or {"discord_id": discord_id, "account": {"username": member["username"],
+                                                                                       "disabled": False}}
+        row.update(username=member["username"], display_name=member.get("display_name", ""),
+                   roles=list(member.get("roles", [])), in_guild=in_guild)
+        state.persons[discord_id] = row
+        return row
+
+    async def push_roster(request: web.Request) -> web.Response:
+        members = (await request.json())["members"]
+        listed = {m["discord_id"] for m in members}
+        leaving = [p for d, p in state.persons.items() if d not in listed and p["in_guild"] and p["account"]]
+        if state.roster_guard is not None and len(leaving) > state.roster_guard:
+            state.notice("roster_guard", data={"push_id": 1, "count": len(leaving),
+                                               "accounts": [p["account"]["username"] for p in leaving]})
+            return _error(409, f"The roster push would disable {len(leaving)} member accounts: it waits for staff",
+                          code="roster_guard", push={"id": 1, "count": len(leaving)})
+        for member in members:
+            _apply(member["discord_id"], member, True)
+        for person in state.persons.values():
+            if person["discord_id"] not in listed:
+                person["in_guild"] = False
+        return web.json_response({"members": len(members), "report": {"left": [p["discord_id"] for p in leaving]}})
+
+    async def push_roles(request: web.Request) -> web.Response:
+        state.roles = (await request.json())["roles"]
+        return web.json_response({"roles": len(state.roles)})
+
+    async def push_member(request: web.Request) -> web.Response:
+        body = await request.json()
+        row = _apply(request.match_info["discord_id"], body, body.get("in_guild", True))
+        return web.json_response({"report": {}, "person": row})
+
+    async def list_members(request: web.Request) -> web.Response:
+        q, kind = request.query.get("q", "").casefold(), request.query.get("state", "member")
+        rows = [p for p in state.persons.values()
+                if (kind == "all" or p["in_guild"] == (kind == "member"))
+                and (not q or q in p["username"].casefold() or q in p["display_name"].casefold() or q == p["discord_id"])]
+        if "account" in request.query:
+            wanted = request.query["account"] == "true"
+            rows = [p for p in rows if (p["account"] is not None) == wanted]
+        return web.json_response({"total": len(rows), "members": rows})
+
+    async def list_notices(request: web.Request) -> web.Response:
+        after, limit = int(request.query.get("after", 0)), int(request.query.get("limit", 100))
+        out = []
+        for row in state.notices:
+            if row["id"] <= after or row["state"] != "new":
+                continue
+            if datetime.fromisoformat(row["expires_at"]) <= state.now:
+                row["state"] = "expired"
+                continue
+            out.append(row)
+        return web.json_response({"notices": out[:limit]})
+
+    def _notice(request: web.Request) -> dict[str, Any] | None:
+        return next((n for n in state.notices if n["id"] == int(request.match_info["notice_id"])), None)
+
+    async def notice_done(request: web.Request) -> web.Response:
+        row = _notice(request)
+        if row is None:
+            return _error(404, f"Notice {request.match_info['notice_id']} not found")
+        body = await request.json()
+        row["state"], row["reason"] = body["state"], body.get("reason")
+        return web.json_response(row)
+
+    async def notice_claim(request: web.Request) -> web.Response:
+        row = _notice(request)
+        if row is None:
+            return _error(404, f"Notice {request.match_info['notice_id']} not found")
+        if row["kind"] != "login_link":
+            return _error(400, "Only a login_link notice has a URL to claim")
+        url = state.link_urls.pop(row["id"], None)
+        if url is None:
+            return _error(410, "This link was claimed already, replaced or used")
+        return web.json_response({"url": url, "expires_at": row["data"]["expires_at"], "account": row["data"]["account"]})
+
+    async def stream(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
+        await response.prepare(request)
+        queue: asyncio.Queue = asyncio.Queue()
+        state.streams.append(queue)
+        kinds = set(request.query.get("kinds", "").split(",")) - {""}
+        try:
+            hello = {"boot": "fake", "gap": state.stream_gap, "replayed": 0, "kinds": sorted(kinds)}
+            state.stream_gap = False
+            await response.write(f"event: hello\ndata: {json.dumps(hello)}\n\n".encode())
+            while (item := await queue.get()) is not None:
+                seq, kind, data = item
+                if kinds and kind not in kinds:
+                    continue
+                body = {"kind": kind, "seq": seq, "server": None, "data": data}
+                await response.write(f"id: fake:{seq}\nevent: {kind}\ndata: {json.dumps(body)}\n\n".encode())
+        finally:
+            state.streams.remove(queue)
+        return response
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
     app.router.add_get("/api/system/info", system_info)
@@ -415,6 +668,18 @@ def make_app(state: State | None = None) -> web.Application:
     app.router.add_get("/api/stats/attendance", attendance)
     app.router.add_get("/api/stats/missions", missions)
     app.router.add_get("/api/stats/missions/{id:\d+}", mission)
+    app.router.add_get("/api/auth/me", me)
+    app.router.add_get("/api/events/stream", stream)
+    app.router.add_put("/api/members/roster", push_roster)
+    app.router.add_put("/api/members/roles", push_roles)
+    app.router.add_get("/api/members/me", my_member)
+    app.router.add_put("/api/members/me/steam", link_steam)
+    app.router.add_delete("/api/members/me/steam", unlink_steam)
+    app.router.add_put("/api/members/{discord_id:\\d{1,25}}", push_member)
+    app.router.add_get("/api/members", list_members)
+    app.router.add_get("/api/notices", list_notices)
+    app.router.add_post("/api/notices/{notice_id:\\d+}/done", notice_done)
+    app.router.add_post("/api/notices/{notice_id:\\d+}/claim", notice_claim)
     return app
 
 

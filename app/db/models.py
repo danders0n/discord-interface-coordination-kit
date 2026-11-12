@@ -341,6 +341,22 @@ class LinkReminder(Base):
     muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class NoticeDelivery(Base):
+    """A supervisor notice the bot started to deliver (docs/PLAN-front-end.md, *Notices*). Written before acting,
+    so a crash never says a thing twice: a row still ``started`` after a restart is reported ``failed``
+    (``bot_crashed``). ``reported_at``: the supervisor heard the outcome."""
+
+    __tablename__ = "notice_delivery"
+
+    notice_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    kind: Mapped[str] = mapped_column(String(40))
+    state: Mapped[str] = mapped_column(String(20))  # started, delivered, failed
+    reason: Mapped[str | None] = mapped_column(String(200))
+    started_at: Mapped[datetime] = mapped_column(default=utcnow)
+    finished_at: Mapped[datetime | None]
+    reported_at: Mapped[datetime | None]
+
+
 class BotState(Base):
     """Small values the bot keeps between restarts (the header message id, the last start)."""
 

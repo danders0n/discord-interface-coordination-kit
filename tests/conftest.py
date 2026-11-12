@@ -116,4 +116,5 @@ async def fake(services, clock):
     await server.start_server()
     services.supervisor.url, services.supervisor.token = str(server.make_url("")).rstrip("/"), TOKEN
     yield state
+    state.close_streams()
     await server.close()

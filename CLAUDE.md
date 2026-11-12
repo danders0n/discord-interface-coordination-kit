@@ -160,6 +160,14 @@ exactly the settings.
   `export.py` (`Exporter`: the daily `archive_export` action copies members' messages and downloads attachments,
   checks the copy, deletes the channel, then empty archive categories), `html.py` (the file: `inline`, `zip` or
   `listed` attachments), `cog.py` (`/archive event`, picking the form that fits the upload limit).
+- The front end (docs/PLAN-front-end.md, being built on `feature/front-end`): `app/roster/service.py` (`Roster`:
+  the guild's members and roles pushed to the supervisor, `roster_push` daily, `member_push:<id>` / `roles_push`
+  retries, `as_member()` pushing an unknown member and repeating an act-as call once), `app/notices/` (`service.py`:
+  `Notices`, the supervisor's notices delivered at most once through `notice_delivery`; `deliver.py`: the Discord
+  handlers per kind), `app/live.py` (`Live`: the supervisor's live events wake the workers). Act-as calls pass
+  `act_as=<discord id>` to the client.
+- `tests/contract/openapi-bot.json` is the supervisor's contract (`python scripts/sync_contract.py`);
+  `tests/contract_check.py` holds the fake's requests to it.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
   creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
 
