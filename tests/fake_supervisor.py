@@ -53,6 +53,10 @@ def _server(number: int, slug: str, state: str = "stopped", players: int = 0) ->
 class State:
     capabilities: list[str] = field(default_factory=lambda: list(ALL))
     has_system_info: bool = True
+    api_level: int = 1
+    timezone: str = "CET"
+    utc_offset: str | None = None  # None: the system info has none (the bot then can't compare)
+    bot_permissions: list[str] = field(default_factory=lambda: ["integration.act_as"])
     heartbeats: list[dict[str, Any]] = field(default_factory=list)
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
     servers: list[dict[str, Any]] = field(default_factory=lambda: [_server(1, "server-1"), _server(2, "event")])
@@ -218,7 +222,8 @@ def make_app(state: State | None = None) -> web.Application:
     async def system_info(_request: web.Request) -> web.Response:
         if not state.has_system_info:
             return _error(404, "Not Found")
-        return web.json_response({"version": {"version": "fake"}, "api_level": 1, "timezone": "CET",
+        return web.json_response({"version": {"version": "fake"}, "api_level": state.api_level,
+                                  "timezone": state.timezone, "utc_offset": state.utc_offset,
                                   "capabilities": state.capabilities})
 
     async def heartbeat(request: web.Request) -> web.Response:
@@ -499,7 +504,7 @@ def make_app(state: State | None = None) -> web.Application:
         person = request.get(PERSON)
         if person is None:
             return web.json_response({"username": "discord-bot", "role": "integration",
-                                      "permissions": ["integration.act_as"], "via": None})
+                                      "permissions": sorted(state.bot_permissions), "acting_via": None})
         account = person["account"] or {}
         return web.json_response({"username": account.get("username") or person["username"], "role": "member",
                                   "permissions": [], "via": "discord-bot", "discord_id": person["discord_id"]})

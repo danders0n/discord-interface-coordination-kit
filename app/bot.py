@@ -11,7 +11,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from app import heartbeat, startup_checks
+from app import heartbeat, startup_checks, supervisor_check
 from app.activity import Activity
 from app.admin.cog import AdminCog
 from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
@@ -223,8 +223,19 @@ class EventBot(commands.Bot):
         if not any(task.get_name() == "scheduler" for task in self._tasks):
             self._tasks.append(asyncio.create_task(self.services.scheduler.run(), name="scheduler"))
 
-    def start_front_end(self) -> None:
-        """The notices worker and the live events: after on_ready, as notices need the guild."""
+    def start_supervisor_gate(self) -> None:
+        """The supervisor work waits for the supervisor check (app/supervisor_check.py)."""
+        if any(task.get_name() == "supervisor-check" for task in self._tasks):
+            return
+        s = self.services
+        self._tasks.append(asyncio.create_task(supervisor_check.gate(
+            s.supervisor, lambda: s.settings.tz, lambda: s.settings.language, s.scheduler.clock, s.staff.post,
+            self.start_front_end), name="supervisor-check"))
+
+    async def start_front_end(self) -> None:
+        """The roster push (now, then daily), the notices worker and the live events: after on_ready, as notices
+        need the guild, and after the supervisor check."""
+        await self.services.roster.start()
         names = {task.get_name() for task in self._tasks}
         for name, job in (("notices", self.services.notices.run), ("live", self.services.live.run)):
             if name not in names:
@@ -277,10 +288,9 @@ class EventBot(commands.Bot):
             except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
                 log.exception("Starting the Steam links failed")
             await self.services.exporter.start()  # the daily move of the oldest quarter into the database
-            await self.services.roster.start()  # the whole guild to the supervisor now, then daily
         finally:
             self.start_scheduler()  # now: the guild is there and the ids resolved; what was due meanwhile runs late
-            self.start_front_end()
+            self.start_supervisor_gate()
         log.info("Logged in as %s on %s", self.user, guild.name)
 
     async def close(self) -> None:

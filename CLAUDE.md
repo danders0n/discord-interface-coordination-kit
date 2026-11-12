@@ -161,8 +161,10 @@ exactly the settings.
   the guild's members and roles pushed to the supervisor, `roster_push` daily, `member_push:<id>` / `roles_push`
   retries, `as_member()` pushing an unknown member and repeating an act-as call once), `app/notices/` (`service.py`:
   `Notices`, the supervisor's notices delivered at most once through `notice_delivery`; `deliver.py`: the Discord
-  handlers per kind), `app/live.py` (`Live`: the supervisor's live events wake the workers). Act-as calls pass
-  `act_as=<discord id>` to the client.
+  handlers per kind), `app/live.py` (`Live`: the supervisor's live events wake the workers),
+  `app/supervisor_check.py` (`api_level`, `integration.act_as`, the zone; `gate()` holds that work back until it
+  passes). Act-as calls pass `act_as=<discord id>` to the client; a `SupervisorError` reaching the command, button
+  or modal error handler is answered in words (`discord_util.supervisor_words`).
 - `tests/contract/openapi-bot.json` is the supervisor's contract (`python scripts/sync_contract.py`);
   `tests/contract_check.py` holds the fake's requests to it.
 - `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed

@@ -313,6 +313,30 @@ phase 5.
   erasure comes with its phase 5); the confirmation says to remove it in the app.
 - `BOT_ROLES__RANK` and `BOT_ROLES__REMARK` stay for `/profile` until the configuration is trimmed in the clean-up.
 
+### Step 3: the supervisor check (2026-11-12)
+
+`app/supervisor_check.py`: at start-up (after `on_ready`) the bot checks `api_level` ≥ `API_LEVEL` (1 for now;
+raised with the operations API) and that its own account holds `integration.act_as` (`GET /api/auth/me`), and
+compares the supervisor's `utc_offset` with `BOT_TIMEZONE`'s now (a warning). Decisions taken while building:
+
+- **Held back, not refused:** a failed check doesn't stop the bot (under NSSM a refusal would be a restart loop,
+  each round posting to the staff channel). The bot stays on Discord and holds back its supervisor work (the
+  roster push, the notices, the live events), checking every minute; the problem goes to the staff log once (again
+  only if it changes), and a note says when it passes. The old event stack is not gated: it is deleted in the
+  clean-up anyway.
+- A supervisor that is only unreachable holds back the same way but writes no staff note (its own webhook
+  reports it). A refused token (401 / 403) is a blocking problem with a hint at `BOT_SUPERVISOR__TOKEN`.
+- No capability is required yet: the operations capabilities are added to the check with the operations API.
+- The time zones are compared by today's UTC offset, as `system/info` gives an abbreviation (`CET`), not an IANA
+  name.
+
+### Waiting for the supervisor
+
+Everything left (the clean-up of phase 1, then phases 3–6) needs the supervisor's operations, change-feed, `meta`
+and file routes. As of 2026-11-12 they exist only as uncommitted work in the supervisor (`app/api/operations.py`,
+`app/operations/`) and are not in `openapi-bot.json`. Resume when its phase 3 is committed: run
+`python scripts/sync_contract.py`, then follow the contract.
+
 ## Not in this plan
 
 - Server control from Discord.

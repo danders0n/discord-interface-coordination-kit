@@ -59,6 +59,7 @@ class SystemInfo:
     version: Any = None
     api_level: int = 0
     timezone: str | None = None
+    utc_offset: str | None = None  # '+0100': the supervisor's zone now
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
     def has(self, capability: str) -> bool:
@@ -121,7 +122,8 @@ class SupervisorClient:
         if not isinstance(body, dict):
             body = {}
         self.info = SystemInfo(version=body.get("version"), api_level=int(body.get("api_level") or 0),
-                               timezone=body.get("timezone"), capabilities=frozenset(body.get("capabilities") or ()))
+                               timezone=body.get("timezone"), utc_offset=body.get("utc_offset"),
+                               capabilities=frozenset(body.get("capabilities") or ()))
         self._info_read = True
         return self.info
 

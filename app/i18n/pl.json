@@ -645,5 +645,11 @@
   "You are not on the app's member list yet. Try again in a minute.": "Nie ma Cię jeszcze na liście członków w aplikacji. Spróbuj ponownie za minutę.",
   "Your account in the app is disabled. Ask staff if that is a mistake.": "Twoje konto w aplikacji jest wyłączone. Zapytaj administrację, jeśli to pomyłka.",
   "{member} linked Steam ID {steam}: confirm it in the app (Members, Steam links).": "{member} łączy Steam ID {steam}: potwierdź to w aplikacji (Członkowie, Linki Steam).",
-  "{member} tried to link Steam ID {steam}, which {owner} holds.": "{member} próbuje połączyć Steam ID {steam}, które ma {owner}."
+  "{member} tried to link Steam ID {steam}, which {owner} holds.": "{member} próbuje połączyć Steam ID {steam}, które ma {owner}.",
+  "The supervisor refused the bot ({status}): {reason}. Check BOT_SUPERVISOR__TOKEN.": "Supervisor odrzucił bota ({status}): {reason}. Sprawdź BOT_SUPERVISOR__TOKEN.",
+  "The supervisor's API level is {have}; this bot needs {need}. Update the supervisor.": "Poziom API supervisora to {have}; ten bot potrzebuje {need}. Zaktualizuj supervisora.",
+  "The bot's supervisor account ({account}) lacks the permission {permission}: give it the integration role.": "Konto bota w supervisorze ({account}) nie ma uprawnienia {permission}: nadaj mu rolę integration.",
+  "The supervisor's time zone ({theirs}, UTC{their_offset}) differs from BOT_TIMEZONE ({ours}, UTC{our_offset}): check both.": "Strefa czasowa supervisora ({theirs}, UTC{their_offset}) różni się od BOT_TIMEZONE ({ours}, UTC{our_offset}): sprawdź obie.",
+  "The supervisor is ready: the bot starts its work with it.": "Supervisor jest gotowy: bot zaczyna z nim pracę.",
+  "The bot holds back its work with the supervisor until this is fixed:": "Bot wstrzymuje pracę z supervisorem, dopóki to nie zostanie naprawione:"
 }
