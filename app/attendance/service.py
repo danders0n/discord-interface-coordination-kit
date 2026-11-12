@@ -28,6 +28,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import delete, select
 
+from app.activity import Activity
 from app.attendance.stats import Play, Player, Stats, StatsReader
 from app.db import Database
 from app.db.models import AttendanceEntry, Event, Signup, Slot
@@ -144,6 +145,7 @@ class AttendanceService:
         self.reader, self.links, self.events, self.notifier, self.names = reader, links, events, notifier, names
         self.clock = clock or scheduler.clock
         self.feedback: Any = None  # app.feedback.service.FeedbackService: a correction may take a rating away
+        self.activity = Activity.off()  # the staff log's activity entries, set by whoever wires the bot
         for kind, handler in ((WATCH, self._watch), (READ, self._read), (CONFIRM_PING, self._confirm_ping),
                               (AUTO_CONFIRM, self._auto_confirm)):
             scheduler.register(kind, handler)
@@ -341,7 +343,7 @@ class AttendanceService:
         if status not in CORRECTABLE:
             raise ValueError(status)
         await self._organised(event_id, member)
-        now, changed, unattended = self.clock(), 0, []
+        now, changed, unattended = self.clock(), [], []
         async with self.db.session() as session, session.begin():
             for member_id in dict.fromkeys(member_ids):
                 entry = (await session.execute(select(AttendanceEntry).where(
@@ -354,13 +356,14 @@ class AttendanceService:
                 elif entry.status in ("attended", "walk_in") and status != "attended":
                     unattended.append(member_id)
                 entry.status, entry.corrected_by, entry.corrected_at = status, member.id, now
-                changed += 1
+                changed.append(member_id)
         if self.feedback is not None:
             for member_id in unattended:
                 await self.feedback.forget(event_id, member_id)
         if changed:
+            await self.activity.corrected(event_id, member.id, changed, status)
             await self.notifier.changed(event_id)
-        return changed
+        return len(changed)
 
     async def probable(self, event_id: int) -> list[AttendanceEntry]:
         return [e for e in await self.entries(event_id) if e.probable_steam_id and e.member_id is not None]
@@ -388,5 +391,8 @@ class AttendanceService:
                 row.probable_steam_id = row.probable_name = None
                 row.corrected_by, row.corrected_at = member.id, self.clock()
             done.append((entry, None))
+        linked = [entry.member_id for entry, error in done if error is None]
+        if linked:
+            await self.activity.linked_probable(event_id, member.id, linked)
         await self.notifier.changed(event_id)
         return done

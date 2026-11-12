@@ -79,7 +79,10 @@ exactly the settings.
 - `app/staff_threads.py`: the staff log and moderation threads in the staff channel (made, remembered, reopened).
 - `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
 - `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
-- `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue.
+- `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue (notes waiting together go out joined).
+- `app/activity.py`: `Activity`, the staff log's activity entries (who signed up where, who edited what, old → new
+  from `snapshot` / `edited`); set as `.activity` on the event, sign-up, attendance, feedback and profile services
+  by `EventBot.build_events` (`Activity.off()` otherwise). It never raises. Organisers' slot actions pass `by`.
 - `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (servers, reservations, `ReservationRefused` for a
   409 with `reservation`), capabilities, heartbeat loop.
 - `app/reservations/service.py`: an event's host reservation: `book` (create or move; `Frozen` from the quiet

@@ -30,6 +30,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import delete, select, update
 
+from app.activity import Activity
 from app.db import Database
 from app.db.models import ApprovalRequest, Event, EventGuestGroup, EventOrganiser, OtherGroup, Slot
 from app.events.times import Times
@@ -122,6 +123,7 @@ class EventService:
         self.clock = clock or scheduler.clock
         self.attendance: Any = None  # app.attendance.service.AttendanceService, set by whoever wires both
         self.profiles: Any = None  # app.profiles.service.ProfileService, likewise
+        self.activity = Activity.off()  # the staff log's activity entries, likewise
         reservations.listener = notifier.reservation_changed
         for kind, handler in ((self.SIGNUP_OPEN, self._signup_open), (self.REMINDER, self._reminder),
                               (self.STALE_PING, self._stale_ping), (self.STALE_CANCEL, self._stale_cancel),
@@ -255,6 +257,7 @@ class EventService:
             await session.flush()
             if draft.kind == "hosted":
                 session.add_all(EventGuestGroup(event_id=event.id, group_id=g) for g in set(draft.guest_group_ids))
+        await self.activity.created(event.id, member.id)
         if draft.kind in RESERVED and access.publishes_without_approval:
             await self._book(event)
         await self._schedule_stale(event)
@@ -286,6 +289,7 @@ class EventService:
                     (event.kind not in COMING or await self.reservations.get(event.id) is not None):
                 proposal, new_times = times, False  # nothing moves until a moderator approves
         old_kind = event.kind
+        before = await self.activity.snapshot(event_id)
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             if title is not None:
@@ -305,6 +309,7 @@ class EventService:
             if new_times:
                 row.assembly_at, row.start_at, row.duration_minutes = times.assembly_at, times.start_at, times.duration_minutes
             event = row
+        await self.activity.edited(event_id, member.id, before)
         if kind is not None and kind != old_kind:
             await self._kind_changed(event, member)
         elif new_times or title is not None:
@@ -351,6 +356,7 @@ class EventService:
         _write(path, content)
         await self._set(event_id, member, preset_name=preset.name, required_dlc=list(preset.cdlc),
                         preset_mods=[[m.workshop_id, m.name] for m in preset.mods], preset_file=str(path))
+        await self.activity.uploaded(event_id, member.id, "preset", preset.name)
         if self.profiles is not None:  # a built profile imports the new preset
             await self.profiles.changed(event_id)
         return preset
@@ -363,6 +369,7 @@ class EventService:
         path = self._file("images", f"{event_id}{suffix.lower()}")
         _write(path, content)
         await self._set(event_id, member, briefing_image=str(path))
+        await self.activity.uploaded(event_id, member.id, "image")
         if event.briefing_image and event.briefing_image != str(path):
             Path(event.briefing_image).unlink(missing_ok=True)
 
@@ -396,25 +403,32 @@ class EventService:
     async def add_organiser(self, event_id: int, member: Member, organiser_id: int) -> None:
         await self._organiser(event_id, member)
         async with self.db.session() as session, session.begin():
-            if await session.get(EventOrganiser, (event_id, organiser_id)) is None:
+            added = await session.get(EventOrganiser, (event_id, organiser_id)) is None
+            if added:
                 session.add(EventOrganiser(event_id=event_id, member_id=organiser_id))
+        if added:
+            await self.activity.organiser(event_id, member.id, organiser_id, added=True)
         await self.notifier.organisers_changed(event_id)
         await self.notifier.changed(event_id)
 
     async def remove_organiser(self, event_id: int, member: Member, organiser_id: int) -> None:
         await self._organiser(event_id, member)
         async with self.db.session() as session, session.begin():
-            await session.execute(delete(EventOrganiser).where(EventOrganiser.event_id == event_id,
-                                                               EventOrganiser.member_id == organiser_id))
+            gone = await session.execute(delete(EventOrganiser).where(EventOrganiser.event_id == event_id,
+                                                                      EventOrganiser.member_id == organiser_id))
+        if gone.rowcount:
+            await self.activity.organiser(event_id, member.id, organiser_id, added=False)
         await self.notifier.organisers_changed(event_id)
         await self.notifier.changed(event_id)
 
     async def _set(self, event_id: int, member: Member, **values) -> Event:
         await self.editable(event_id, member)
+        before = await self.activity.snapshot(event_id)
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             for name, value in values.items():
                 setattr(row, name, value)
+        await self.activity.edited(event_id, member.id, before)
         await self.notifier.changed(event_id)
         return row
 
@@ -472,6 +486,7 @@ class EventService:
         closed = await self._withdraw_requests(event_id, "publish")
         async with self.db.session() as session, session.begin():
             (await session.get(Event, event_id)).status = "draft"
+        await self.activity.withdrew(event_id, member.id)
         await self.reservations.cancel(event_id)
         await self.notifier.requests_withdrawn(closed)
         await self.notifier.changed(event_id)
@@ -657,6 +672,8 @@ class EventService:
         async with self.db.session() as session, session.begin():
             row = await session.get(Event, event_id)
             row.status, row.cancel_reason = "cancelled", reason
+        await self.activity.cancelled(event_id, member.id if member is not None else None, reason,
+                                      draft=was in ("draft", "pending"))
         closed = await self._withdraw_requests(event_id)
         await self.notifier.requests_withdrawn(closed)
         await self.reservations.cancel(event_id)

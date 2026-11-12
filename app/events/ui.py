@@ -741,7 +741,7 @@ class OrbatTools(discord.ui.View):
             roles = [(role.id, role.name) for role in getattr(interaction.guild, "roles", ())]
             squads = parse(text, roles, interaction.locale)
             await s.events.editable(event.id, member)
-            displaced = await s.signups.set_orbat(event.id, squads)
+            displaced = await s.signups.set_orbat(event.id, squads, by=member.id)
             if displaced:
                 log.info("ORBAT of event %s edited: %s moved to the reserve list", event.id, displaced)
             return orbat_summary(squads, interaction.locale)
@@ -765,7 +765,7 @@ class OrbatTools(discord.ui.View):
                 roles = [(role.id, role.name) for role in getattr(i.guild, "roles", ())]
                 squads = parse(template.text, roles, i.locale)
                 await s.events.editable(self.event.id, member_of(i))  # locked while waiting for approval
-                await s.signups.set_orbat(self.event.id, squads)
+                await s.signups.set_orbat(self.event.id, squads, by=i.user.id)
                 return orbat_summary(squads, i.locale)
 
             summary = await guarded(i, save)
@@ -895,13 +895,13 @@ class SlotTools(discord.ui.View):
         async def save() -> bool:
             await s.events.editable(self.event.id, member_of(interaction))  # locked while waiting for approval
             if action == "lock":
-                await s.signups.lock(self.slot_id, True)
+                await s.signups.lock(self.slot_id, True, by=interaction.user.id)
             elif action == "unlock":
-                await s.signups.lock(self.slot_id, False)
+                await s.signups.lock(self.slot_id, False, by=interaction.user.id)
             elif action == "remove":
-                await s.signups.remove(self.slot_id)
+                await s.signups.remove(self.slot_id, by=interaction.user.id)
             else:
-                await s.signups.assign(self.slot_id, member_id)
+                await s.signups.assign(self.slot_id, member_id, by=interaction.user.id)
             return True
 
         if await guarded(interaction, save):

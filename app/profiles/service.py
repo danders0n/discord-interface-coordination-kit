@@ -30,6 +30,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import func, select
 
+from app.activity import Activity
 from app.db import Database
 from app.db.models import Event, Slot
 from app.events.service import RESERVED
@@ -112,6 +113,7 @@ class ProfileService:
         self.db, self.store, self.scheduler, self.client, self.events = db, store, scheduler, client, events
         self.notifier = notifier
         self.clock = clock or scheduler.clock
+        self.activity = Activity.off()  # the staff log's activity entries, set by whoever wires the bot
         for kind, handler in ((JOB, self._job), (INDEX, self._index), (SWAP, self._swap), (RESTORE, self._restore),
                               (CLEANUP, self._cleanup)):
             scheduler.register(kind, handler)
@@ -198,6 +200,7 @@ class ProfileService:
             saved = await self.client.upload_mission(filename, content, overwrite=existing is not None)
         except SupervisorError as exc:
             raise ProfileError(Problem.SUPERVISOR, exc.message) from exc
+        await self.activity.uploaded(event_id, member.id, "mission", saved["name"])
         return await self._mission(event, saved["name"], saved.get("report") or {})
 
     async def pick_mission(self, event_id: int, member: Member, name: str) -> Event:
@@ -209,6 +212,7 @@ class ProfileService:
             report = await self.client.mission_report(name)
         except SupervisorError as exc:
             raise ProfileError(Problem.SUPERVISOR, exc.message) from exc
+        await self.activity.uploaded(event_id, member.id, "mission", name)
         return await self._mission(event, name, report)
 
     async def _mission(self, event: Event, name: str, report: dict[str, Any]) -> Event:
@@ -236,6 +240,7 @@ class ProfileService:
             raise ProfileError(Problem.BAD_NUMBER)
         await self._save(event_id, hostname=hostname.strip()[:200] or None, max_players=int(players) if players else None,
                          verify_signatures=signatures)
+        await self.activity.profile(event_id, member.id, "settings")
         await self.changed(event_id)
 
     async def set_keep(self, event_id: int, member: Member, keep: bool) -> None:
@@ -243,6 +248,7 @@ class ProfileService:
         if not await self.events.can_organise(event, member) or not self.may_manage(member):
             raise ProfileError(Problem.NOT_ALLOWED)
         await self._save(event_id, profile_keep=keep)
+        await self.activity.profile(event_id, member.id, "keep" if keep else "drop")
 
     # ---------------------------------------------------------------- building
 
@@ -255,7 +261,9 @@ class ProfileService:
     async def build(self, event_id: int, member: Member) -> Event:
         """*Build profile*: refusals and the supervisor's errors are raised for the panel to show."""
         await self._editable(event_id, member)
-        return await self._build(event_id)
+        event = await self._build(event_id)
+        await self.activity.profile(event_id, member.id, "built")
+        return event
 
     async def _build_quietly(self, event_id: int) -> None:
         try:

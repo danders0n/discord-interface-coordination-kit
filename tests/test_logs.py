@@ -44,11 +44,11 @@ async def test_an_error_has_one_id_in_the_file_and_the_staff_log(tmp_path, resto
 async def test_the_staff_log_drops_the_oldest_when_full():
     staff = StaffLog()
     staff.bind(asyncio.get_running_loop())
-    for n in range(250):
+    for n in range(1050):
         staff.post(str(n))
     await asyncio.sleep(0)
     notes = staff.drain()
-    assert len(notes) == 200 and notes[0] == "50" and notes[-1] == "249"
+    assert len(notes) == 1000 and notes[0] == "50" and notes[-1] == "1049"
 
 
 async def test_sending_continues_after_a_failure():
@@ -62,10 +62,29 @@ async def test_sending_continues_after_a_failure():
 
     task = asyncio.create_task(staff.run(send))
     staff.post("bad")
+    await asyncio.sleep(0.01)
     staff.post("good")
     await asyncio.sleep(0.01)
     task.cancel()
     assert sent == ["good"]
+
+
+async def test_waiting_notes_go_out_together():
+    staff, sent = StaffLog(), []
+    staff.bind(asyncio.get_running_loop())
+
+    async def send(text):
+        sent.append(text)
+
+    for n in range(3):
+        staff.post(f"note {n}")
+    task = asyncio.create_task(staff.run(send))
+    await asyncio.sleep(0.01)
+    staff.post("x" * 1500)
+    staff.post("y" * 1500)
+    await asyncio.sleep(0.01)
+    task.cancel()
+    assert sent == ["note 0\nnote 1\nnote 2", "x" * 1500, "y" * 1500]
 
 
 def test_long_notes_split_at_line_ends():

@@ -1,7 +1,9 @@
 """The staff log channel (docs/PLAN.md, *Notifications*): short notes for staff, in the public language.
 
 Anything can :meth:`StaffLog.post` from any thread, before or after the bot is connected; one task sends the queue
-to the channel. A failure to send goes to the log file only (``app.staff_log`` is never sent back here)."""
+to the channel. Notes waiting together (a sign-up rush, while Discord's rate limit holds a send back) go out joined,
+one line after another, in as few messages as fit. A failure to send goes to the log file only (``app.staff_log`` is
+never sent back here)."""
 
 from __future__ import annotations
 
@@ -9,7 +11,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-MAX_QUEUE = 200
+MAX_QUEUE = 1000
 MAX_MESSAGE = 2000
 log = logging.getLogger(__name__)
 
@@ -55,8 +57,10 @@ class StaffLog:
 
     async def run(self, send: Callable[[str], Awaitable[None]]) -> None:
         while True:
-            text = await self._queue.get()
-            for part in chunks(text):
+            notes = [await self._queue.get()]
+            while not self._queue.empty():
+                notes.append(self._queue.get_nowait())
+            for part in chunks("\n".join(notes)):
                 try:
                     await send(part)
                 except Exception as exc:  # noqa: BLE001 - the staff log must never take the bot down

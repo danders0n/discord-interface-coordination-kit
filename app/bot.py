@@ -12,6 +12,7 @@ import discord
 from discord.ext import commands
 
 from app import heartbeat, startup_checks
+from app.activity import Activity
 from app.admin.cog import AdminCog
 from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
 from app.i18n import Translator, t
@@ -95,6 +96,9 @@ class EventBot(commands.Bot):
         s.feedback = channels.feedback = events.attendance.feedback = FeedbackService(s.db, s.store, s.scheduler.clock)
         s.profiles = events.profiles = ProfileService(s.db, s.store, s.scheduler, s.supervisor, events, channels)
         s.channels, s.events, s.signups, s.attendance = channels, events, signups, events.attendance
+        activity = Activity(s.db, s.store, s.staff.post, s.scheduler.clock)  # docs/PLAN.md, *Notifications*
+        for service in (events, signups, events.attendance, s.feedback, s.profiles):
+            service.activity = activity
 
     def names_of(self, member_id: int) -> list[str]:
         """A member's names on the server (nick, display name, username), for matching an in-game name."""

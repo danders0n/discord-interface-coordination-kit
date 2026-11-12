@@ -24,6 +24,7 @@ from typing import Protocol
 
 from sqlalchemy import delete, func, insert, literal, select, update
 
+from app.activity import Activity
 from app.db import Database
 from app.db.models import Event, Offer, Signup, Slot, Squad, UtcDateTime
 from app.orbat.parser import ParsedSquad
@@ -125,6 +126,7 @@ class SignupService:
         self.notifier = notifier
         self.roles_of = roles_of
         self.clock = clock or scheduler.clock
+        self.activity = Activity.off()  # the staff log's activity entries, set by whoever wires the bot
         scheduler.register(OFFER_KIND, self._offer_expired)
 
     # ---------------------------------------------------------------- reading
@@ -238,6 +240,7 @@ class SignupService:
             return refused.outcome
         if offer is not None:
             await self.scheduler.cancel(f"{OFFER_KIND}:{offer_id}")
+        await self.activity.took(event_id, member.id, slot_id, from_slot=freed)
         if freed is not None:
             await self._offer(freed)
         await self.notifier.changed(event_id)
@@ -262,6 +265,7 @@ class SignupService:
                     raise _Refused(Refusal.NOT_SIGNED_UP)
         except _Refused as refused:
             return refused.outcome
+        await self.activity.left(event_id, member.id, freed)
         if freed is not None:
             await self._offer(freed)
         await self.notifier.changed(event_id)
@@ -286,8 +290,10 @@ class SignupService:
                         raise _Refused(Refusal.LOCKED)
                     freed = _free(own)
                 await self._set(session, event_id, member.id, status)
+                no_orbat = event.kind in COMING
         except _Refused as refused:
             return refused.outcome
+        await self.activity.answered(event_id, member.id, status, freed, coming_kind=no_orbat)
         if freed is not None:
             await self._offer(freed)
         await self.notifier.changed(event_id)
@@ -312,6 +318,7 @@ class SignupService:
                 await self._set(session, event_id, member.id, "reserve", (last or 0) + 1)
         except _Refused as refused:
             return refused.outcome
+        await self.activity.answered(event_id, member.id, "reserve")
         await self.notifier.changed(event_id)
         return Outcome()
 
@@ -356,6 +363,7 @@ class SignupService:
                 missing = self.missing_dlc(event, member.role_ids)
         except _Refused as refused:
             return refused.outcome
+        await self.activity.answered(event_id, member.id, "coming")
         await self.notifier.changed(event_id)
         return Outcome(missing_dlc=missing)
 
@@ -391,6 +399,7 @@ class SignupService:
             await session.flush()
         await self.scheduler.schedule(OFFER_KIND, expires, key=f"{OFFER_KIND}:{offer.id}", event_id=event.id,
                                       payload={"offer": offer.id})
+        await self.activity.offered(event.id, slot_id, offer.member_id, expires)
         await self.notifier.offered(offer, eligible if to_all else eligible[:1])
         await self.notifier.changed(event.id)
 
@@ -411,8 +420,9 @@ class SignupService:
             if offer is None or offer.state != "open" or offer.member_id != member.id:
                 return Outcome(Refusal.OFFER_GONE)
             offer.state = "declined"
-            slot_id = offer.slot_id
+            slot_id, event_id = offer.slot_id, offer.event_id
         await self.scheduler.cancel(f"{OFFER_KIND}:{offer_id}")
+        await self.activity.offer_ended(event_id, slot_id, member.id, "declined")
         await self._offer(slot_id)
         return Outcome()
 
@@ -422,28 +432,32 @@ class SignupService:
             if offer is None or offer.state != "open":
                 return None
             offer.state = "expired"
-            slot_id = offer.slot_id
+            slot_id, event_id, member_id = offer.slot_id, offer.event_id, offer.member_id
+        await self.activity.offer_ended(event_id, slot_id, member_id, "expired")
         await self._offer(slot_id)
         return None
 
     # ---------------------------------------------------------------- organisers
 
-    async def lock(self, slot_id: int, locked: bool) -> None:
-        """Lock a free slot closed, lock a held one as an assignment, or unlock it."""
+    async def lock(self, slot_id: int, locked: bool, by: int | None = None) -> None:
+        """Lock a free slot closed, lock a held one as an assignment, or unlock it (``by``: the organiser, for the
+        staff log)."""
         async with self.db.session() as session, session.begin():
             slot = await session.get(Slot, slot_id)
             if slot is None:
                 return
             slot.locked = locked
-            event_id, free = slot.event_id, slot.holder_id is None
+            event_id, holder = slot.event_id, slot.holder_id
+            free = holder is None
             if locked and free:
                 await session.execute(update(Offer).where(Offer.slot_id == slot_id, Offer.state == "open")
                                       .values(state="withdrawn"))
+        await self.activity.locked(event_id, slot_id, by, locked, holder)
         if not locked and free:
             await self._offer(slot_id)
         await self.notifier.changed(event_id)
 
-    async def assign(self, slot_id: int, member_id: int) -> None:
+    async def assign(self, slot_id: int, member_id: int, by: int | None = None) -> None:
         """Put a member in a slot, locked: from their other slot in the event and off its lists. A previous holder
         goes to the top of the reserve list."""
         freed: int | None = None
@@ -453,7 +467,8 @@ class SignupService:
             if slot is None:
                 return
             event_id = slot.event_id
-            if slot.holder_id == member_id:
+            again = slot.holder_id == member_id
+            if again:
                 slot.locked = True
             else:
                 displaced = slot.holder_id
@@ -469,24 +484,31 @@ class SignupService:
                                       .values(state="withdrawn"))
                 if displaced is not None:
                     await self._to_top(session, event_id, [displaced])
+        if again:
+            await self.activity.locked(event_id, slot_id, by, True, member_id)
+        else:
+            await self.activity.assigned(event_id, slot_id, member_id, by, displaced)
         if displaced is not None:
             await self.notifier.lost_slot(event_id, [displaced])
         if freed is not None:
             await self._offer(freed)
         await self.notifier.changed(event_id)
 
-    async def remove(self, slot_id: int) -> None:
+    async def remove(self, slot_id: int, by: int | None = None) -> None:
         """Take the holder out of a slot (organisers); the slot is offered on."""
         async with self.db.session() as session, session.begin():
             slot = await session.get(Slot, slot_id)
             if slot is None:
                 return
+            holder = slot.holder_id
             _free(slot)
             event_id = slot.event_id
+        if holder is not None:
+            await self.activity.removed(event_id, slot_id, holder, by)
         await self._offer(slot_id)
         await self.notifier.changed(event_id)
 
-    async def set_orbat(self, event_id: int, squads: list[ParsedSquad]) -> list[int]:
+    async def set_orbat(self, event_id: int, squads: list[ParsedSquad], by: int | None = None) -> list[int]:
         """Replace the ORBAT. A holder keeps the slot that matches by squad name, slot name and position among
         same-named slots (and an organiser's assignment stays locked); a slot now written with ``!`` is closed and
         loses its holder. Members whose slot is gone go to the top of the reserve list; they are returned."""
@@ -530,6 +552,7 @@ class SignupService:
             displaced = [member for member in holders if member not in kept]
             if displaced:
                 await self._to_top(session, event_id, displaced)
+        await self.activity.orbat_set(event_id, by, sum(len(parsed.slots) for parsed in squads), displaced)
         if displaced:
             await self.notifier.lost_slot(event_id, displaced)
         await self.notifier.changed(event_id)

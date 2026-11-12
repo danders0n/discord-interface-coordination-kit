@@ -17,6 +17,7 @@ from enum import StrEnum
 
 from sqlalchemy import delete, func, select
 
+from app.activity import Activity
 from app.db import Database
 from app.db.models import AttendanceEntry, Event, MissionRating
 from app.settings import SettingsStore
@@ -43,6 +44,7 @@ class FeedbackService:
     def __init__(self, db: Database, store: SettingsStore, clock: Callable[[], datetime] | None = None) -> None:
         self.db, self.store = db, store
         self.clock = clock or (lambda: datetime.now(UTC))
+        self.activity = Activity.off()  # the staff log's activity entries, set by whoever wires the bot
 
     def closes_at(self, event: Event) -> datetime | None:
         if event.reported_at is None or event.attendance_state is None:
@@ -77,11 +79,13 @@ class FeedbackService:
         async with self.db.session() as session, session.begin():
             row = (await session.execute(select(MissionRating).where(
                 MissionRating.event_id == event.id, MissionRating.member_id == member_id))).scalar_one_or_none()
+            again = row is not None
             if row is None:
                 row = MissionRating(event_id=event.id, member_id=member_id, stars=int(text), comment=comment)
                 session.add(row)
             else:
                 row.stars, row.comment = int(text), comment
+        await self.activity.rated(event.id, member_id, again)
         return row
 
     async def mine(self, event_id: int, member_id: int) -> MissionRating | None:
