@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from conftest import ADMIN, MEMBER, MISSION_MAKER
 from fakes import invoke
-from test_attendance import ANNA, BOB, MAKER, asking, at, hold, person, play, published, run, stack  # noqa: F401
+from test_attendance import ANNA, BOB, MAKER, asking, at, hold, linked, person, play, published, run, stack  # noqa: F401
 
 from app.attendance.cog import AttendanceCog
 from app.attendance.ui import ReportAction
@@ -21,8 +21,8 @@ async def reported(stack, guild, clock, fake, kind="internal", host=None):
     event = await published(stack, clock, kind=kind, host=host)
     await hold(stack, event, 1, 2)
     if kind != "guest":
-        await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
-        await stack.links.link(2, BOB, "Bob", 2, has_rank=True)
+        linked(fake, 1, ANNA, "Anna")
+        linked(fake, 2, BOB, "Bob")
         fake.plays = [play(1, event.start_at + timedelta(minutes=5), 120, players=[(ANNA, "Anna", 5000)])]
         at(clock, fake, event.start_at + timedelta(minutes=140))
     else:
@@ -141,11 +141,11 @@ async def test_profile_mission_maker_and_group(stack, guild, clock, fake):
     own = asking(stack, guild, guild.members[1])
     await invoke(cog.profile, cog, own, member=None)
     fields = {f.name: f.value for f in own.replies[0].kwargs["embed"].fields}
-    assert fields["squad.xml"] == f"Anna · Steam ID {ANNA}"
+    assert fields["squad.xml"] == f"Linked · Steam ID {ANNA}"
     other = asking(stack, guild, guild.members[2])
     await invoke(cog.profile, cog, other, member=guild.members[1])
     fields = {f.name: f.value for f in other.replies[0].kwargs["embed"].fields}
-    assert fields["squad.xml"] == "Anna"  # no Steam ID for others
+    assert fields["squad.xml"] == "Linked"  # no Steam ID for others
     authored = asking(stack, guild, maker)
     await invoke(cog.profile, cog, authored, member=None)
     fields = {f.name: f.value for f in authored.replies[0].kwargs["embed"].fields}

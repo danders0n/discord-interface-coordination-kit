@@ -1,8 +1,9 @@
 """Erasing a member's data on request (docs/PLAN.md, *Privacy*, *Erasure*), without discord.py.
 
-The Steam link is deleted (so the member drops out of squad.xml), and their Discord id and Steam ID are replaced
-by one fixed pseudonym, ``former:<n>``, in every table: slots, sign-ups, offers, attendance, ratings (whose comments
-are emptied), organisers, creator and author fields, approval decisions, templates, groups, links made by them.
+Their Steam link and squad.xml entry are the supervisor's (its erasure, called by ``/privacy-erase`` once the
+supervisor offers it; until then staff remove the link in the app). In the bot their reminders are deleted, and their
+Discord id and Steam ID are replaced by one fixed pseudonym, ``former:<n>``, in every table: slots, sign-ups, offers, attendance, ratings (whose comments
+are emptied), organisers, creator and author fields, approval decisions, templates, groups.
 Past events still add up, but nothing points back to the person. Discord ids are numbers, so in those columns the
 pseudonym is ``-n`` (:func:`pseudonym` turns it back into words); Steam ID columns hold ``former:<n>``.
 
@@ -21,7 +22,7 @@ from sqlalchemy import delete, select, update
 
 from app.db import Database, state
 from app.db.models import (ApprovalRequest, ArchivedMessage, AttendanceEntry, Event, EventOrganiser, LinkReminder,
-                           MissionRating, Offer, OrbatTemplate, OtherGroup, Signup, Slot, SteamLink)
+                           MissionRating, Offer, OrbatTemplate, OtherGroup, Signup, Slot)
 
 COUNTER_KEY = "erasures"
 
@@ -43,12 +44,8 @@ async def erase(db: Database, member_id: int, now: Callable[[], datetime]) -> Er
     await state.put(db, COUNTER_KEY, {"last": number})
     former, former_steam = -number, f"former:{number}"
     async with db.session() as session, session.begin():
-        link = await session.get(SteamLink, member_id)
-        steam_ids = {link.steam_id} if link is not None else set()
-        steam_ids |= set((await session.execute(select(AttendanceEntry.steam_id).where(
+        steam_ids = set((await session.execute(select(AttendanceEntry.steam_id).where(
             AttendanceEntry.member_id == member_id, AttendanceEntry.steam_id.is_not(None)))).scalars())
-        if link is not None:
-            await session.delete(link)
         await session.execute(delete(LinkReminder).where(LinkReminder.member_id == member_id))
 
         coming = select(Event.id).where(Event.status.in_(("draft", "pending", "published")), Event.start_at > now())
@@ -68,7 +65,7 @@ async def erase(db: Database, member_id: int, now: Callable[[], datetime]) -> Er
                               (EventOrganiser, EventOrganiser.member_id),
                               (ApprovalRequest, ApprovalRequest.requested_by), (ApprovalRequest, ApprovalRequest.decided_by),
                               (OrbatTemplate, OrbatTemplate.owner_id), (OtherGroup, OtherGroup.added_by),
-                              (SteamLink, SteamLink.linked_by), (AttendanceEntry, AttendanceEntry.member_id),
+                              (AttendanceEntry, AttendanceEntry.member_id),
                               (AttendanceEntry, AttendanceEntry.corrected_by)):
             await session.execute(update(model).where(column == member_id).values({column.key: former}))
         await session.execute(update(MissionRating).where(MissionRating.member_id == member_id)

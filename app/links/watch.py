@@ -1,20 +1,19 @@
-"""Keeping the Steam links and squad.xml in step with the server (docs/PLAN.md, *Steam link and squad.xml*).
+"""Steam link reminders (docs/PLAN-front-end.md, *Commands and buttons*). The supervisor knows which roles are squad.xml
+ranks and who is linked (``GET /api/members?unlinked=true``); the bot delivers:
 
-- A member who gains or loses a rank or remark role, leaves, or renames their Discord account: squad.xml is
-  written again (debounced); a rank lost or regained moves the link's ``rank_lost_at``.
-- A member who gains a rank without a link gets a DM with *Link now* at once (unless staff turned their reminders
-  off); if their DMs are closed, a ping in the reminder channel instead. ``/links remind`` sends the same.
-- An hourly scheduled action reminds the members with a rank and no link every N days, at most ``dms_per_hour``
-  at a time, and deletes the links of members N days without a rank (told to the staff log).
+- A member who gains a role is asked once at once, if the supervisor then lists them as unlinked and they were never
+  reminded (unless staff turned their reminders off): a DM with *Link now*, or a ping in the reminder channel if
+  their DMs are closed. ``/links remind`` sends the same.
+- An hourly scheduled action reminds the unlinked every N days, at most ``dms_per_hour`` at a time.
 - The first run posts one announcement with *Link now* in the reminder channel; it counts as everyone's first
   reminder, so the DMs start N days later.
 
-The services stay Discord-free; this is the thin layer that sends."""
+Squad.xml and the links of members without a rank are the supervisor's. This is the thin layer that sends."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -23,7 +22,7 @@ import discord
 from app.i18n import t
 from app.links.ui import link_view
 from app.scheduler import Action
-from app.squadxml.service import Person
+from app.supervisor_client import SupervisorError
 
 log = logging.getLogger(__name__)
 KIND = "link_reminders"
@@ -31,34 +30,29 @@ EVERY = timedelta(hours=1)
 
 
 class LinkWatch:
-    def __init__(self, services: Any, guild: Callable[[], Any], roster: Callable[[], Mapping[int, Person] | None]) -> None:
-        self.s, self.guild, self.roster = services, guild, roster
+    def __init__(self, services: Any, guild: Callable[[], Any]) -> None:
+        self.s, self.guild = services, guild
         services.scheduler.register(KIND, self._hourly)
 
     @property
     def language(self) -> str:
         return self.s.settings.language
 
-    def ranked(self) -> set[int]:
-        people, rank = self.roster() or {}, self.s.ids.rank
-        return {member_id for member_id, person in people.items() if not person.role_ids.isdisjoint(rank)}
-
     # ---------------------------------------------------------------- start-up
 
     async def start(self) -> None:
-        """Once connected: what changed while the bot was down, the hourly action, the first rollout, squad.xml."""
-        if self.roster() is None:
-            return
-        ranked = self.ranked()
-        await self.s.links.reconcile(ranked)
+        """Once connected: the hourly action and the first rollout."""
         if not await self.s.scheduler.exists(KIND):
             await self.s.scheduler.schedule(KIND, self.s.scheduler.clock() + EVERY, key=KIND)
-        if self.s.ids.rank and not await self.s.links.rollout_done():
-            await self._rollout(ranked)
-        await self.s.squadxml.write_now()
+        if not await self.s.links.rollout_done():
+            try:
+                unlinked = await self.s.links.unlinked()
+            except SupervisorError as exc:
+                log.warning("The Steam link rollout waits for the supervisor: %s", exc.message)
+                return
+            await self._rollout(unlinked)
 
-    async def _rollout(self, ranked: set[int]) -> None:
-        linked = {link.member_id for link in await self.s.links.all()}
+    async def _rollout(self, unlinked: set[int]) -> None:
         channel = self._reminder_channel()
         if channel is not None:
             await channel.send(t("Link your Steam account with the bot: it keeps our squad.xml and counts attendance. "
@@ -66,36 +60,27 @@ class LinkWatch:
                                view=link_view(self.language))
         else:
             log.warning("No reminder channel (BOT_CHANNELS__LINK_REMINDER): the Steam link rollout posted nothing")
-        await self.s.links.mark_rollout(ranked - linked)
+        await self.s.links.mark_rollout(unlinked)
         self.s.staff.post(t(("Steam link rollout: {count} member without a link gets a DM in {days} days unless they "
                              "link first.",
                              "Steam link rollout: {count} members without a link get a DM in {days} days unless they "
-                             "link first."), self.language, count=len(ranked - linked),
+                             "link first."), self.language, count=len(unlinked),
                             days=self.s.settings.links.reminder_days))
 
     # ---------------------------------------------------------------- members
 
-    async def member_changed(self, member: Any, before: frozenset[int]) -> None:
-        ids = self.s.ids
-        after = frozenset(role.id for role in member.roles)
-        had, has = not before.isdisjoint(ids.rank), not after.isdisjoint(ids.rank)
-        if had != has:
-            await self.s.links.rank_changed(member.id, has)
-            if has and not getattr(member, "bot", False) and await self.s.links.get(member.id) is None \
-                    and not await self.s.links.muted(member.id):
-                await self.remind(member)
-                await self.s.links.reminded([member.id])
-        if not (before ^ after).isdisjoint(ids.rank | set(ids.remark)):
-            self.s.squadxml.request()
-
-    async def member_left(self, member_id: int) -> None:
-        await self.s.links.rank_changed(member_id, False)
-        self.s.squadxml.request()
-
-    async def renamed(self, member_id: int) -> None:
-        """A Discord username changed: it is the ``<icq>`` of a linked member."""
-        if await self.s.links.get(member_id) is not None:
-            self.s.squadxml.request()
+    async def roles_gained(self, member: Any) -> None:
+        """After the member's push: ask a newly ranked member at once (only the first time)."""
+        if getattr(member, "bot", False) or not await self.s.links.never_reminded(member.id):
+            return
+        try:
+            if member.id not in await self.s.links.unlinked():
+                return
+        except SupervisorError as exc:  # the hourly run asks them later
+            log.info("No link check for %s: %s", member.id, exc.message)
+            return
+        if await self.remind(member) is not None:
+            await self.s.links.reminded([member.id])
 
     # ---------------------------------------------------------------- reminders
 
@@ -124,23 +109,28 @@ class LinkWatch:
 
     async def _hourly(self, action: Action, now: datetime) -> datetime:
         guild, settings = self.guild(), self.s.settings
-        if guild is not None and self.roster() is not None and await self.s.links.rollout_done():
-            due = await self.s.links.due_reminders(self.ranked(), timedelta(days=settings.links.reminder_days),
-                                                   settings.links.dms_per_hour)
-            tried = []
-            for member_id in due:
-                member = guild.get_member(member_id)
-                if member is None:
-                    continue
-                try:
-                    await self.remind(member)
-                except discord.HTTPException as exc:  # (the reminder channel refused): the next run tries them again
-                    log.warning("Reminding %s to link Steam failed: %s", member_id, exc)
-                    continue
-                tried.append(member_id)
-            await self.s.links.reminded(tried)  # (not the failed ones: the next hour asks them again)
-        for link in await self.s.links.expire(settings.links.delete_after_days):
-            self.s.staff.post(t("Steam link of {member} deleted after {days} days without a rank: {steam} ({nick}).",
-                                self.language, member=f"<@{link.member_id}>", days=settings.links.delete_after_days,
-                                steam=link.steam_id, nick=link.nick))
+        if guild is None:
+            return now + EVERY
+        try:
+            unlinked = await self.s.links.unlinked()
+        except SupervisorError as exc:  # the next hour asks again
+            log.warning("Steam link reminders skipped: %s", exc.message)
+            return now + EVERY
+        if not await self.s.links.rollout_done():  # (the supervisor was away at start-up)
+            await self._rollout(unlinked)
+            return now + EVERY
+        due = await self.s.links.due_reminders(unlinked, timedelta(days=settings.links.reminder_days),
+                                               settings.links.dms_per_hour)
+        tried = []
+        for member_id in due:
+            member = guild.get_member(member_id)
+            if member is None:
+                continue
+            try:
+                await self.remind(member)
+            except discord.HTTPException as exc:  # (the reminder channel refused): the next run tries them again
+                log.warning("Reminding %s to link Steam failed: %s", member_id, exc)
+                continue
+            tried.append(member_id)
+        await self.s.links.reminded(tried)  # (not the failed ones: the next hour asks them again)
         return now + EVERY

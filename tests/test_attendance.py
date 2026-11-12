@@ -22,7 +22,6 @@ from app.feedback.service import FeedbackService
 from app.links.service import LinkService
 from app.orbat.parser import parse
 from app.signup.service import Member, SignupService
-from app.squadxml.service import SquadXml
 from app.staff_threads import StaffThreads
 
 ENGLISH = discord.Locale.british_english
@@ -43,7 +42,7 @@ async def stack(services, fake, guild, clock):
     channels.header = Header(services.db, services.store, lambda: services.ids, lambda: guild, clock, interval=0)
     channels.staff, channels.services = services.staff, services
     channels.threads = services.threads = StaffThreads(services.db, services.store)
-    links = LinkService(services.db, clock)
+    links = LinkService(services.db, services.supervisor, lambda who, call: call(who), clock)
     names = lambda member_id: [guild.members[member_id].name] if member_id in guild.members else []
     attendance = AttendanceService(services.db, services.store, services.scheduler, services.reservations,
                                    StatsReader(services.supervisor), links, events, channels, names)
@@ -51,10 +50,13 @@ async def stack(services, fake, guild, clock):
     services.feedback = channels.feedback = attendance.feedback = FeedbackService(services.db, services.store, clock)
     services.events, services.signups, services.channels, services.attendance = events, signups, channels, attendance
     services.links = links
-    services.squadxml = SquadXml(links, services.store, lambda: services.ids, lambda: None, delay=0)
     yield services
     await settle(channels)
-    await services.squadxml.settle()
+
+
+def linked(fake, member_id: int, steam: str, name: str, confirmed: bool = True) -> None:
+    """The member's Steam link, as the supervisor holds it."""
+    fake.person(member_id, name, steam_uid=steam, steam_state="confirmed" if confirmed else "unconfirmed")
 
 
 def person(guild, member_id: int, *roles: int) -> FakeMember:
@@ -165,8 +167,8 @@ async def test_a_finished_mission_ends_the_event_and_the_report_follows(stack, g
         person(guild, member_id, MEMBER)
     event = await published(stack, clock)
     await hold(stack, event, 1, 2)
-    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
-    await stack.links.link(3, BOB, "Bob", 3, has_rank=True)
+    linked(fake, 1, ANNA, "Anna")
+    linked(fake, 3, BOB, "Bob")
     start = event.start_at
     fake.plays = [play(1, start + timedelta(minutes=5), 100, players=[
         (ANNA, "Anna", 5000), (MATCH, "m2", 4000), (BOB, "Bob", 3000), (STRANGER, "Stranger", 2000),
@@ -201,8 +203,8 @@ async def test_a_zeus_event_ends_with_its_reservation_and_counts_those_coming(st
     for member_id in (1, 2):
         person(guild, member_id, MEMBER)
         await stack.signups.coming(event.id, Member(member_id, frozenset({MEMBER})))
-    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
-    await stack.links.link(2, BOB, "Bob", 2, has_rank=True)
+    linked(fake, 1, ANNA, "Anna")
+    linked(fake, 2, BOB, "Bob")
     start = event.start_at
     fake.plays = [play(1, start + timedelta(minutes=5), 30, players=[(ANNA, "Anna", 1800)])]  # finished: ignored
     at(clock, fake, start + timedelta(minutes=120))
@@ -275,12 +277,12 @@ async def test_a_guest_event_is_confirmed_by_hand_or_after_n_days(stack, guild, 
 
 # ---------------------------------------------------------------------------- corrections
 
-async def test_organisers_correct_the_report_and_confirm_a_probable_link(stack, guild, clock, fake):
+async def test_organisers_correct_the_report(stack, guild, clock, fake):
     for member_id in (1, 2):
         person(guild, member_id, MEMBER)
     event = await published(stack, clock)
     await hold(stack, event, 1, 2)
-    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    linked(fake, 1, ANNA, "Anna")
     start = event.start_at
     fake.plays = [play(1, start + timedelta(minutes=5), 120, players=[(ANNA, "Anna", 600), (MATCH, "m2", 4000)])]
     at(clock, fake, start + timedelta(minutes=140))
@@ -301,12 +303,20 @@ async def test_organisers_correct_the_report_and_confirm_a_probable_link(stack, 
     assert done.replies[0].content == "2 members are now Excused."
     entries = {e.member_id: e for e in await stack.attendance.entries(event.id)}
     assert entries[1].status == "excused" and entries[1].corrected_by == 20 and entries[9].status == "excused"
-    (probable,) = await stack.attendance.probable(event.id)
-    confirm = asking(stack, guild, maker)
-    await editor._confirm(confirm, [probable.id])
-    assert confirm.replies[0].content == "Linked: <@2> is m2."
-    assert (await stack.links.get(2)).steam_id == MATCH
-    assert {e.member_id: e.status for e in await stack.attendance.entries(event.id)}[2] == "attended"
+    assert entries[2].status == "not_linked" and entries[2].probable_steam_id == MATCH  # shown, not linked here
+
+
+async def test_an_unconfirmed_link_does_not_count_yet(stack, guild, clock, fake):
+    person(guild, 1, MEMBER)
+    event = await published(stack, clock)
+    await hold(stack, event, 1)
+    linked(fake, 1, ANNA, "Anna", confirmed=False)
+    start = event.start_at
+    fake.plays = [play(1, start + timedelta(minutes=5), 120, players=[(ANNA, "Anna", 5000)])]
+    at(clock, fake, start + timedelta(minutes=140))
+    await run(stack)
+    entries = {e.member_id: e for e in await stack.attendance.entries(event.id)}
+    assert entries[1].status == "not_linked"
 
 
 async def test_end_event_with_the_supervisor_down_still_reports(stack, guild, clock, fake, monkeypatch):

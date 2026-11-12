@@ -345,12 +345,6 @@ class Activity:
                      status=label))
 
     @_safe
-    async def linked_probable(self, event_id: int, member_id: int, member_ids: list[int]) -> None:
-        self._emit(t("{member} confirmed the probable Steam IDs in the attendance of {event}: {members}.",
-                     self.language, member=mention(member_id), event=await self._event(event_id),
-                     members=self._members(member_ids)))
-
-    @_safe
     async def rated(self, event_id: int, member_id: int, again: bool) -> None:
         """Only that someone rated: never the stars or the comment."""
         if again:

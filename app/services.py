@@ -36,9 +36,8 @@ class Services:
     profiles: Any = None  # phase 7: app.profiles.service.ProfileService
     archive: Any = None  # phase 8: app.archive.service.ArchiveService
     exporter: Any = None  # phase 8: app.archive.export.Exporter (moves the oldest quarter into the database)
-    # Steam links and squad.xml (phase 5), also built by the bot: app.bot.EventBot.build_links.
+    # Steam links through the supervisor and their reminders, also built by the bot: app.bot.EventBot.build_links.
     links: Any = None
-    squadxml: Any = None
     link_watch: Any = None
     # The supervisor as the owner of members and notices (docs/PLAN-front-end.md), built by the bot:
     # app.bot.EventBot.build_front_end.

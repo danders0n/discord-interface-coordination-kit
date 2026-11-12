@@ -37,8 +37,9 @@ class PrivacyCog(commands.Cog):
     @app_commands.guild_only()
     @require(Perm.BOT_ADMIN)
     async def erase(self, interaction: discord.Interaction, member: discord.User) -> None:
-        await reply(interaction, t("Erase the data of {member}? Their Steam link is deleted and their ids are replaced "
-                                   "by a pseudonym everywhere. This can't be undone.", interaction.locale,
+        await reply(interaction, t("Erase the data of {member}? Their ids are replaced by a pseudonym everywhere in the "
+                                   "bot. This can't be undone. Their Steam link is in the app: remove it there.",
+                                   interaction.locale,
                                    member=member.mention), view=ConfirmErase(self.services, member.id, interaction.locale))
 
 
@@ -54,8 +55,6 @@ class ConfirmErase(discord.ui.View):
         s = self.services
         done = await erase(s.db, self.member_id, s.scheduler.clock)
         self.stop()
-        if s.squadxml is not None:
-            s.squadxml.request()
         if s.channels is not None:
             for event_id in done.events:
                 await s.channels.changed(event_id)

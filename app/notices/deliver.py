@@ -38,6 +38,8 @@ class Delivery:
     def install(self, notices: Notices) -> None:
         notices.register("login_link", self.login_link)
         notices.register("roster_guard", self.roster_guard)
+        notices.register("link_request", self.link_request)
+        notices.register("link_duplicate", self.link_duplicate)
 
     async def _member(self, discord_id: Any) -> Any | None:
         guild = self.guild()
@@ -73,6 +75,22 @@ class Delivery:
             return failed("dm_closed")
         except discord.HTTPException as exc:
             return failed(f"discord: {exc.status}")
+        return delivered()
+
+    @staticmethod
+    def _who(notice: dict[str, Any]) -> str:
+        persons = notice.get("persons") or []
+        return f"<@{persons[0]}>" if persons and str(persons[0]).isdigit() else "?"
+
+    async def link_request(self, notice: dict[str, Any]) -> Outcome:
+        self.s.staff.post(t("{member} linked Steam ID {steam}: confirm it in the app (Members, Steam links).",
+                            self.language, member=self._who(notice), steam=(notice.get("data") or {}).get("steam_uid")))
+        return delivered()
+
+    async def link_duplicate(self, notice: dict[str, Any]) -> Outcome:
+        data = notice.get("data") or {}
+        self.s.staff.post(t("{member} tried to link Steam ID {steam}, which {owner} holds.", self.language,
+                            member=self._who(notice), steam=data.get("steam_uid"), owner=data.get("owner") or "?"))
         return delivered()
 
     async def roster_guard(self, notice: dict[str, Any]) -> Outcome:

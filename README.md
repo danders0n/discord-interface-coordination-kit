@@ -13,8 +13,8 @@ by quarter. *Create event* in the header channel starts a wizard; *Organiser pan
 edits it, publishes or sends it for approval; moderators decide in the moderation thread. `/event preset` and
 `/event image` attach the launcher preset and the briefing image. Members sign up with the buttons under the
 ORBAT or `/slot take | leave`, freed slots are offered to the reserve list, and `/events` lists what is coming.
-Members link their Steam account with `/link` (or *Link now* in a reminder), `/unlink` removes it, staff use
-`/links set | remove`, and the bot keeps squad.xml in step with the rank and remark roles. After a mission the
+Members link their Steam account with `/link` (or *Link now* in a reminder) and `/unlink` removes it; the link is
+held, confirmed and written into squad.xml by the supervisor (the app's Members page). After a mission the
 bot ends the event (a finished mission, the reservation's end, or *End event*), reads who played from the
 supervisor and posts the attendance report in the event channel, where the organisers correct it with *Edit
 attendance*. Attendees rate the mission under the report; `/attendance`, `/profile`, `/mission-maker` and
@@ -77,20 +77,12 @@ applies a changed file; the token, the guild, the data folder and the supervisor
 The `/privacy` text ships in `app/privacy/`; to change it, put `privacy.pl.md` / `privacy.en.md` into the data
 folder.
 
-### squad.xml and the old bot's links
+### Steam links and squad.xml
 
-The bot writes only `squad.xml`, into `BOT_SQUAD_XML__OUTPUT_DIR`; IIS serves that folder, with `squad.dtd`,
-`squad.xsl` and the logo kept there by hand. Members are those with a `BOT_ROLES__RANK` role and a Steam link;
-`BOT_ROLES__REMARK` roles make the remark. Staff with *manage links* check the file with `/links status` (with
-*Write now*), see who is in it or missing with `/links list`, give a member an own remark with `/links remark`,
-and send or turn off the link reminders with `/links remind` and `/links reminders`. On the switch-over day, stop
-the old bot's squad.xml export, then import its links before the first start:
-
-```powershell
-.venv\Scripts\python.exe -m app import-old-links D:\Workspace\python\IBC_BOT\data\steam_ids.json
-```
-
-It prints what it skipped (bad ids, duplicates). On its first start the bot posts one *Link now* announcement in
+The supervisor holds the links and writes squad.xml (its Members → Steam links page, where staff confirm links, set
+anyone's link and remarks, and check the file; its `import-old-links` takes the old bot's `steam_ids.json`). The
+bot pushes the server's members and roles to it, lets members link themselves, and reminds them: staff with *manage
+links* send or turn off the reminders with `/links remind` and `/links reminders`. On its first start the bot posts one *Link now* announcement in
 `BOT_CHANNELS__LINK_REMINDER`; members with a rank and still no link get a DM `BOT_LINKS__REMINDER_DAYS` later
 (at most `BOT_LINKS__DMS_PER_HOUR` an hour), and again every that many days.
 

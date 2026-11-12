@@ -286,6 +286,33 @@ supervisor publishes the operations routes.
     a refused single-member or roles push is only a log warning (the daily push repairs it).
   - The login-link DM is in the config language (a DM outside an interaction has no locale).
 
+### Step 2: Steam links through the supervisor (2026-11-12)
+
+The supervisor's phase 2 (links on persons, squad.xml) is committed, so the bot's links move now rather than in
+phase 5.
+
+- **Gone:** `app/squadxml/`, the `steam_link` table (migration 0015), `/links set | remove | status | list |
+  remark`, *Write now*, `python -m app import-old-links` (the supervisor has its own), `BOT_SQUAD_XML__*` and
+  `BOT_LINKS__DELETE_AFTER_DAYS`, the squad.xml start-up checks, the link expiry after N days without a rank, the
+  in-game name lookup at `/link`, and the attendance editor's *Confirm links*.
+- **`/link steam`** (no nick: the supervisor's nick rule) and *Link now* call `PUT /api/members/me/steam` through
+  act-as; the reply says the link waits for staff and gives `squadxml_url` from the answer. `/unlink` calls
+  `DELETE`. Refusals: `link_taken`, `link_invalid` (worded as a bad ID or a custom address, by what was typed).
+  The staff log hears of links through the supervisor's `link_request` / `link_duplicate` notices (staff-log notes,
+  `app/notices/deliver.py`).
+- **Reminders** use `GET /api/members?unlinked=true` instead of the bot's rank roles. A member who gains a role is
+  pushed, then asked at once if the supervisor lists them as unlinked and they were never reminded.
+- **Attendance** (until it moves to the supervisor): the report matches only **confirmed** links, read from
+  `GET /api/members` (the supervisor's rule). A probable match is still shown; the member links with `/link` and
+  staff confirm it in the app.
+- **Words for refusals:** the command, button and modal error handlers answer any `SupervisorError` in words
+  (`discord_util.supervisor_words`: `unknown_person`, `account_disabled`, `act_as_route`, the supervisor down or
+  5xx; the supervisor's message otherwise), logged as INFO / WARNING instead of an ERROR. So an act-as call needs
+  no handling of its own.
+- **Interim gap:** `/privacy-erase` no longer deletes the member's Steam link (it is in the supervisor, whose
+  erasure comes with its phase 5); the confirmation says to remove it in the app.
+- `BOT_ROLES__RANK` and `BOT_ROLES__REMARK` stay for `/profile` until the configuration is trimmed in the clean-up.
+
 ## Not in this plan
 
 - Server control from Discord.

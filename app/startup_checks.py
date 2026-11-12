@@ -43,10 +43,4 @@ def check(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
                               "\"Mention @everyone, @here and All Roles\"", language, role=role.name))
     if not ids.signup:
         problems.append(t("BOT_ROLES__SIGNUP names no role on this server: nobody can sign up for events.", language))
-    folder = settings.squad_xml.output_dir
-    if folder is not None and not folder.is_dir():
-        problems.append(t("BOT_SQUAD_XML__OUTPUT_DIR: {folder} is not a folder; squad.xml is not written.", language,
-                          folder=str(folder)))
-    if folder is not None and not ids.rank:
-        problems.append(t("BOT_ROLES__RANK names no role on this server: squad.xml stays empty.", language))
     return ids, problems

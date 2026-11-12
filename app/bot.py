@@ -35,7 +35,7 @@ from app.attendance.stats import StatsReader
 from app.attendance.ui import ReportAction
 from app.links.cog import LinkCog
 from app.links.service import LinkService
-from app.links.ui import LinkNow, WriteNow
+from app.links.ui import LinkNow
 from app.links.watch import LinkWatch
 from app.live import Live
 from app.notices.deliver import Delivery
@@ -46,7 +46,6 @@ from app.roster.service import Roster
 from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.services import Services
 from app.signup.service import Member, SignupService
-from app.squadxml.service import Person, SquadXml
 from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
@@ -79,9 +78,9 @@ class EventBot(commands.Bot):
         self._tasks: list[asyncio.Task] = []
         self._started = False
         services.roles_of = self.roles_of
+        self.build_front_end()
         self.build_links()
         self.build_events()
-        self.build_front_end()
         services.archive = ArchiveService(services.db, services.store, services.scheduler.clock)
         services.exporter = Exporter(services, self.guild)
 
@@ -124,13 +123,6 @@ class EventBot(commands.Bot):
         if member is None:
             return []
         return [n for n in (member.nick, member.global_name, member.display_name, member.name) if n]
-
-    def roster(self) -> dict[int, Person] | None:
-        """The server's members now, for squad.xml and the link reminders; None until the member list is loaded."""
-        guild = self.guild()
-        if guild is None or not guild.chunked:
-            return None
-        return {m.id: Person(frozenset(r.id for r in m.roles), m.name) for m in guild.members if not m.bot}
 
     def build_front_end(self) -> None:
         """The roster push, the notices and the live events (docs/PLAN-front-end.md)."""
@@ -177,11 +169,11 @@ class EventBot(commands.Bot):
             await self.services.roster.roles_changed()
 
     def build_links(self) -> None:
-        """Steam links and squad.xml (docs/PLAN.md, phase 5)."""
+        """Steam links through the supervisor, and the reminders (docs/PLAN-front-end.md); after the roster, whose
+        ``as_member`` they use."""
         s = self.services
-        s.links = LinkService(s.db, s.scheduler.clock)
-        s.squadxml = SquadXml(s.links, s.store, lambda: s.ids, self.roster)
-        s.link_watch = LinkWatch(s, self.guild, self.roster)
+        s.links = LinkService(s.db, s.supervisor, s.roster.as_member, s.scheduler.clock)
+        s.link_watch = LinkWatch(s, self.guild)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if not self._ours(before.guild):
@@ -190,13 +182,12 @@ class EventBot(commands.Bot):
             previous = frozenset(r.id for r in before.roles)
             await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)),
                                                        previous=previous)
-            await self.services.link_watch.member_changed(after, previous)
         if not after.bot and (before.roles != after.roles or before.display_name != after.display_name):
             await self.services.roster.member_changed(roster_member(after, after.guild.id))
+            if set(after.roles) - set(before.roles):  # (after the push: the supervisor knows the new roles)
+                await self.services.link_watch.roles_gained(after)
 
     async def on_user_update(self, before: discord.User, after: discord.User) -> None:
-        if before.name != after.name:
-            await self.services.link_watch.renamed(after.id)
         if (before.name, before.display_name) != (after.name, after.display_name):
             member = self.roster_one(after.id)  # (a nickname on the server wins over the global name)
             if member is not None:
@@ -208,14 +199,13 @@ class EventBot(commands.Bot):
     async def on_member_remove(self, member: discord.Member) -> None:
         if self._ours(member.guild):
             await self.services.signups.member_left(member.id)
-            await self.services.link_watch.member_left(member.id)
             if not member.bot:
                 await self.services.roster.member_left(roster_member(member, member.guild.id))
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, SquadList, OfferAction,  # outlive a restart
-                               ApprovalAction, LinkNow, WriteNow, ReportAction)
+                               ApprovalAction, LinkNow, ReportAction)
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
@@ -283,7 +273,7 @@ class EventBot(commands.Bot):
             await self.services.channels.refresh_all()  # whatever changed while the bot was down
             self.services.channels.header.request()
             try:
-                await self.services.link_watch.start()  # ranks lost meanwhile, the rollout, squad.xml rebuilt
+                await self.services.link_watch.start()  # the hourly reminders, the first rollout
             except Exception:  # noqa: BLE001 - logged as an ERROR; the rest of the bot works on
                 log.exception("Starting the Steam links failed")
             await self.services.exporter.start()  # the daily move of the oldest quarter into the database

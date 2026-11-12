@@ -128,16 +128,13 @@ exactly the settings.
   the DLC warning); the buttons are off before sign-up opens, after the start, and (*Coming*) at a Zeus limit.
   `app/approval/ui.py`: the request message in the moderation thread with *Approve* / *Reject*, and *Retry
   reservation* while Approve is off (`approval:<id>:<action>`).
-- `app/links/`: `service.py` (`LinkService`: Steam ID parsing, one Steam ID per member, `rank_lost_at` and the
-  deletion after N days, reminder bookkeeping, the rollout flag; `import_old` for `python -m app import-old-links`),
-  `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link`, the modal and `/links set`; the
-  `/links status` embed and *Write now* `squadxml:write`), `cog.py` (`/link`, `/unlink`, staff `/links set |
-  remove | status | list | remark | remind | reminders`), `watch.py` (`LinkWatch`: role changes, departures,
-  renames, the hourly `link_reminders` action with DMs or a reminder-channel ping, skipping `muted` members, the
-  first-run announcement). `app/squadxml/service.py`: `render` (the old bot's layout) and `SquadXml` (debounced
-  atomic writes, only when changed, never while `roster()` is None; `remark_of` puts a link's own remark before
-  the role remarks; `status()` for `/links status`, the last failure in memory). Both get the server's members
-  through `EventBot.roster`.
+- `app/links/` (the links and squad.xml are the supervisor's): `service.py` (`LinkService`: the member's own link
+  through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` / `steam_ids()` (confirmed, for
+  the attendance report) read from `GET /api/members`, and the reminder bookkeeping in `link_reminder` with the
+  rollout flag), `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link` and the modal), `cog.py`
+  (`/link`, `/unlink`, staff `/links remind | reminders`), `watch.py` (`LinkWatch`: a member who gains a role and is
+  then unlinked is asked once at once, the hourly `link_reminders` action with DMs or a reminder-channel ping,
+  skipping `muted` members, the first-run announcement, retried hourly while the supervisor is away).
 - `app/attendance/`: `stats.py` (`StatsReader`: plays and mission time from `/api/stats/attendance`, or the plays
   fallback), `service.py` (`AttendanceService`: the `attendance_watch` action every minute from the assembly,
   `finished_at` and `compute` as pure rules, `attendance_read` with retries until the deadline, guest events'

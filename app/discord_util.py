@@ -11,6 +11,7 @@ from discord import app_commands
 
 from app.i18n import t
 from app.permissions import Access, Perm
+from app.supervisor_client import SupervisorError, SupervisorUnreachable
 
 log = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -80,10 +81,29 @@ async def finish(interaction: discord.Interaction, content: str) -> None:
         await message.delete(delay=seconds)
 
 
+def supervisor_words(error: SupervisorError, locale: Any) -> str:
+    """A refusal of the supervisor for the member (docs/PLAN-front-end.md, *Acting for members*): the codes the bot
+    knows in the member's language, the supervisor's own message otherwise."""
+    if isinstance(error, SupervisorUnreachable) or error.status >= 500:
+        return t("The app can't be reached right now. Try again in a few minutes.", locale)
+    known = {
+        "unknown_person": t("You are not on the app's member list yet. Try again in a minute.", locale),
+        "account_disabled": t("Your account in the app is disabled. Ask staff if that is a mistake.", locale),
+        "act_as_route": t("This can only be done in the app.", locale),
+    }
+    return known.get(error.code or "", error.message[:1900])
+
+
 async def _sorry(interaction: discord.Interaction, error: Exception, where: str) -> None:
-    log.error("%s failed: %s", where, error, exc_info=error)
+    if isinstance(error, SupervisorError):  # a refusal or a supervisor that is down: words, not an ERROR
+        log.log(logging.WARNING if isinstance(error, SupervisorUnreachable) else logging.INFO,
+                "%s: the supervisor answered %s: %s", where, error.status, error.message)
+        text = supervisor_words(error, interaction.locale)
+    else:
+        log.error("%s failed: %s", where, error, exc_info=error)
+        text = t("Something went wrong. Staff can find the details in the log.", interaction.locale)
     try:
-        await reply(interaction, t("Something went wrong. Staff can find the details in the log.", interaction.locale))
+        await reply(interaction, text)
     except discord.HTTPException:  # (the interaction expired meanwhile)
         pass
 
@@ -108,6 +128,4 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         await reply(interaction, str(error))
         return
     original = getattr(error, "original", error)
-    log.error("Command /%s failed: %s", interaction.command.qualified_name if interaction.command else "?",
-              original, exc_info=original)
-    await reply(interaction, t("Something went wrong. Staff can find the details in the log.", interaction.locale))
+    await _sorry(interaction, original, f"Command /{interaction.command.qualified_name if interaction.command else '?'}")

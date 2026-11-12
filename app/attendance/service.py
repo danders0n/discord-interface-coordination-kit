@@ -14,7 +14,8 @@
   in-game name matches an unlinked holder's names is offered as *probably* that member.
 - **Guest events** are on another group's server: at start + duration + buffer every slot holder is *to confirm*;
   the organisers are pinged after 24 h if some still are, and after N days those count as attended.
-- **Corrections**: organisers move members between attended, no-show and excused, and confirm probable links.
+- **Corrections**: organisers move members between attended, no-show and excused. A probable match is shown; its
+  link is the member's to make (``/link``) and staff's to confirm in the app.
 
 The Discord side hears through :class:`AttendanceNotifier`; refusals are the events service's ``Problem`` codes."""
 
@@ -33,7 +34,7 @@ from app.attendance.stats import Play, Player, Stats, StatsReader
 from app.db import Database
 from app.db.models import AttendanceEntry, Event, Signup, Slot
 from app.events.service import EventError, Problem
-from app.links.service import LinkError, LinkService
+from app.links.service import LinkService
 from app.reservations.service import ReservationService
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
@@ -278,7 +279,7 @@ class AttendanceService:
         return None
 
     async def report(self, event: Event, stats: Stats) -> None:
-        links = {link.member_id: link.steam_id for link in await self.links.all()}
+        links = await self.links.steam_ids()  # (the supervisor's confirmed links)
         lines, guests = compute(await self._holders(event), links, stats.players,
                                 self.settings.attendance.min_minutes * 60, event.kind == "hosted", self.names)
         await self._store(event.id, lines, guests, "reported")
@@ -365,34 +366,3 @@ class AttendanceService:
             await self.notifier.changed(event_id)
         return len(changed)
 
-    async def probable(self, event_id: int) -> list[AttendanceEntry]:
-        return [e for e in await self.entries(event_id) if e.probable_steam_id and e.member_id is not None]
-
-    async def confirm_probable(self, event_id: int, member: Member, entry_ids: Iterable[int],
-                               has_rank: Callable[[int], bool]) -> list[tuple[AttendanceEntry, LinkError | None]]:
-        """*Link*: the probable Steam ID becomes the member's link (nick: the in-game name), and their time counts."""
-        await self._organised(event_id, member)
-        wanted = set(entry_ids)
-        done = []
-        min_seconds = self.settings.attendance.min_minutes * 60
-        for entry in await self.probable(event_id):
-            if entry.id not in wanted:
-                continue
-            try:
-                await self.links.link(entry.member_id, entry.probable_steam_id, entry.probable_name or "?", member.id,
-                                      has_rank(entry.member_id))
-            except LinkError as exc:
-                done.append((entry, exc))
-                continue
-            async with self.db.session() as session, session.begin():
-                row = await session.get(AttendanceEntry, entry.id)
-                row.steam_id, row.name = row.probable_steam_id, row.probable_name or ""
-                row.status = "attended" if row.seconds >= min_seconds else "no_show"
-                row.probable_steam_id = row.probable_name = None
-                row.corrected_by, row.corrected_at = member.id, self.clock()
-            done.append((entry, None))
-        linked = [entry.member_id for entry, error in done if error is None]
-        if linked:
-            await self.activity.linked_probable(event_id, member.id, linked)
-        await self.notifier.changed(event_id)
-        return done

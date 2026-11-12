@@ -76,6 +76,7 @@ class State:
     persons: dict[str, dict[str, Any]] = field(default_factory=dict)
     roles: list[dict[str, Any]] = field(default_factory=list)
     roster_guard: int | None = None
+    rank_roles: set[str] = field(default_factory=set)  # the Discord roles marked as squad.xml ranks (unlinked=true)
     notices: list[dict[str, Any]] = field(default_factory=list)
     link_urls: dict[int, str] = field(default_factory=dict)
     acted: list[tuple[str, str, str]] = field(default_factory=list)
@@ -580,6 +581,8 @@ def make_app(state: State | None = None) -> web.Application:
         if "account" in request.query:
             wanted = request.query["account"] == "true"
             rows = [p for p in rows if (p["account"] is not None) == wanted]
+        if request.query.get("unlinked") == "true":  # a squad.xml rank and no link, on the server
+            rows = [p for p in rows if p["in_guild"] and not p.get("steam_uid") and state.rank_roles & set(p["roles"])]
         return web.json_response({"total": len(rows), "members": rows})
 
     async def list_notices(request: web.Request) -> web.Response:

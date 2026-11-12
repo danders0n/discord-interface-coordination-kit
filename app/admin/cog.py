@@ -43,8 +43,6 @@ class AdminCog(commands.Cog):
                                  locale) + "\n"
                 text += "\n".join(f"- {e.title}" + (f" (<#{e.channel_id}>)" if e.channel_id else "")
                                   for e in affected[:15])
-        if self.services.squadxml is not None:  # rank and remark roles, header fields: a full rebuild
-            self.services.squadxml.request()
         await reply(interaction, text[:2000])
         self.services.staff.post(t("Settings reloaded by {member}.", self.services.settings.language,
                                    member=interaction.user.mention))

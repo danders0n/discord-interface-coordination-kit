@@ -142,3 +142,13 @@ async def test_a_failing_handler_is_a_failed_delivery_and_the_rest_go_on(service
     assert await notices.run_once() == 2
     assert (broken["state"], broken["reason"]) == ("failed", "error: bad data")
     assert fine["state"] == "failed"
+
+
+async def test_link_notices_are_staff_notes(services, fake, guild):
+    fake.notice("link_request", persons=[ANNA], data={"person_id": 1, "username": "anna", "steam_uid": "76561198000000001"})
+    fake.notice("link_duplicate", persons=[ANNA], data={"steam_uid": "76561198000000002", "owner": "bob"})
+    assert await make(services, guild).run_once() == 2
+    await asyncio.sleep(0)
+    request, duplicate = services.staff.drain()
+    assert "<@11>" in request and "76561198000000001" in request
+    assert "<@11>" in duplicate and "76561198000000002" in duplicate and "bob" in duplicate

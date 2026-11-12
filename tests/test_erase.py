@@ -5,7 +5,7 @@ from datetime import timedelta
 from conftest import ADMIN, MEMBER
 from fakes import invoke
 from sqlalchemy import select
-from test_attendance import ANNA, asking, at, hold, person, play, published, run, stack  # noqa: F401
+from test_attendance import ANNA, asking, at, hold, linked, person, play, published, run, stack  # noqa: F401
 
 from app.db.models import AttendanceEntry, Event, MissionRating, Slot
 from app.privacy.cog import PrivacyCog
@@ -17,7 +17,7 @@ async def test_an_erasure_replaces_the_member_everywhere_and_frees_coming_places
     person(guild, 2, MEMBER)
     past = await published(stack, clock)
     await hold(stack, past, 1)
-    await stack.links.link(1, ANNA, "Anna", 1, has_rank=True)
+    linked(fake, 1, ANNA, "Anna")
     fake.plays = [play(1, past.start_at + timedelta(minutes=5), 120, players=[(ANNA, "Anna", 5000)])]
     at(clock, fake, past.start_at + timedelta(minutes=140))
     await run(stack)
@@ -38,7 +38,6 @@ async def test_an_erasure_replaces_the_member_everywhere_and_frees_coming_places
     assert confirmed.response.edited[0]["content"] == "Erased: the member is now former:1."
     await run(stack)
 
-    assert await stack.links.get(1) is None
     async with stack.db.session() as session:
         entry = (await session.execute(select(AttendanceEntry).where(AttendanceEntry.event_id == past.id))).scalar_one()
         rating = (await session.execute(select(MissionRating))).scalar_one()

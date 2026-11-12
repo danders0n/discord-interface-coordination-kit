@@ -31,6 +31,7 @@ from app.events.groups import Groups
 from app.i18n import t
 from app.permissions import Perm
 from app.services import Services
+from app.supervisor_client import SupervisorError
 
 RECENT = 10
 PERIODS = {"30": 30, "90": 90, "365": 365, "all": None}
@@ -146,11 +147,20 @@ class AttendanceCog(commands.Cog):
         target = member or interaction.user
         details = sees_details(interaction, target.id)
         embed = discord.Embed(title=t("Profile: {name}", locale, name=target.display_name))
-        link = await s.links.get(target.id) if s.links is not None else None
-        if link is None:
-            embed.add_field(name=t("squad.xml", locale), value=t("Not linked", locale), inline=False)
+        try:
+            person = await s.links.person(target.id) if s.links is not None else None
+        except SupervisorError:
+            person = None
+            embed.add_field(name=t("squad.xml", locale), value=t("The app can't be reached right now. Try again in a "
+                                                                 "few minutes.", locale), inline=False)
         else:
-            value = link.nick + (f" · Steam ID {link.steam_id}" if details else "")
+            uid = (person or {}).get("steam_uid")
+            if not uid:
+                value = t("Not linked", locale)
+            else:
+                value = t("Linked", locale) if person.get("steam_state") == "confirmed" else \
+                    t("Linked, waiting for staff to confirm", locale)
+                value += f" · Steam ID {uid}" if details else ""
             embed.add_field(name=t("squad.xml", locale), value=value, inline=False)
         roles = {role.id for role in getattr(target, "roles", ())}
         ids = s.ids
