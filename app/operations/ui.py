@@ -365,6 +365,8 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
         if kind in ("internal", "hosted"):
             shown.append("autoend")
     shown += [a for a in ("publish", "submit", "withdraw", "copy", "delete", "cancel") if a in actions]
+    if "end_operation" in actions:
+        shown.append("end")
     return shown
 
 
@@ -418,10 +420,11 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
               t("Don't end automatically: off", locale),
               "publish": t("Publish", locale), "submit": t("Send for approval", locale),
               "withdraw": t("Withdraw request", locale), "copy": t("Copy operation", locale),
-              "delete": t("Delete draft", locale), "cancel": t("Cancel operation", locale)}
+              "delete": t("Delete draft", locale), "cancel": t("Cancel operation", locale),
+              "end": t("End operation", locale)}
     view = discord.ui.View(timeout=None)
     for section in panel_sections(op):
-        style = discord.ButtonStyle.danger if section in ("cancel", "delete") else \
+        style = discord.ButtonStyle.danger if section in ("cancel", "delete", "end") else \
             discord.ButtonStyle.success if section in ("publish", "submit") else discord.ButtonStyle.secondary
         view.add_item(PanelAction(op["id"], section, labels[section], style))
     return "\n".join(lines)[:2000], view
@@ -564,6 +567,16 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
 
         await interaction.response.send_modal(TextModal(interaction, t("Cancel operation", locale), "", 500, save,
                                                         label=t("Reason", locale)))
+
+    async def _end(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """After the start: the operation ends now and the attendance is read shortly after."""
+        await thinking(interaction)
+        s = services(interaction)
+        await act(interaction, lambda me: s.supervisor.end_operation(me, op["id"]))
+        s.staff.post(t("{member} ended {title}.", s.settings.language, member=interaction.user.mention,
+                       title=render.plain(op["title"])))
+        await reply(interaction, t("The operation has ended; the attendance report follows shortly.",
+                                   interaction.locale))
 
     async def _delete(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await reply(interaction, t("Delete the draft {title}? This can't be undone.", interaction.locale,

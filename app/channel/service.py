@@ -44,6 +44,7 @@ from app.i18n import t
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
+from app.attendance import ui as attendance_ui
 from app.operations.ui import panel_view
 from app.signup import ui as signup_ui
 from app.supervisor_client import SupervisorClient, SupervisorError
@@ -52,6 +53,7 @@ ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, the sign-up closed
 SIGNUP_KIND = "signup_open"  # the sign-up opens: the roles pinged in the thread
 DRAW_KIND = "draw_retry"  # a redraw that couldn't get the operation's files: tried again
+RATING_KIND = "rating_close"  # the rating window closes: drawn again, without Rate (the supervisor writes no change)
 REMINDER_KIND = "reminder"  # times.reminder_minutes before the assembly: the slot holders (or Coming) pinged
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
@@ -151,6 +153,7 @@ class OperationChannels:
         scheduler.register(CLOSE_KIND, self._redraw_action)
         scheduler.register(SIGNUP_KIND, self._signup_action)
         scheduler.register(DRAW_KIND, self._redraw_action)
+        scheduler.register(RATING_KIND, self._redraw_action)
         scheduler.register(REMINDER_KIND, self._reminder_action)
 
     # ---------------------------------------------------------------- helpers
@@ -386,6 +389,8 @@ class OperationChannels:
         pages = [key for key in messages if key.startswith("orbat:")]
         if pages:  # the sign-up buttons under the last ORBAT message (None: removed, as on a cancelled operation)
             messages[pages[-1]].view = signup_ui.buttons(row.operation, self.language, ctx.now)
+        if "report" in messages:  # Rate (while open) and Edit attendance under the report
+            messages["report"].view = attendance_ui.report_buttons(row.operation, self.language, ctx.now)
         attached = dict(row.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
@@ -482,6 +487,9 @@ class OperationChannels:
         elif not published:
             await self.scheduler.cancel(f"{SIGNUP_KIND}:{op_id}")
         await self._schedule_reminders(op, published, now)
+        closes = render.when(op.get("rating") or {}, "closes_at")
+        if closes is not None and closes > now:
+            await self.scheduler.schedule(RATING_KIND, closes, key=f"{RATING_KIND}:{op_id}", operation_id=op_id)
         if row.archived_at is not None:
             return
         if op["status"] == "cancelled":
@@ -509,7 +517,7 @@ class OperationChannels:
         """Gone in the supervisor: a channel never published is deleted, one that was is archived."""
         channel = self._channel(row)
         await self.scheduler.cancel_all(REMINDER_KIND, row.operation_id)
-        for kind in (ARCHIVE_KIND, CLOSE_KIND, SIGNUP_KIND, DRAW_KIND):
+        for kind in (ARCHIVE_KIND, CLOSE_KIND, SIGNUP_KIND, DRAW_KIND, RATING_KIND):
             await self.scheduler.cancel(f"{kind}:{row.operation_id}")
         if channel is not None and row.thread_id and row.archived_at is None:
             await self.archive(row.operation_id)

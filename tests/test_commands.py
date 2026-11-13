@@ -17,10 +17,10 @@ async def test_privacy_answers_privately_in_the_members_language(services):
     await invoke(cog.privacy, cog, polish)
     (sent,) = polish.replies
     assert sent.kwargs["ephemeral"] is True
-    assert "Co bot o Tobie zapisuje" in sent.kwargs["embed"].description
+    assert "Co jest o Tobie zapisane" in sent.kwargs["embed"].description
     english = FakeInteraction(services, FakeMember(1), ENGLISH)
     await invoke(cog.privacy, cog, english)
-    assert "What the bot stores" in english.replies[0].kwargs["embed"].description
+    assert "What is stored about you" in english.replies[0].kwargs["embed"].description
 
 
 async def test_a_long_privacy_text_is_split_into_messages(services):

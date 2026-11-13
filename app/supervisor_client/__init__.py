@@ -390,6 +390,37 @@ class SupervisorClient:
         """The server's missions (``name``, ``terrain``, ``size`` ...)."""
         return await self.request("GET", "/api/operations/missions", act_as=act_as)
 
+    # ---------------------------------------------------------------- attendance, ratings, reports, erasure (act-as)
+
+    async def end_operation(self, act_as: int, op_id: int) -> dict[str, Any]:
+        """*End operation* (its organisers, after the start): the attendance is read shortly after."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/end", act_as=act_as)
+
+    async def correct_attendance(self, act_as: int, op_id: int, person_ids: list[int], status: str) -> dict[str, Any]:
+        """``attended``, ``no_show`` or ``excused`` for these persons (one missing from the report is added)."""
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/attendance", act_as=act_as,
+                                  json={"person_ids": [int(p) for p in person_ids], "status": status})
+
+    async def rate(self, act_as: int, op_id: int, stars: int, comment: str) -> dict[str, Any]:
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/rating", act_as=act_as,
+                                  json={"stars": int(stars), "comment": comment[:1000]})
+
+    async def report(self, act_as: int, kind: str, who: str | int) -> dict[str, Any]:
+        """``member`` or ``maker`` (``me`` or a person id), ``group`` (a group id): what the member may see of it."""
+        assert kind in ("member", "maker", "group")
+        return await self.request("GET", f"/api/operations/reports/{kind}/{_segment(who)}", act_as=act_as)
+
+    async def attendance_totals(self, act_as: int, days: int, csv: bool = False) -> Any:
+        """Per person, the operations started in the last ``days`` (0: all); staff. ``csv``: the text."""
+        return await self.request("GET", "/api/operations/reports/attendance", act_as=act_as,
+                                  params={"days": str(int(days)), "format": "csv" if csv else "json"})
+
+    async def erase_member(self, act_as: int, discord_id: int) -> dict[str, Any]:
+        """Erase a member (Manage users; never one's own account): ``former``, ``number``; an ``erased`` notice
+        follows, which empties what the bot holds."""
+        return await self.request("POST", "/api/members/erase", act_as=act_as,
+                                  json={"discord_id": str(int(discord_id)), "confirm": True})
+
     # ---------------------------------------------------------------- approval (act-as)
 
     async def approve_request(self, act_as: int, request_id: int) -> dict[str, Any]:

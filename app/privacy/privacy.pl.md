@@ -1,16 +1,13 @@
-**Co bot o Tobie zapisuje**
-- Twoje Steam ID i nick do squad.xml, jeśli powiążesz konto przez `/link`.
-- Zapisy na eventy (sloty, „może”, „nie mogę”, rezerwa) i frekwencję z serwera (kto grał i jak długo).
-- Oceny misji, które wystawisz, z komentarzem.
-- Wiadomości na kanałach eventów i w ich wątkach, gdy kanał trafi do archiwum w bazie (po ok. roku).
+**Co jest o Tobie zapisane**
+- W aplikacji grupy (bot przekazuje do niej Twoje kliknięcia i komendy): Twoja nazwa i role na Discordzie, Twoje konto, Steam ID i nick do squad.xml, jeśli powiążesz konto przez `/link`, zapisy na operacje (sloty, „może”, „nie mogę”, rezerwa), frekwencja z serwera (kto grał i jak długo) oraz oceny misji, które wystawisz, z komentarzem.
+- W bocie: przypomnienia o powiązaniu Steam, które Ci wysłał, oraz Twoje wiadomości na kanałach operacji i w ich wątkach, gdy kanał trafi do jego archiwum (po ok. roku).
 
-**Co bot publikuje**
-- squad.xml: Steam ID, nick, nazwa użytkownika Discord i specjalizacje. Plik jest publiczny, pod adresem podanym przy `/link`.
+**Co jest publikowane**
+- squad.xml: Steam ID, nick, nazwa użytkownika Discord i uwagi. Plik jest publiczny, pod adresem podanym przy `/link`.
 
 **Jak długo**
-- Bez limitu: dane eventów i frekwencja służą statystykom grupy.
-- Powiązanie Steam znika samo, gdy stracisz rangę na dłużej (domyślnie 90 dni).
+- Bez limitu: operacje i frekwencja służą statystykom grupy.
 - Kopie zapasowe bazy wygasają po kilkunastu dniach.
 
 **Usunięcie danych**
-- Napisz do administracji bota. Twoje Steam ID i konto Discord zostaną zastąpione pseudonimem we wszystkich danych, powiązanie Steam usunięte, a Twoje wiadomości w archiwum wyczyszczone. Statystyki dawnych eventów zostają, ale nie wskazują już na Ciebie.
+- Napisz do administracji. Twoje konto zostanie usunięte, w zapisach, frekwencji i ocenach staniesz się pseudonimem (former:<n>), powiązanie Steam zniknie, a Twoje wiadomości w archiwum zostaną wyczyszczone. Statystyki dawnych operacji zostają, ale nie wskazują już na Ciebie.

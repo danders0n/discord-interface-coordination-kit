@@ -1,6 +1,7 @@
 """Saying the supervisor's notices on Discord (docs/PLAN-front-end.md, *Notices*): one handler per kind, added to
 :class:`~app.notices.service.Notices` by :meth:`Delivery.install`: the login link (a DM), staff-log notes (the held
-roster push, Steam links, ``activity``), and the pings of ``cancelled`` and ``slot_lost`` in the operation's thread.
+roster push, Steam links, ``activity``, ``attendance_reported``, ``profile_failed``), the pings of ``cancelled``,
+``slot_lost`` and ``attendance_unconfirmed`` in the operation's thread, and ``erased`` (what the bot holds of them).
 Offers are app.signup.offers's, requests, decisions and stale drafts app.approval.moderation's."""
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import discord
 from app.channel import render
 from app.i18n import t
 from app.notices.service import Later, Notices, Outcome, delivered, failed
+from app.privacy.erase import erase
 from app.supervisor_client import SupervisorError, SupervisorUnreachable
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,10 @@ class Delivery:
         notices.register("activity", self.activity)
         notices.register("cancelled", self.cancelled)
         notices.register("slot_lost", self.slot_lost)
+        notices.register("attendance_reported", self.attendance_reported)
+        notices.register("attendance_unconfirmed", self.attendance_unconfirmed)
+        notices.register("profile_failed", self.profile_failed)
+        notices.register("erased", self.erased)
         if offers is not None:
             notices.register("offer", offers.deliver)
         if moderation is not None:
@@ -143,6 +149,44 @@ class Delivery:
         title = render.plain((notice.get("data") or {}).get("title") or "?")
         return await self._ping(notice, t("Your slot in {title} was removed from the ORBAT; you are first on the "
                                           "reserve list.", self.language, title=title))
+
+    async def attendance_reported(self, notice: dict[str, Any]) -> Outcome:
+        """The report itself comes with the feed (the channel's ``report``); the staff log gets the counts."""
+        data = notice.get("data") or {}
+        counts = data.get("counts") or {}
+        parts = [f"{render.status_name(status, self.language)} {count}" for status, count in counts.items() if count]
+        if data.get("guests"):
+            parts.append(t(("{count} guest", "{count} guests"), self.language, count=int(data["guests"])))
+        self.s.staff.post(t("Attendance of {title}: {counts}.", self.language,
+                            title=render.plain(data.get("title") or "?"), counts=", ".join(parts) or "—"))
+        return delivered()
+
+    async def attendance_unconfirmed(self, notice: dict[str, Any]) -> Outcome:
+        """A guest operation's players still to confirm: the organisers, in the thread."""
+        data = notice.get("data") or {}
+        return await self._ping(notice, t(("{title}: {count} player still waits to be confirmed in the attendance "
+                                           "report: Edit attendance.",
+                                           "{title}: {count} players still wait to be confirmed in the attendance "
+                                           "report: Edit attendance."), self.language,
+                                          title=render.plain(data.get("title") or "?"),
+                                          count=int(data.get("to_confirm") or 0)))
+
+    async def profile_failed(self, notice: dict[str, Any]) -> Outcome:
+        data = notice.get("data") or {}
+        self.s.staff.post(t("The server profile of {title} couldn't be built: {reason}", self.language,
+                            title=render.plain(data.get("title") or "?"), reason=str(data.get("reason") or "?")[:500]))
+        return delivered()
+
+    async def erased(self, notice: dict[str, Any]) -> Outcome:
+        """A member erased (from /privacy-erase or in the app): what the bot holds of them, under the app's number."""
+        data = notice.get("data") or {}
+        discord_id, former = str(data.get("discord_id") or ""), str(data.get("former") or "")
+        number = former.partition(":")[2]
+        if not discord_id.isdigit() or not number.isdigit():
+            return failed("no_discord_id")
+        done = await erase(self.s.db, int(discord_id), int(number))
+        log.info("Erased what the bot held of former:%s (%s archived messages)", done.number, done.messages)
+        return delivered()
 
     async def roster_guard(self, notice: dict[str, Any]) -> Outcome:
         data = notice.get("data") or {}

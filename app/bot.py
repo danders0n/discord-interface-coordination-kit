@@ -18,6 +18,8 @@ from app.admin.cog import AdminCog
 from app.approval.moderation import Moderation
 from app.approval.ui import ApprovalAction
 from app.archive.cog import ArchiveCog
+from app.attendance.cog import AttendanceCog
+from app.attendance.ui import ReportAction
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService
 from app.channel.service import OperationChannels
@@ -183,11 +185,12 @@ class EventBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction, CreateOperation,
-                               PanelButton, PanelAction)  # outlive a restart
+                               PanelButton, PanelAction, ReportAction)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),
-                    ArchiveCog(self.services), SlotCog(self.services), OperationCog(self.services)):
+                    ArchiveCog(self.services), SlotCog(self.services), OperationCog(self.services),
+                    AttendanceCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before

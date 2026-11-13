@@ -13,14 +13,6 @@ from contract_check import CONTRACT, problems, request_problems, routes
 from fake_supervisor import make_app
 
 SUPERVISOR = Path(__file__).resolve().parents[2] / "arma-server-supervisior" / "docs" / "api" / "openapi-bot.json"
-# The supervisor's phase 5 (attendance, ratings, reports, erasure): the fake serves them with the bot's members and
-# history step (docs/PLAN-front-end.md, phase 5). Every other contract route it serves now.
-PENDING = {
-    ("GET", "/api/operations/reports/attendance"), ("GET", "/api/operations/reports/group/{group_id}"),
-    ("GET", "/api/operations/reports/maker/{who}"), ("GET", "/api/operations/reports/member/{who}"),
-    ("POST", "/api/members/erase"), ("POST", "/api/operations/{op_id}/end"),
-    ("PUT", "/api/operations/{op_id}/attendance"), ("PUT", "/api/operations/{op_id}/rating"),
-}
 
 
 def fake_routes() -> set[tuple[str, str]]:
@@ -35,7 +27,7 @@ def fake_routes() -> set[tuple[str, str]]:
 
 
 def test_the_fake_serves_every_contract_route():
-    assert routes() - fake_routes() == PENDING
+    assert routes() - fake_routes() == set()
 
 
 def test_the_fake_serves_nothing_outside_the_contract():

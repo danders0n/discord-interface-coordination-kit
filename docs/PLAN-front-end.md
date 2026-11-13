@@ -1,8 +1,8 @@
 # Plan: the bot as the supervisor's Discord front end
 
-Status: building on `feature/front-end`; steps 1–6 are done (*As built*): the old event stack is gone, the channels
-are drawn from the supervisor's change feed, members sign up, take offers and approve on Discord, and organisers
-create and run operations there (this plan's phases 1–4). Next: phase 5. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
+Status: building on `feature/front-end`; steps 1–7 are done (*As built*): this plan's phases 1–5. The channels are
+drawn from the supervisor's change feed; members sign up, take offers, rate and approve on Discord; organisers create
+and run operations there; attendance, reports and erasure go through the supervisor. Next: phase 6, the release. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
 (`D:\Workspace\python\arma-server-supervisior`, interviews 2026-11-11 and 2026-11-12), which is the source of
 every rule about operations, people and permissions. This plan says what changes **in this repo**.
 
@@ -493,12 +493,49 @@ The rest of this plan's phase 4.
     `missing` as `opord.situation` …, a `PATCH` of an approved member's times as a `times` request with `proposal`, and
     a preset upload with its mods and `staged`.
 
+### Step 7: attendance, ratings, reports, erasure (2026-11-14)
+
+This plan's phase 5, on the supervisor's phase 5 (`6c48fe2`). The fake serves every contract route now (`PENDING` is
+gone): *End operation*, corrections, ratings, the four reports, the erasure; its `State.report()` reports an
+operation's attendance as the supervisor does.
+
+- **Client:** `end_operation`, `correct_attendance`, `rate`, `report` (member, maker, group), `attendance_totals`,
+  `erase_member`; all act-as.
+- **Report** (`render.report`, keyed `report`, after the ORBAT): attended, no-show, excused, to confirm, played
+  without a slot, not linked (with *probably …*), guests, the rating (not for a guest operation), the minimum mission
+  time; from the operation's `attendance` and `rating`. Under it (`app/attendance/ui.py`, `attendance:<op>:rate|edit`):
+  *Rate the mission* (guest: *the cooperation*) while the window is open, judged from `rating.closes_at` and the clock,
+  and a `rating_close` action redraws at the closing (the supervisor writes no change then); *Edit attendance* always.
+  A press reads the operation in the member's name: *Rate* needs `rate` in `my.actions` (else why: not open, closed,
+  only attendees), the modal is filled with `my.rating`; *Edit* needs `correct`, then a status and a member picker
+  (members become persons through `GET /api/members`, so someone missing from the report is added).
+- **Panel:** *End operation* (`end_operation`, after the start), with a staff-log note.
+- **Commands** (`app/attendance/cog.py`): `/attendance [member]`, `/profile [member]`, `/mission-maker [member]`,
+  `/group group` (autocomplete from the groups, by id), `/attendance-report period` (Manage Server visibility; the
+  supervisor's staff rule decides) with a CSV the bot writes from the JSON (cells guarded against formulas). What each
+  shows is what the supervisor returns for the member (details about oneself and for staff).
+- **Notices:** `attendance_reported` (a staff-log line with the counts; the report itself comes with the feed),
+  `attendance_unconfirmed` (the organisers pinged in the thread), `profile_failed` (a staff-log note), `erased` (what
+  the bot holds of that Discord id, under the supervisor's `former:<n>`).
+- **Erasure:** `/privacy-erase member` asks, then erases in the supervisor in the staff member's name (it needs Manage
+  users there and refuses one's own account); its `erased` notice empties the bot's link reminders and archived
+  messages, so both name the member alike. A member the supervisor never knew (`not_found`) loses only the bot's data,
+  and only for *bot admin*. The bot's own counter stays above the supervisor's numbers it has seen.
+- **Archive:** `/archive event` is open to the participants too (slot holders, Coming, the report's people, from the
+  operation as last drawn).
+- **`/privacy`:** rewritten for the front end: what the app keeps and what the bot keeps (reminders, the archive), and
+  erasure through staff. The old Steam-link expiry, gone since step 2, is out of it.
+- **Decisions taken while building:**
+  - Members can't erase themselves from Discord: the supervisor's erasure needs Manage users and refuses one's own
+    account, so `/privacy-erase` stays a staff command and `/privacy` says to ask staff.
+  - *Edit attendance* is always on the report and answers non-organisers in words (as the sign-up buttons do), rather
+    than a second report message for organisers.
+
 ### Next
 
-Phase 5 on the supervisor's phase 5 (the 8 `PENDING` routes): the attendance report in the channel with *Edit
-attendance* and *Rate*, *End operation* in the panel, `/attendance`, `/profile`, `/mission-maker`, `/group`,
-`/attendance-report`, `/privacy-erase` through the supervisor, the `attendance_reported`, `attendance_unconfirmed`,
-`profile_failed` and `erased` notices, and `/archive event` for participants.
+Phase 6, the release: the scratch-supervisor test instance (the first run against the real supervisor), the README
+(the bot's supervisor account with the `integration` role, the removed settings), `docs/PLAN.md` marked as replaced
+for data and rules, a last `CLAUDE.md` pass, and the merge with the supervisor's operations work.
 
 ## Not in this plan
 

@@ -5,8 +5,9 @@ Pure functions: an operation and a :class:`Context` in, :class:`Message` payload
 ``info`` (an embed), the OPORD's paragraphs (``situation``, ``mission``, ``execution``, ``sustainment``, ``command``;
 each its own message, continued in ``<paragraph>:1`` ... past Discord's 2000 characters; the banner and the map go
 with the first), ``preset`` (the launcher file), then ``orbat:0`` ... (the ORBAT, or a Zeus or training operation's
-Coming list; the sign-up buttons go on the last, see ``app.signup.ui``), and the link to the discussion thread last
-(Discord's own "started a thread" card while it is still last, see ``sync``).
+Coming list; the sign-up buttons go on the last, see ``app.signup.ui``), ``report`` (the attendance, once the
+supervisor has it, with *Rate* and *Edit attendance*, see ``app.attendance.ui``), and the link to the discussion
+thread last (Discord's own "started a thread" card while it is still last, see ``sync``).
 The paragraphs are the organisers' Markdown, shown as Discord renders it; an unwritten one is left out. Everything is
 in the public language; mentions are sent without pinging, and edits never ping."""
 
@@ -294,6 +295,78 @@ def signup_messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     return {f"orbat:{number}": page for number, page in enumerate(pages)}
 
 
+def participants(op: dict[str, Any]) -> list[int]:
+    """The Discord ids of those who took part: slot holders, Coming, and everyone in the attendance report."""
+    entries = [slot.get("holder") for squad in op.get("orbat") or [] for slot in squad.get("slots") or []]
+    entries += (op.get("signups") or {}).get("coming") or []
+    entries += [e.get("person") for e in (op.get("attendance") or {}).get("entries") or []]
+    found = [str((e or {}).get("discord_id") or "") for e in entries]
+    return list(dict.fromkeys(int(i) for i in found if i.isdigit()))
+
+
+def status_name(status: str, language: str) -> str:
+    return {"attended": t("Attended", language), "no_show": t("No-show", language), "excused": t("Excused", language),
+            "to_confirm": t("To confirm", language), "not_linked": t("Not linked", language),
+            "walk_in": t("Played without a slot", language)}.get(status, status)
+
+
+def stars(average: float | None, count: int, language: str) -> str:
+    if average is None:
+        return t("no ratings yet", language)
+    return t(("{average} ★ ({count} rating)", "{average} ★ ({count} ratings)"), language, average=f"{average:.1f}",
+             count=count)
+
+
+def _items(items: list[str], language: str, limit: int = 1000) -> str:
+    """Items that fit ``limit`` characters, then "and N more"."""
+    out, used = [], 0
+    for index, item in enumerate(items):
+        if used + len(item) + 2 > limit:
+            return ", ".join(out) + " " + t("and {count} more", language, count=len(items) - index)
+        out.append(item)
+        used += len(item) + 2
+    return ", ".join(out) or "—"
+
+
+def report(op: dict[str, Any], ctx: Context) -> Message | None:
+    """The attendance report (docs/PLAN.md, *Supervisor: attendance*, *Report*), once the supervisor has one."""
+    attendance, language = op.get("attendance") or {}, ctx.language
+    if attendance.get("state") not in ("reported", "unavailable"):
+        return None
+    embed = discord.Embed(title=t("Attendance", language), colour=COLOURS["ended"])
+    if attendance["state"] == "unavailable":
+        embed.description = t("The server's statistics couldn't be read; the organisers can fill the attendance in "
+                              "with Edit attendance.", language)
+    entries = attendance.get("entries") or []
+
+    def who(entry: dict[str, Any]) -> str:
+        return person(entry["person"]) if entry.get("person") else plain(entry.get("name") or entry.get("steam_id") or "?")
+
+    for status in ("attended", "no_show", "excused", "to_confirm", "walk_in"):
+        found = [who(e) for e in entries if e.get("status") == status]
+        if found:
+            embed.add_field(name=f"{status_name(status, language)} ({len(found)})", value=_items(found, language),
+                            inline=False)
+    unlinked = [who(e) + (" (" + t("probably {name}", language, name=plain(e["probable_name"])) + ")"
+                          if e.get("probable_name") else "") for e in entries if e.get("status") == "not_linked"]
+    if unlinked:
+        embed.add_field(name=f"{status_name('not_linked', language)} ({len(unlinked)})",
+                        value=_items(unlinked, language), inline=False)
+    if attendance.get("guests"):
+        embed.add_field(name=t("Guests", language), value=t(("{count} player", "{count} players"), language,
+                                                            count=int(attendance["guests"])), inline=False)
+    if not embed.fields and not embed.description:
+        embed.description = t("Nobody played.", language)
+    rating = op.get("rating") or {}
+    if op["kind"] != "guest" and rating.get("count"):
+        embed.add_field(name=t("Rating", language), value=stars(rating.get("average"), int(rating["count"]), language),
+                        inline=False)
+    if op["kind"] != "guest" and attendance["state"] == "reported" and attendance.get("min_minutes"):
+        embed.set_footer(text=t("Attended: at least {minutes} min of mission time.", language,
+                                minutes=attendance["min_minutes"]))
+    return Message(content="​", embeds=[embed])  # the empty line above it
+
+
 def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     """Every message of the channel, keyed in channel order."""
     found = {"info": info(op, ctx)}
@@ -304,6 +377,9 @@ def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
         found["preset"] = Message(content=t("Modset for the Arma 3 Launcher: {name}", ctx.language, name=plain(name)),
                                   files=[preset])
     found |= signup_messages(op, ctx)
+    drawn = report(op, ctx)
+    if drawn is not None:
+        found["report"] = drawn
     if ctx.thread_id:
         found["discussion"] = Message(content=f"💬 <#{ctx.thread_id}>")
     return found

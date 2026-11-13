@@ -4,8 +4,8 @@ Discord allows 500 channels per server, so only the current quarter and the ones
 all) stay as channels. An older quarter's operations move into the database: the operation itself is the
 supervisor's (and its last copy is in ``operation_channel``), and the exporter adds the **transcript** (every message
 not posted by the bot, in the channel and its thread) and downloads the attachments, then deletes the channel.
-``/archive event`` reads it back as an HTML file, for the operation's organisers and *bot admin* roles (its
-participants too once the supervisor's operation lists them: docs/PLAN-front-end.md, phase 5)."""
+``/archive event`` reads it back as an HTML file, for the operation's organisers and participants (slot holders,
+Coming, the attendance report's people, as the operation was last drawn) and the *bot admin* roles."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select
 
-from app.channel.render import organisers
+from app.channel.render import organisers, participants
 from app.db import Database
 from app.db.models import ArchivedMessage, OperationChannel
 from app.permissions import Access, Perm
@@ -101,7 +101,8 @@ class ArchiveService:
 
     @staticmethod
     def _may(row: OperationChannel, member_id: int) -> bool:
-        return member_id in organisers(row.operation or {})
+        op = row.operation or {}
+        return member_id in organisers(op) or member_id in participants(op)
 
     async def readable(self, member_id: int, access: Access, text: str = "", limit: int = 25) -> list[OperationChannel]:
         """The exported operations this member may read, newest first, whose title or date (dd.mm.yyyy) has

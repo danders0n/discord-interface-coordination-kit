@@ -20,8 +20,9 @@ the supervisor owns operations (the bot's events), sign-ups, approval, attendanc
 the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–5 are done: the roster, notices, live events,
 Steam links, the supervisor check, the operation channels drawn from the change feed (the old event stack is
 deleted), the ORBAT with its sign-up buttons, `/slot`, offers, reminders and the moderation thread, and the wizard,
-the organiser panel, `/operation preset | image | mission` and `/operations` (steps 1–6). Next: phase 5, attendance,
-ratings, reports and erasure (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
+the organiser panel, `/operation preset | image | mission` and `/operations`, and attendance, ratings, the report
+commands and erasure (steps 1–7, the plan's phases 1–5). Next: phase 6, the release against the real supervisor
+(*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
 data rules moved to the supervisor. Read the relevant section before implementing a feature, and keep the plans and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
 
@@ -82,8 +83,8 @@ exactly the settings.
 - `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (act-as, the roster, notices, the stream, the
   operations' feed, `meta`, files and plumbing), capabilities, heartbeat loop.
 - Domains: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a
-  confirmation, `erase.py` emptying what the bot holds: link reminders, archived messages, as `former:<n>` stored
-  as `-n`).
+  confirmation, erasing in the supervisor in the staff member's name; `erase.py` emptying what the bot holds when
+  the `erased` notice comes: link reminders, archived messages, as the supervisor's `former:<n>` stored as `-n`).
 - `app/operations/`: `feed.py` (`Feed`: `GET /api/operations/changes` oldest first into the channels, the cursor in
   `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`),
   `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next day, aware UTC
@@ -110,6 +111,9 @@ exactly the settings.
   notice by DM or thread, `delivered`, the message closed when the offer ends; table `offer_message`).
 - `app/approval/`: `ui.py` (the request embed, `ApprovalAction`, `RejectModal`), `moderation.py` (`Moderation`: the
   moderation thread, the request / decision / stale-draft notices; table `moderation_message`).
+- `app/attendance/`: `ui.py` (the report's `ReportAction` *Rate* / *Edit attendance*, `RateModal`, `Editor`), `cog.py`
+  (`/attendance`, `/profile`, `/mission-maker`, `/group`, `/attendance-report`, from the supervisor's reports). The
+  report message itself is `render.report`.
 - `app/links/` (the links and squad.xml are the supervisor's): `service.py` (`LinkService`: the member's own link
   through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` read from `GET /api/members`,
   and the reminder bookkeeping in `link_reminder` with the rollout flag), `ui.py` (*Link now* `link:now`, the

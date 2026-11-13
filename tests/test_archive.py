@@ -19,7 +19,7 @@ from app.archive.cog import ArchiveCog
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService, quarter, quarter_name
 from app.db.models import ArchivedMessage
-from app.privacy.cog import ConfirmErase
+from app.notices.deliver import Delivery
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 8000  # inlined about 11 kB, zipped far less
 ENGLISH = discord.Locale.british_english
@@ -141,9 +141,9 @@ async def test_an_erasure_empties_the_members_archived_messages(stack, archive, 
     at(clock, fake, datetime(2027, 11, 3, 5, 0, tzinfo=UTC))
     await run(stack)
     picture = Path((await archive.messages(drawn.operation_id))[1].attachments[0]["path"])
-    view = ConfirmErase(stack, 1, None)
-    await view._erase(asking(stack, guild, member(guild, 30, ADMIN)))
+    erased = await Delivery(stack, lambda: guild).erased({"data": {"discord_id": "1", "former": "former:4"}})
+    assert erased == ("delivered", None)
     async with stack.db.session() as session:
         rows = (await session.execute(select(ArchivedMessage))).scalars().all()
-    assert {(r.author_id, r.author_name, r.content) for r in rows} == {(-1, "", "")}
+    assert {(r.author_id, r.author_name, r.content) for r in rows} == {(-4, "", "")}
     assert not picture.exists()

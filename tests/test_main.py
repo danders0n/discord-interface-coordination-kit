@@ -91,7 +91,7 @@ async def test_setup_registers_the_guild_commands_and_starts_the_tasks(services,
     await bot.setup_hook()
     names = {c.name for c in bot.tree.get_commands(guild=bot.guild_object)}
     assert names == {"reload", "privacy", "link", "unlink", "links", "privacy-erase", "archive", "slot", "operation",
-                     "operations"}
+                     "operations", "attendance", "profile", "mission-maker", "group", "attendance-report"}
     assert bot.tree.get_commands() == []
     assert synced == [services.settings.guild_id]
     translated = await bot.tree.translator.translate(app_commands.locale_str("privacy"), Locale.polish,

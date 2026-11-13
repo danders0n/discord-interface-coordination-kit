@@ -151,6 +151,9 @@ class State:
     counters: dict[str, int] = field(default_factory=dict)
     templates: list[dict[str, Any]] = field(default_factory=list)
     offer_to_all_minutes: int = 60
+    # The supervisor's phase 5: the rating window and the erasures' counter.
+    rating_days: int = 3
+    erasures: int = 0
 
     # ------------------------------------------------------------ the front end
 
@@ -219,7 +222,8 @@ class State:
               "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
-              "published_at": None, "ended_at": None, "squads": [], "signups": [], "offers": [], "requests": []}
+              "published_at": None, "ended_at": None, "squads": [], "signups": [], "offers": [], "requests": [],
+              "attendance_state": "", "reported_at": None, "guests": 0, "entries": [], "ratings": []}
         op |= fields
         self.operations[op["id"]] = op
         self._touch(op, by, ["created"], "created", revision=False)
@@ -456,6 +460,67 @@ class State:
             "assembly_at": iso(op["assembly_at"]), "start_at": iso(op["start_at"]),
             "duration_minutes": op["duration_minutes"]}}
 
+    # ------------------------------------------------------------ attendance and ratings (the supervisor's phase 5)
+
+    def report(self, op_id: int, lines: list[tuple[Any, str]], guests: int = 0) -> None:
+        """The attendance as the supervisor reports it: ``lines`` of (Discord id or a player's name, status); the
+        operation ends if it hasn't, and an ``attendance_reported`` notice goes out."""
+        op = self.operations[op_id]
+        op["entries"] = []
+        for who, status in lines:
+            person = self.persons.get(str(who))
+            op["entries"].append({"id": self._id("entry"), "person_id": person["id"] if person else None,
+                                  "status": status, "holder": person is not None and self.held(op, person["id"]) is not None,
+                                  "name": None if person else str(who),
+                                  "minutes": 90 if status in ("attended", "walk_in") else 0, "corrected_by": None})
+        op["attendance_state"], op["reported_at"], op["guests"] = "reported", self.now, guests
+        if op["status"] != "ended":
+            op["status"], op["ended_at"] = "ended", self.now
+        counts: dict[str, int] = {}
+        for entry in op["entries"]:
+            counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+        self.notice("attendance_reported", operation_id=op_id, data={"key": f"OP-{op_id}", "title": op["title"],
+                                                                     "counts": counts, "guests": guests})
+        self._touch(op, "supervisor", ["attendance", "status"], "attendance_reported", revision=False)
+
+    def rating_closes(self, op: dict[str, Any]) -> datetime | None:
+        if op["reported_at"] is None or op["attendance_state"] not in ("reported", "unavailable"):
+            return None
+        return op["reported_at"] + timedelta(days=self.rating_days)
+
+    def may_rate(self, op: dict[str, Any], person: dict[str, Any] | None) -> str | None:
+        closes = self.rating_closes(op)
+        if closes is None:
+            return "not_open"
+        if self.now >= closes:
+            return "rating_closed"
+        entries = [e for e in op["entries"] if person is not None and e["person_id"] == person["id"]]
+        ok = any(e["holder"] for e in entries) if op["kind"] == "guest" else any(
+            e["status"] in ("attended", "walk_in") for e in entries)
+        return None if ok else "not_attended"
+
+    def attendance_out(self, op: dict[str, Any], person: dict[str, Any] | None) -> dict[str, Any]:
+        if not op["attendance_state"]:
+            return {"attendance": None}
+        counts: dict[str, int] = {}
+        for entry in op["entries"]:
+            counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+        ratings = op["ratings"]
+        closes = self.rating_closes(op)
+        rating = {"average": round(sum(r["stars"] for r in ratings) / len(ratings), 2) if ratings else None,
+                  "count": len(ratings), "closes_at": iso(closes), "open": closes is not None and self.now < closes,
+                  "cooperation": op["kind"] == "guest"}
+        if person is None or self.organises(op, person) or APPROVE in person["permissions"]:
+            rating["ratings"] = [{"person": self._person(r["person_id"]), "stars": r["stars"], "comment": r["comment"]}
+                                 for r in ratings]
+        return {"attendance": {
+            "state": op["attendance_state"], "reported_at": iso(op["reported_at"]), "guests": op["guests"],
+            "counts": counts, "min_minutes": 30,
+            "entries": [{"id": e["id"], "status": e["status"], "person": self._person(e["person_id"]),
+                         "holder": e["holder"], "name": e["name"], "minutes": e["minutes"], "steam_id": None,
+                         "probable_name": None, "probable_steam_id": None, "corrected_by": e["corrected_by"]}
+                        for e in op["entries"]]}, "rating": rating}
+
     # ------------------------------------------------------------ drawing an operation
 
     def _person(self, person_id: int | None) -> dict[str, Any] | None:
@@ -530,10 +595,22 @@ class State:
         data |= board if full else {"slots": board["slots"], "signup": board["signup"]}
         if full:
             data["requests"] = [self.request_out(op, r) for r in op["requests"]]
+            data |= self.attendance_out(op, person)
         if person is not None:
             mine = self.mine(op, person)
-            data["my"] = {"organiser": self.organises(op, person),
-                          "actions": self.actions(op, person) + mine.pop("signup_actions"), **mine}
+            actions = self.actions(op, person) + mine.pop("signup_actions")
+            if op["attendance_state"]:
+                entry = next((e for e in op["entries"] if e["person_id"] == person["id"]), None)
+                rated = next((r for r in op["ratings"] if r["person_id"] == person["id"]), None)
+                mine["attendance"] = entry["status"] if entry else None
+                mine["rating"] = {"stars": rated["stars"], "comment": rated["comment"]} if rated else None
+                if self.may_rate(op, person) is None:
+                    actions.append("rate")
+                if op["attendance_state"] in ("reported", "unavailable") and self.organises(op, person):
+                    actions.append("correct")
+            if op["status"] == "published" and self.now >= op["start_at"] and self.organises(op, person):
+                actions.append("end_operation")
+            data["my"] = {"organiser": self.organises(op, person), "actions": actions, **mine}
         return data
 
     def may_see(self, op: dict[str, Any], person: dict[str, Any] | None) -> bool:
@@ -1454,6 +1531,180 @@ def make_app(state: State | None = None) -> web.Application:
         state._touch(op, _actor(request), ["status", "requests"], "withdrawn", revision=False)
         return _reply(op, request)
 
+    # ------------------------------------------------------------ attendance, ratings, reports, erasure (phase 5)
+
+    async def end_operation(request: web.Request) -> web.Response:
+        op = _organised(request)
+        if isinstance(op, web.Response):
+            return op
+        if op["status"] != "published":
+            return _refuse("closed", f"OP-{op['id']} is {op['status']}")
+        if state.now < op["start_at"]:
+            return _refuse("not_started", f"OP-{op['id']} has not started: cancel it instead")
+        op["status"], op["ended_at"], op["attendance_state"] = "ended", state.now, "waiting"
+        state._touch(op, _actor(request), ["status", "attendance"], "ended", revision=False)
+        return _reply(op, request)
+
+    async def correct_attendance(request: web.Request) -> web.Response:
+        op = _organised(request)
+        if isinstance(op, web.Response):
+            return op
+        if op["attendance_state"] not in ("reported", "unavailable"):
+            return _refuse("no_report", f"OP-{op['id']} has no attendance report yet")
+        body = await request.json()
+        for person_id in body["person_ids"]:
+            if state.by_person(person_id) is None:
+                return _refuse("unknown_person", f"Person {person_id} not found", 404)
+            entry = next((e for e in op["entries"] if e["person_id"] == person_id), None)
+            if entry is None:
+                entry = {"id": state._id("entry"), "person_id": person_id, "holder": False, "name": None, "minutes": 0}
+                op["entries"].append(entry)
+            if entry.get("status") in ("attended", "walk_in") and body["status"] != "attended":
+                op["ratings"] = [r for r in op["ratings"] if r["person_id"] != person_id]
+            entry["status"], entry["corrected_by"] = body["status"], _actor(request)
+        state._touch(op, _actor(request), ["attendance"], "attendance_corrected", revision=False)
+        return _reply(op, request)
+
+    async def rate(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        person = _person(request)
+        refused = state.may_rate(op, person)
+        if refused is not None:
+            return _refuse(refused, "You can't rate this operation now")
+        body = await request.json()
+        op["ratings"] = [r for r in op["ratings"] if r["person_id"] != person["id"]]
+        op["ratings"].append({"person_id": person["id"], "stars": body["stars"], "comment": body.get("comment", "")})
+        state._touch(op, _actor(request), ["ratings"], "rated", revision=False)
+        return _reply(op, request)
+
+    def _who(request: web.Request) -> dict[str, Any] | web.Response:
+        who = request.match_info["who"]
+        person = _person(request) if who == "me" else (state.by_person(int(who)) if who.isdigit() else None)
+        if person is None:
+            return _error(404, f"Person {who} not found", code="unknown_person")
+        return person
+
+    def _staff(request: web.Request) -> bool:
+        return bool({APPROVE, "operations.manage"} & set((_person(request) or {}).get("permissions") or []))
+
+    def _op_brief(op: dict[str, Any]) -> dict[str, Any]:
+        return {"id": op["id"], "key": f"OP-{op['id']}", "title": op["title"], "kind": op["kind"],
+                "start_at": iso(op["start_at"]), "status": op["status"]}
+
+    def _average(stars: list[int]) -> float | None:
+        return round(sum(stars) / len(stars), 2) if stars else None
+
+    def _maker(person: dict[str, Any], request: web.Request) -> dict[str, Any]:
+        ops = [o for o in state.operations.values() if o["author_person_id"] == person["id"] and o["kind"] != "guest"
+               and o["status"] == "ended"]
+        stars = [r["stars"] for o in ops for r in o["ratings"]]
+        comments = _staff(request) or (_person(request) or {}).get("id") == person["id"]
+        items = []
+        for o in ops:
+            item = _op_brief(o) | {"average": _average([r["stars"] for r in o["ratings"]]), "count": len(o["ratings"])}
+            if comments:
+                item["ratings"] = [{"person": state._person(r["person_id"]), "stars": r["stars"],
+                                    "comment": r["comment"]} for r in o["ratings"]]
+            items.append(item)
+        return {"person": state._person(person["id"]), "operations": items,
+                "summary": {"missions": len(ops), "average": _average(stars), "ratings": len(stars)}}
+
+    async def report_member(request: web.Request) -> web.Response:
+        person = _who(request)
+        if isinstance(person, web.Response):
+            return person
+        mine = (_person(request) or {}).get("id") == person["id"]
+        full = mine or _staff(request)
+        rows = [(o, e["status"]) for o in sorted(state.operations.values(), key=lambda o: o["start_at"], reverse=True)
+                for e in o["entries"] if e["person_id"] == person["id"]]
+        attended = sum(s in ("attended", "walk_in") for _, s in rows)
+        no_show = sum(s == "no_show" for _, s in rows)
+        record: dict[str, Any] = {"attended": attended,
+                                  "rate": round(attended / (attended + no_show), 3) if attended + no_show else None}
+        if full:
+            record |= {"no_show": no_show, "excused": sum(s == "excused" for _, s in rows),
+                       "recent": [_op_brief(o) | {"attendance": s} for o, s in rows[:10]]}
+        out: dict[str, Any] = {"person": state._person(person["id"]), "mine": mine, "details": full,
+                               "roles": [r["name"] for r in state.roles if str(r.get("id")) in set(person["roles"])],
+                               "attendance": record, "maker": _maker(person, request)["summary"]}
+        if full:
+            uid = person.get("steam_uid")
+            out["steam"] = {"steam_id": uid, "state": person.get("steam_state")} if uid else None
+        return web.json_response(out)
+
+    async def report_maker(request: web.Request) -> web.Response:
+        person = _who(request)
+        return person if isinstance(person, web.Response) else web.json_response(_maker(person, request))
+
+    async def report_group(request: web.Request) -> web.Response:
+        group = state._group(int(request.match_info["group_id"]))
+        if group is None:
+            return _error(404, "Group not found", code="not_found")
+        ops = [o for o in state.operations.values()
+               if (o["host_group_id"] == group["id"] or group["id"] in o["group_ids"])
+               and o["status"] in ("published", "ended")]
+        out: dict[str, Any] = {"group": group, "count": len(ops), "operations": [
+            _op_brief(o) | {"role": "host" if o["host_group_id"] == group["id"] else "invited"} for o in ops]}
+        if _staff(request):
+            ratings = [r for o in ops if o["host_group_id"] == group["id"] for r in o["ratings"]]
+            out["cooperation"] = {"average": _average([r["stars"] for r in ratings]), "count": len(ratings),
+                                  "ratings": []}
+        return web.json_response(out)
+
+    async def report_attendance(request: web.Request) -> web.Response:
+        if not _staff(request):
+            return _refuse("not_allowed", "The attendance report needs Manage or Approve operations", 403)
+        days = int(request.query.get("days", 30))
+        found: dict[int, dict[str, int]] = {}
+        for o in state.operations.values():
+            if days and o["start_at"] < state.now - timedelta(days=days):
+                continue
+            for e in o["entries"]:
+                if e["person_id"] is None:
+                    continue
+                row = found.setdefault(e["person_id"], {"attended": 0, "no_show": 0, "excused": 0})
+                key = "attended" if e["status"] in ("attended", "walk_in") else e["status"]
+                if key in row:
+                    row[key] += 1
+        rows = [{"person": state._person(pid), **row,
+                 "rate": round(row["attended"] / (row["attended"] + row["no_show"]), 3)
+                 if row["attended"] + row["no_show"] else None} for pid, row in found.items()]
+        rows.sort(key=lambda r: (-r["attended"], r["person"]["display_name"].casefold()))
+        if request.query.get("format") == "csv":
+            lines = ["username,display_name,attended,no_show,excused,rate"] + [
+                f"{r['person']['username']},{r['person']['display_name']},{r['attended']},{r['no_show']},"
+                f"{r['excused']},{'' if r['rate'] is None else r['rate']}" for r in rows]
+            return web.Response(text="\n".join(lines) + "\n", content_type="text/csv")
+        return web.json_response(rows)
+
+    async def erase_member(request: web.Request) -> web.Response:
+        actor = _person(request)
+        if actor is None or "users.manage" not in actor["permissions"]:
+            return _error(403, "Erasing needs Manage users", code="forbidden")
+        body = await request.json()
+        if not body.get("confirm"):
+            return _error(422, "Erasing can't be undone: send confirm: true")
+        person = state.persons.get(str(body.get("discord_id")))
+        if person is None:
+            return _error(404, "Nobody to erase: no such member or account", code="not_found")
+        if person.get("erased"):
+            return _error(409, f"This member was erased already ({person['erased']})", code="erased")
+        if person is actor:
+            return _error(409, "You can't erase your own account", code="self")
+        state.erasures += 1
+        former = f"former:{state.erasures}"
+        touched = sorted(o["id"] for o in state.operations.values()
+                         if person["id"] in [*o["organisers"], *(e["person_id"] for e in o["entries"])]
+                         or state.held(o, person["id"]) or state.entry(o, person["id"]))
+        account = person["account"] is not None
+        person.update(username=former, display_name=former, account=None, erased=former, steam_uid=None)
+        state.notice("erased", persons=[person["discord_id"]], data={"discord_id": person["discord_id"],
+                                                                     "former": former, "operations": touched})
+        return web.json_response({"former": former, "number": state.erasures, "account_deleted": account,
+                                  "player": False, "operations": touched})
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
     add = app.router
@@ -1518,6 +1769,14 @@ def make_app(state: State | None = None) -> web.Application:
     add.add_post("/api/operations/requests/{request_id:\\d+}/reject", reject_request)
     add.add_post("/api/operations/{op_id:\\d+}/submit", submit)
     add.add_post("/api/operations/{op_id:\\d+}/withdraw", withdraw)
+    add.add_post("/api/operations/{op_id:\\d+}/end", end_operation)
+    add.add_put("/api/operations/{op_id:\\d+}/attendance", correct_attendance)
+    add.add_put("/api/operations/{op_id:\\d+}/rating", rate)
+    add.add_get("/api/operations/reports/member/{who}", report_member)
+    add.add_get("/api/operations/reports/maker/{who}", report_maker)
+    add.add_get("/api/operations/reports/group/{group_id:\\d+}", report_group)
+    add.add_get("/api/operations/reports/attendance", report_attendance)
+    add.add_post("/api/members/erase", erase_member)
     return app
 
 

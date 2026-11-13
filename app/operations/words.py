@@ -82,5 +82,14 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "bad_preset": t("That file is not an Arma 3 Launcher preset.", locale),
         "too_large": t("That file is too large.", locale),
         "unknown_mission": t("There is no such mission on the server.", locale),
+        # attendance, ratings, erasure
+        "not_started": t("The operation hasn't started yet: cancel it instead.", locale),
+        "no_report": t("There is no attendance report yet.", locale),
+        "rating_closed": t("Ratings for this operation have closed.", locale),
+        "not_attended": t("Only those who attended rate the mission.", locale),
+        "bad_stars": t("Give 1 to 5 stars.", locale),
+        "self": t("Nobody erases their own account here: ask another admin.", locale),
+        "erased": t("That member was erased already.", locale),
+        "forbidden": t("You don't have the permission for this.", locale),
     }
     return words.get(code or "")
