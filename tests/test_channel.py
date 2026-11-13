@@ -83,7 +83,7 @@ async def test_edits_in_the_app_are_drawn_the_opord_a_message_per_paragraph(stac
     await run(stack)
     drawn = await row(stack, op["id"])
     channel = guild.get_channel(drawn.channel_id)
-    assert list(drawn.messages) == ["info", "situation", "execution", "execution:1"]
+    assert list(drawn.messages) == ["info", "situation", "execution", "execution:1", "orbat:0"]
     assert texts(channel)[1] == f"{render.SPACER}## Sytuacja\nEnemy **armour** north."
     assert texts(channel)[2].startswith(f"{render.SPACER}## Wykonanie\nLine 0")
     assert all(len(text) <= 2000 for text in texts(channel))

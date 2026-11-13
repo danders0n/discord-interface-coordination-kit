@@ -4,8 +4,9 @@ as the supervisor returns it (its JSON, ``GET /api/operations/changes``).
 Pure functions: an operation and a :class:`Context` in, :class:`Message` payloads out, keyed in channel order:
 ``info`` (an embed), the OPORD's paragraphs (``situation``, ``mission``, ``execution``, ``sustainment``, ``command``;
 each its own message, continued in ``<paragraph>:1`` ... past Discord's 2000 characters; the banner and the map go
-with the first), ``preset`` (the launcher file), then ``orbat:0`` ... once the supervisor has the ORBAT, and the
-link to the discussion thread last (Discord's own "started a thread" card while it is still last, see ``sync``).
+with the first), ``preset`` (the launcher file), then ``orbat:0`` ... (the ORBAT, or a Zeus or training operation's
+Coming list; the sign-up buttons go on the last, see ``app.signup.ui``), and the link to the discussion thread last
+(Discord's own "started a thread" card while it is still last, see ``sync``).
 The paragraphs are the organisers' Markdown, shown as Discord renders it; an unwritten one is left out. Everything is
 in the public language; mentions are sent without pinging, and edits never ping."""
 
@@ -27,6 +28,7 @@ SPACER = "​\n"  # an empty first line: Discord trims a plain one
 COLOURS = {"draft": 0x95A5A6, "pending": 0xF1C40F, "published": 0x2ECC71, "ended": 0x3498DB, "cancelled": 0xE74C3C}
 PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 OPEN = ("draft", "pending", "published")
+COMING = ("zeus", "training")  # no ORBAT: Coming / Not coming
 
 
 @dataclass
@@ -191,6 +193,107 @@ def opord(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     return found
 
 
+def phase(op: dict[str, Any], now: datetime) -> str:
+    """The sign-up's state now, as the supervisor names it (``not_published``, ``not_open``, ``open``, ``closed``),
+    from the times: the operation as last read may be older than the opening or the start."""
+    if op["status"] in ("draft", "pending"):
+        return "not_published"
+    start, opens = when(op, "start_at"), when(op, "signup_opens_at")
+    if op["status"] != "published" or (start is not None and now >= start):
+        return "closed"
+    return "not_open" if opens is not None and now < opens else "open"
+
+
+def _mentions(entries: list[dict[str, Any]], language: str, glue: str, limit: int) -> str:
+    """The persons (mentions or names) that fit ``limit`` characters, then "and N more"."""
+    out, used = [], 0
+    for index, entry in enumerate(entries):
+        text = person(entry)
+        if used + len(text) + len(glue) > limit:
+            return glue.join(out) + glue + t("and {count} more", language, count=len(entries) - index)
+        out.append(text)
+        used += len(text) + len(glue)
+    return glue.join(out) or "—"
+
+
+def _slot_line(number: int, slot: dict[str, Any], language: str) -> str:
+    """```1.` Name (@Role) — holder``; a free, closed or offered slot in words."""
+    role = slot.get("required_role") or {}
+    role_text = f" (<@&{role['id']}>)" if str(role.get("id") or "").isdigit() else (
+        f" ({plain(role.get('name') or '')})" if role else "")
+    if slot.get("holder"):
+        holder = person(slot["holder"]) + (" \U0001F512" if slot.get("locked") else "") + (
+            " ⚠" if slot.get("flagged") else "")
+    elif slot.get("locked"):
+        holder = f"\U0001F512 *{t('closed', language)}*"
+    elif slot.get("offered"):
+        holder = f"*{t('offered', language)}*"
+    else:
+        holder = f"*{t('free', language)}*"
+    return f"`{number}.` {plain(slot['name'])}{role_text} — {holder}"
+
+
+def _state_line(op: dict[str, Any], now: datetime, language: str) -> str:
+    """The sign-up's state with a coloured dot: after publishing, from a time, open until the start, closed."""
+    state = phase(op, now)
+    if state == "not_published":
+        return "⚪ **" + t("Sign-up after publishing", language) + "**"
+    if state == "closed":
+        return "\U0001F534 **" + t("Sign-up closed", language) + "**"
+    if state == "not_open":
+        return "\U0001F7E1 **" + t("Sign-up opens {when}", language, when=ts(when(op, "signup_opens_at"), "f")) + "**"
+    return "\U0001F7E2 **" + t("Sign-up open", language) + "** – " + t("closes {when}", language,
+                                                                       when=ts(when(op, "start_at"), "f"))
+
+
+def _header(op: dict[str, Any], ctx: Context, counted: str, closed: int = 0) -> str:
+    """``## Sign-up: title``, the start, how many are in (``counted``) and the slots closed, the state."""
+    line = f"{t('Start: {when}', ctx.language, when=ts(when(op, 'start_at'), 'F'))} • {counted}"
+    if closed:
+        line += f" • \U0001F512 {closed}"
+    return SPACER + "\n".join([f"## {t('Sign-up: {title}', ctx.language, title=plain(op['title']))}", line,
+                               _state_line(op, ctx.now, ctx.language)])
+
+
+def orbat(op: dict[str, Any], ctx: Context) -> list[Message]:
+    """The header, a block per squad (its name in bold, its slots numbered), the other answers, and while sign-up
+    is open the hint to the slot lists under the last message (docs/PLAN.md, decided 2026-11-01)."""
+    language, squads, lists = ctx.language, op.get("orbat") or [], op.get("signups") or {}
+    counts = op.get("slots") or {}
+    blocks = [_header(op, ctx, t("Taken slots: {taken}", language,
+                                 taken=f"**{counts.get('taken', 0)}/{counts.get('total', 0)}**"), counts.get("closed", 0))]
+    for squad in squads:
+        lines = [_slot_line(n, slot, language) for n, slot in enumerate(squad.get("slots") or [], 1)]
+        blocks.append("\n".join([f"**{plain(squad['name'])}**", *lines]))
+    if not squads:
+        blocks.append(t("Not set yet.", language))
+    for status, name in (("maybe", t("Maybe", language)), ("cant", t("Can't come", language)),
+                         ("reserve", t("Reserve list", language))):
+        if entries := lists.get(status):
+            blocks.append(f"**{name}** ({len(entries)})\n{_mentions(entries, language, ', ', 1000)}")
+    if squads and phase(op, ctx.now) == "open":
+        blocks.append("-# " + t("Pick your squad from the list below, then the slot, and press Sign up. Taking "
+                                "another slot moves your sign-up.", language))
+    return [Message(content=text) for text in texts(blocks, "\n\n")]
+
+
+def coming_list(op: dict[str, Any], ctx: Context) -> list[Message]:
+    """A Zeus or training operation: the header, then Coming and Not coming, one person per line."""
+    language, lists = ctx.language, op.get("signups") or {}
+    coming, not_coming = lists.get("coming") or [], lists.get("cant") or []
+    limit = f"/{op['signup_limit']}" if op.get("signup_limit") else ""
+    blocks = [_header(op, ctx, t("Coming: {count}", language, count=f"**{len(coming)}{limit}**")),
+              f"**{t('Coming', language)}** ({len(coming)}{limit})\n{_mentions(coming, language, chr(10), 1500)}",
+              f"**{t('Not coming', language)}** ({len(not_coming)})\n{_mentions(not_coming, language, chr(10), 1500)}"]
+    return [Message(content=text) for text in texts(blocks, "\n\n")]
+
+
+def signup_messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
+    """``orbat:0`` ...: the ORBAT, or a Zeus or training operation's list."""
+    pages = coming_list(op, ctx) if op["kind"] in COMING else orbat(op, ctx)
+    return {f"orbat:{number}": page for number, page in enumerate(pages)}
+
+
 def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     """Every message of the channel, keyed in channel order."""
     found = {"info": info(op, ctx)}
@@ -200,6 +303,7 @@ def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
         name = ((op.get("files") or {}).get("preset") or {}).get("preset_name") or preset.name
         found["preset"] = Message(content=t("Modset for the Arma 3 Launcher: {name}", ctx.language, name=plain(name)),
                                   files=[preset])
+    found |= signup_messages(op, ctx)
     if ctx.thread_id:
         found["discussion"] = Message(content=f"💬 <#{ctx.thread_id}>")
     return found

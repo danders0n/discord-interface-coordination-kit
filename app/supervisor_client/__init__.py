@@ -246,6 +246,44 @@ class SupervisorClient:
         """The bot's plumbing (``channel_url``, ``thread_url``): fields left out stay, None clears one."""
         return await self.request("PUT", f"/api/operations/{int(op_id)}/discord", json=plumbing)
 
+    # ---------------------------------------------------------------- sign-ups and offers (act-as)
+    # Each answers the operation as the member now sees it, plus ``outcome`` (``missing_dlc``: Creator DLC names
+    # their roles don't show; a warning). Refusals carry a ``code`` (app/operations/words.py words them).
+
+    async def take_slot(self, act_as: int, op_id: int, slot_id: int) -> dict[str, Any]:
+        """Take the slot if it is still free (one atomic update), moving from the member's other place."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/slots/{int(slot_id)}/take", act_as=act_as)
+
+    async def answer(self, act_as: int, op_id: int, status: str) -> dict[str, Any]:
+        """``maybe``, ``cant``, ``reserve`` or ``coming`` (Zeus and training)."""
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/signup", act_as=act_as,
+                                  json={"status": status})
+
+    async def leave(self, act_as: int, op_id: int) -> dict[str, Any]:
+        """Off the member's slot and every list."""
+        return await self.request("DELETE", f"/api/operations/{int(op_id)}/signup", act_as=act_as)
+
+    async def accept_offer(self, act_as: int, op_id: int, offer_id: int) -> dict[str, Any]:
+        return await self.request("POST", f"/api/operations/{int(op_id)}/offers/{int(offer_id)}/accept", act_as=act_as)
+
+    async def decline_offer(self, act_as: int, op_id: int, offer_id: int) -> dict[str, Any]:
+        return await self.request("POST", f"/api/operations/{int(op_id)}/offers/{int(offer_id)}/decline", act_as=act_as)
+
+    async def offer_delivered(self, op_id: int, offer_id: int, via: str) -> dict[str, Any]:
+        """The bot's own account: the offer reached the member (``dm`` or ``thread``); its 30 minutes start now."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/offers/{int(offer_id)}/delivered",
+                                  json={"via": via})
+
+    # ---------------------------------------------------------------- approval (act-as)
+
+    async def approve_request(self, act_as: int, request_id: int) -> dict[str, Any]:
+        """Publish, hold the host, or move to the proposed times. 409 when it would clash (it stays pending)."""
+        return await self.request("POST", f"/api/operations/requests/{int(request_id)}/approve", act_as=act_as)
+
+    async def reject_request(self, act_as: int, request_id: int, reason: str) -> dict[str, Any]:
+        return await self.request("POST", f"/api/operations/requests/{int(request_id)}/reject", act_as=act_as,
+                                  json={"reason": reason[:500]})
+
 
 def _segment(value: Any) -> str:
     """One path segment from outside (a slug someone typed, a file name): quoted whole, so ``/``, ``..``, ``?`` and

@@ -1,7 +1,7 @@
 # Plan: the bot as the supervisor's Discord front end
 
-Status: building on `feature/front-end`; steps 1–4 are done (*As built*): the old event stack is gone and the
-channels are drawn from the supervisor's change feed. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
+Status: building on `feature/front-end`; steps 1–5 are done (*As built*): the old event stack is gone, the channels
+are drawn from the supervisor's change feed, and members sign up, take offers and approve on Discord. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
 (`D:\Workspace\python\arma-server-supervisior`, interviews 2026-11-11 and 2026-11-12), which is the source of
 every rule about operations, people and permissions. This plan says what changes **in this repo**.
 
@@ -386,19 +386,72 @@ drawing went in together: the kept channel code depended on the deleted `EventSe
   - `/archive event` is for the organisers (author, co-organisers) and *bot admin*; participants join when the
     operation carries the sign-ups.
   - The reminder pings wait for the sign-up step: they ping the slot holders, which the operation JSON doesn't carry
-    in the phase-3 contract.
+    in the phase-3 contract (done in step 5).
   - Polish: *Operacja* is feminine, so the markers are ODWOŁANA, ZAKOŃCZONA. The 479 translations nobody uses any
     more were dropped (the test allows none); they come back from git history with their UI.
 - **Contract:** synced to the supervisor's phase 4 (`7366d28`, committed while this step was built). Its 22 new
   routes (ORBAT, sign-ups, offers, templates, approval) are listed as `PENDING` in `tests/test_contract.py`: the fake
   serves them with the sign-up step.
 
+### Step 5: sign-ups, offers, the moderation thread (2026-11-13)
+
+The first half of this plan's phase 4, on the supervisor's phase 4 (`7366d28`). The contract was synced again to its
+phase 5 (`6c48fe2`): those 8 routes (attendance, ratings, reports, erasure, *End operation*) are `PENDING` in
+`tests/test_contract.py`; the fake serves every other route, the phase-4 ones included (ORBAT, sign-ups, offers,
+templates, approval; its `State` gained `set_orbat`, `sign`, `free`, `request` for tests).
+
+- **Client:** `take_slot`, `answer`, `leave`, `accept_offer`, `decline_offer` (act-as), `offer_delivered` (the bot's
+  own), `approve_request`, `reject_request` (act-as).
+- **Words:** `app/operations/words.py` words the supervisor's operation codes (`taken`, `overlap` with the other
+  operation, `bad_orbat` with its problems, `own_request` ...); `discord_util.supervisor_words` uses it, so a refusal
+  reaching any button, modal or command error handler is in words with no handling of its own.
+- **Render:** `orbat:0` ... after the preset, always (a draft's ORBAT too): the header (start, taken / total, closed
+  slots, the sign-up state with its dot, computed from the times, as the operation last read may be older than the
+  opening or the start), a block per squad (holders as mentions, 🔒, ⚠ for `flagged`, *closed* / *offered* / *free*),
+  Maybe / Can't come / Reserve list, the hint while open. Zeus and training: Coming (with the limit) and Not coming.
+- **Buttons** (`app/signup/ui.py`, persistent): under the last ORBAT message of a published operation: the squad lists
+  (`squad:<op>:<n>`, squads with a free slot not under offer) and Reserve / Maybe / Can't come / Leave
+  (`signup:<op>:<action>`); Zeus: Coming / Not coming / Leave. Not open yet: lists, Reserve and Coming off; started:
+  all off; full: Coming off; not published (or over): none. A squad opens the private picker, which reads the
+  operation **in the member's name**: no `take` in `my.actions` answers why (not open, closed, an organiser's
+  assignment, no permission); the slots are those the member's roles allow. A refused *Sign up* in the picker shows the
+  words above fresh lists. Answers add the supervisor's `missing_dlc` warning and, once, *Link now*.
+- **`/slot take | leave`** (`app/signup/cog.py`) in an operation's channel or thread (`OperationChannels.by_channel`);
+  the autocomplete lists the free slots from the operation as last drawn.
+- **Offers** (`app/signup/offers.py`, table `offer_message`): one person: a DM with *Take it* / *No thanks*
+  (`offer:<op>:<offer>:take|decline`; the route needs the operation, so the id carries it), DMs closed: the thread;
+  the whole reserve list: one thread ping, *Take it* only. Then `delivered` (`dm` / `thread`), whose answer gives the
+  deadline, which the message then shows (edited from the content as sent, so a thread's keeps its mention). A
+  supervisor that doesn't hear it is told again (`offer_delivered` action), never a second DM. When the feed shows the
+  offer no longer open, the message is closed (*has ended*, no buttons), after one fresh read of the operation, since an
+  older one from the feed looks the same.
+- **Reminders:** `reminder:<op>:<minutes>` actions while ahead, recomputed on every redraw (an offset /reload removed is
+  dropped); the slot holders and Coming in the thread, skipped once the assembly or a later reminder has come.
+- **Pings** (`OperationChannels.ping`): the thread, mentions split at 2000 characters, a view on the first message; a
+  draft (no thread): by DM; an archived thread (a cancelled operation, archived at once) is opened for the message and
+  locked again.
+- **Notices:** `activity` (a staff-log line), `cancelled` and `slot_lost` (pings), `offer` (above);
+  `approval_requested` / `proposal_requested`, `approval_decided` / `proposal_decided` and `stale_draft` in
+  `app/approval/moderation.py` (`Moderation`, table `moderation_message`): the request embed in the moderation thread
+  (kind, who asked, the channel, the date or the old and new times, *Blocked* with the supervisor's reason and Approve
+  off) with *Approve* / *Reject* (`approval:<request>:approve|reject`, act-as; Reject asks the reason); a decision draws
+  it final without buttons, pings whoever asked (a draft: by DM) and notes it in the staff log; a stale draft pings the
+  organisers, notes it, and a pending one's request is posted again (the older message loses its buttons).
+- **Watchers:** `OperationChannels.watchers` (offers, moderation) hear `changed(op)` / `gone(id)` from the feed: a
+  request withdrawn, replaced by a newer one, or whose operation was deleted is drawn *Withdrawn*; a pending one is
+  redrawn when it becomes blocked or free (an in-memory note of what each message shows saves the other edits).
+- **Decisions taken while building:**
+  - Requests name who asked and who decided by **app username** (`requested_by`, `decided_by`), not as persons, so the
+    embed shows the name, not a mention (to ask the supervisor, with the creator person of step 4).
+  - `delivered` is reported for an offer to the whole list too (`thread`): harmless, and the app shows it.
+  - Polish texts the old bot had come back from git history; "event" became *operacja* in them.
+
 ### Next
 
-Step 5 (this plan's phase 4) on the supervisor's phase 4: the fake's sign-up, offer, template and approval routes
-(emptying `PENDING`), the operation's ORBAT and sign-up lists in `render.py`, the sign-up buttons and picker, `/slot`,
-offers (DM, `delivered`, take), the reminder pings, the moderation thread and the notices worker's operation kinds,
-then the wizard and the panel with `If-Match`, `/operation preset | image | mission`, `/operations`.
+Step 6, the rest of this plan's phase 4: the wizard (*Create operation* on the header) and the organiser panel with
+`actions` and `If-Match` (details, OPORD, ORBAT text and templates, co-organisers, sign-up opening and limit, *Send for
+approval* / *Withdraw request*, *Copy*, *Cancel*), `/operation preset | image | mission`, `/operations`. Then phase 5
+on the supervisor's phase 5 (the 8 `PENDING` routes).
 
 ## Not in this plan
 

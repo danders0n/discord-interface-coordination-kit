@@ -114,6 +114,34 @@
         "title": "CopyIn",
         "type": "object"
       },
+      "CorrectIn": {
+        "properties": {
+          "person_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Person Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "attended",
+              "no_show",
+              "excused"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person_ids",
+          "status"
+        ],
+        "title": "CorrectIn",
+        "type": "object"
+      },
       "DeliveredIn": {
         "properties": {
           "via": {
@@ -161,6 +189,55 @@
           }
         },
         "title": "DiscordIn",
+        "type": "object"
+      },
+      "EraseBody": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "description": "must be true: erasing can't be undone",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "discord_id": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{1,25}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the Discord id (/privacy-erase); or",
+            "title": "Discord Id"
+          },
+          "person_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the person (Members); or",
+            "title": "Person Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the account (a local one without a person too)",
+            "title": "User Id"
+          }
+        },
+        "title": "EraseBody",
         "type": "object"
       },
       "GroupIn": {
@@ -976,6 +1053,27 @@
         "title": "PlaceIn",
         "type": "object"
       },
+      "RatingIn": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "stars": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Stars",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stars"
+        ],
+        "title": "RatingIn",
+        "type": "object"
+      },
       "RejectIn": {
         "properties": {
           "reason": {
@@ -1548,6 +1646,62 @@
         "tags": [
           "members"
         ]
+      }
+    },
+    "/api/members/erase": {
+      "post": {
+        "description": "Erase a member's personal data on request (Manage users; the bot's ``/privacy-erase`` through act-as). Name\nexactly one of ``person_id``, ``discord_id``, ``user_id``, and send ``confirm: true``. They become\n``former:<n>`` in sign-ups, attendance, ratings (comments emptied), organisers and the audit log; the account\nis deleted, the Steam link goes, the player's Steam ID and names are replaced. The bot gets an ``erased``\nnotice. Codes: not_found, erased, self, last_admin.",
+        "operationId": "erase_member_api_members_erase_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EraseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Erase Member Api Members Erase Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Erase Member",
+        "tags": [
+          "members"
+        ],
+        "x-act-as": true
       }
     },
     "/api/members/me": {
@@ -2571,6 +2725,249 @@
         "x-act-as": true
       }
     },
+    "/api/operations/reports/attendance": {
+      "get": {
+        "description": "``/attendance-report``: per person attended, no-show, excused and the rate (Manage or Approve operations).",
+        "operationId": "attendance_report_api_operations_reports_attendance_get",
+        "parameters": [
+          {
+            "description": "operations started in the last days; 0: all",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "description": "operations started in the last days; 0: all",
+              "maximum": 3650,
+              "minimum": 0,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Attendance Report",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/reports/group/{group_id}": {
+      "get": {
+        "description": "``/group``: our operations with another group; the cooperation ratings (guest operations) for staff.",
+        "operationId": "group_report_api_operations_reports_group__group_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Group Report Api Operations Reports Group  Group Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Group Report",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/reports/maker/{who}": {
+      "get": {
+        "description": "``/mission-maker``: the operations a person authored with their ratings' averages; the comments for them and\nstaff.",
+        "operationId": "maker_report_api_operations_reports_maker__who__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "who",
+            "required": true,
+            "schema": {
+              "title": "Who",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Maker Report Api Operations Reports Maker  Who  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Maker Report",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/reports/member/{who}": {
+      "get": {
+        "description": "``/attendance`` and ``/profile``: a person's record (``who``: ``me`` or a person's id), roles and the missions\nthey authored. About others a member sees only the basics (attended, rate, roles); the details (each\noperation, no-shows, excused, the Steam link) are the person's own and staff's (``details``).",
+        "operationId": "member_report_api_operations_reports_member__who__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "who",
+            "required": true,
+            "schema": {
+              "title": "Who",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Member Report Api Operations Reports Member  Who  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Member Report",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
     "/api/operations/requests": {
       "get": {
         "description": "Approval requests (``publish``, ``hold``, ``times``): all of them for Approve operations, else those on the\noperations the caller organises. ``blocked``: why approving would be refused now (a clash); ``may_decide``.",
@@ -3166,6 +3563,73 @@
         "x-act-as": true
       }
     },
+    "/api/operations/{op_id}/attendance": {
+      "put": {
+        "description": "*Edit attendance* (organisers, Manage operations): these persons are now attended, no-show or excused\n(someone not in the report is added). One who is no longer attended loses their rating.",
+        "operationId": "correct_attendance_api_operations__op_id__attendance_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Correct Attendance Api Operations  Op Id  Attendance Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Correct Attendance",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
     "/api/operations/{op_id}/cancel": {
       "post": {
         "description": "A published operation becomes ``cancelled`` (kept as history; a window it has in progress ends now); a\ndraft that was never published is deleted (the answer is null).",
@@ -3371,6 +3835,63 @@
         "tags": [
           "operations"
         ]
+      }
+    },
+    "/api/operations/{op_id}/end": {
+      "post": {
+        "description": "*End operation* after its start (its organisers, or Manage operations): its window ends now (the stopped\nservers start again) and the attendance is read after ``operations.settle_minutes``.",
+        "operationId": "end_operation_api_operations__op_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response End Operation Api Operations  Op Id  End Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "End Operation",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
       }
     },
     "/api/operations/{op_id}/files/{name}": {
@@ -4627,6 +5148,73 @@
           }
         ],
         "summary": "Publish",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/rating": {
+      "put": {
+        "description": "Rate the mission 1-5 with a comment (a guest operation: the cooperation with the host group): attendees (guest:\nthose who held a slot), for ``operations.rating_days`` after the report; again to change it. Codes: not_open,\nrating_closed, not_attended, no_person.",
+        "operationId": "rate_api_operations__op_id__rating_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RatingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rate Api Operations  Op Id  Rating Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Rate",
         "tags": [
           "operations"
         ],

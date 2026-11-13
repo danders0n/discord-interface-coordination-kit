@@ -47,9 +47,13 @@ class FakeMember:
     async def send(self, content: str | None = None, **kwargs: Any) -> Any:
         if self.dms_closed:
             raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Cannot send messages to this user")
-        message = Sent(content, kwargs)
+        message = Sent(content, kwargs, channel=self.dm_channel)
         self.dms.append(message)
         return message
+
+    @property
+    def dm_channel(self) -> FakeDM:
+        return FakeDM(self)
 
     @property
     def mention(self) -> str:
@@ -68,6 +72,7 @@ class Sent:
     deleted: bool = False
     edits: list[dict[str, Any]] = field(default_factory=list)
     type: discord.MessageType = discord.MessageType.default
+    channel: Any = None  # where it was sent (a channel, a thread, a member's DMs)
 
     @property
     def embeds(self) -> list[Any]:
@@ -77,7 +82,26 @@ class Sent:
     @property
     def text(self) -> str:
         """The content now, after the edits."""
-        return (self.edits[-1].get("content") if self.edits else self.content) or ""
+        return next((e["content"] for e in reversed(self.edits) if "content" in e), self.content) or ""
+
+    @property
+    def view(self) -> Any:
+        """The buttons now: the last edit that passed ``view`` wins (None removes them)."""
+        return next((e["view"] for e in reversed(self.edits) if "view" in e), self.kwargs.get("view"))
+
+    async def edit(self, **changes: Any) -> Sent:
+        self.edits.append(changes)
+        return self
+
+
+class FakeDM:
+    """A member's DM channel: its id is the member's own (enough to find it again)."""
+
+    def __init__(self, member: FakeMember) -> None:
+        self.member, self.id = member, member.id
+
+    def get_partial_message(self, message_id: int) -> MessageRef:
+        return MessageRef(SimpleNamespace(sent=self.member.dms), message_id)
 
 
 @dataclass
@@ -161,7 +185,7 @@ class FakeThread:
     async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
         if self.archived:
             raise AssertionError("sent to an archived thread")
-        message = Sent(content, kwargs)
+        message = Sent(content, kwargs, channel=self)
         self.sent.append(message)
         return message
 
@@ -210,7 +234,7 @@ class FakeChannel:
         return f"<#{self.id}>"
 
     async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
-        message = Sent(content, kwargs)
+        message = Sent(content, kwargs, channel=self)
         self.sent.append(message)
         return message
 
@@ -315,6 +339,13 @@ class FakeGuild:
         """Like Discord's cache: archived threads aren't in it, only a fetch finds them."""
         thread = self.threads.get(thread_id)
         return thread if thread is not None and not thread.archived else None
+
+    def messageable(self, channel_id: int) -> Any:
+        """The client's ``get_partial_messageable``: a channel, a thread or a member's DMs, by id."""
+        found = self.threads.get(channel_id) or self.channel_map.get(channel_id)
+        if found is None and channel_id in self.members:
+            found = self.members[channel_id].dm_channel
+        return found
 
     async def fetch_channel(self, channel_id: int) -> Any:
         found = self.threads.get(channel_id) or self.channel_map.get(channel_id)

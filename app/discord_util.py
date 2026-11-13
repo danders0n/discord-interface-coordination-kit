@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 
 from app.i18n import t
+from app.operations.words import refusal
 from app.permissions import Access, Perm
 from app.supervisor_client import SupervisorError, SupervisorUnreachable
 
@@ -91,7 +92,7 @@ def supervisor_words(error: SupervisorError, locale: Any) -> str:
         "account_disabled": t("Your account in the app is disabled. Ask staff if that is a mistake.", locale),
         "act_as_route": t("This can only be done in the app.", locale),
     }
-    return known.get(error.code or "", error.message[:1900])
+    return known.get(error.code or "") or refusal(error.code, error.body, locale) or error.message[:1900]
 
 
 async def _sorry(interaction: discord.Interaction, error: Exception, where: str) -> None:

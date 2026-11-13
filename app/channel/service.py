@@ -14,7 +14,10 @@ to repeat, so a redraw after a crash, a restart or the bot's own echo does no ha
   ``channel_name``, renamed in the background (Discord allows two renames per ten minutes).
 - Published: the discussion thread is made after the messages, so Discord's thread card is last; the announcement
   goes out once, mentioning the announcement role and the climate's role, and is edited on every change. Sign-up
-  opening pings those roles in the thread (skipped more than an hour late); the start redraws (sign-up closes).
+  opening pings those roles in the thread (skipped more than an hour late); the start redraws (sign-up closes). The
+  sign-up buttons sit on the last ORBAT message. Reminders ping the slot holders (or Coming) in the thread at
+  ``times.reminder_minutes`` before the assembly, skipped once the assembly or a later reminder has come.
+- Watchers (offers, the moderation thread) hear of every change the feed hands over, and of an operation gone.
 - Cancelled: drawn as such, the announcement edited, archived at once. Over (ended, or past its end): archived
   ``archive_hours`` after the end. A deleted draft (a tombstone) loses its channel; an operation missing from a
   reset is archived if it was ever published, deleted otherwise.
@@ -40,12 +43,14 @@ from app.i18n import t
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
+from app.signup import ui as signup_ui
 from app.supervisor_client import SupervisorClient, SupervisorError
 
 ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, the sign-up closed
 SIGNUP_KIND = "signup_open"  # the sign-up opens: the roles pinged in the thread
 DRAW_KIND = "draw_retry"  # a redraw that couldn't get the operation's files: tried again
+REMINDER_KIND = "reminder"  # times.reminder_minutes before the assembly: the slot holders (or Coming) pinged
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 PING_LATE = timedelta(hours=1)  # a sign-up ping later than this is skipped
@@ -100,6 +105,27 @@ def _id(value: Any) -> int | None:
     return int(text) if text.isdigit() else None
 
 
+def mention_chunks(text: str, member_ids: list[int], limit: int = render.MAX_CONTENT) -> list[str]:
+    """``text`` and the members' mentions, split into messages Discord takes (docs/PLAN.md, *Notifications*)."""
+    messages, current = [], text
+    for member_id in member_ids:
+        mention = f"<@{member_id}>"
+        if len(current) + len(mention) + 1 > limit:
+            messages.append(current)
+            current = ""
+        current = f"{current} {mention}".strip() if current else mention
+    if current:
+        messages.append(current)
+    return messages
+
+
+def attending(op: dict[str, Any]) -> list[int]:
+    """The Discord ids of the slot holders and of those Coming (whom a reminder pings)."""
+    entries = [slot.get("holder") for squad in op.get("orbat") or [] for slot in squad.get("slots") or []]
+    entries += (op.get("signups") or {}).get("coming") or []
+    return list(dict.fromkeys(i for i in (_id((e or {}).get("discord_id")) for e in entries) if i is not None))
+
+
 class OperationChannels:
     def __init__(self, db: Database, store: SettingsStore, ids: Callable[[], Ids], scheduler: Scheduler,
                  guild: Callable[[], Any], client: SupervisorClient, interval: float = 2.0,
@@ -116,10 +142,14 @@ class OperationChannels:
         self._renames: dict[int, asyncio.Task] = {}
         self._drawing: dict[int, asyncio.Lock] = {}  # one redraw per operation at a time
         self._overwrites_due: set[int] = set()  # organisers changed (or a restart): the overwrites follow
+        # What else follows an operation's changes (the offers' DMs, the moderation thread): objects with
+        # ``async changed(op)`` and ``async gone(op_id)``, told after the operation is kept.
+        self.watchers: list[Any] = []
         scheduler.register(ARCHIVE_KIND, self._archive_action)
         scheduler.register(CLOSE_KIND, self._redraw_action)
         scheduler.register(SIGNUP_KIND, self._signup_action)
         scheduler.register(DRAW_KIND, self._redraw_action)
+        scheduler.register(REMINDER_KIND, self._reminder_action)
 
     # ---------------------------------------------------------------- helpers
 
@@ -185,6 +215,7 @@ class OperationChannels:
             row.gone_at = None
         self.redrawer.request(op_id)
         self._calendar()
+        await self._tell("changed", op)
 
     async def gone(self, op_id: int) -> None:
         """Deleted in the supervisor (a tombstone, or missing from a reset): the channel goes."""
@@ -195,6 +226,23 @@ class OperationChannels:
             row.gone_at = self.clock()
         self.redrawer.request(op_id)
         self._calendar()
+        await self._tell("gone", op_id)
+
+    async def _tell(self, what: str, value: Any) -> None:
+        """The watchers; one that fails is logged and the feed goes on (what they draw is redrawn next time)."""
+        for watcher in self.watchers:
+            try:
+                await getattr(watcher, what)(value)
+            except Exception:  # noqa: BLE001
+                log.exception("%s.%s failed", type(watcher).__name__, what)
+
+    async def by_channel(self, channel_id: int | None) -> OperationChannel | None:
+        """The operation whose channel or thread this is (``/slot`` typed there)."""
+        if not channel_id:
+            return None
+        async with self.db.session() as session:
+            return (await session.execute(select(OperationChannel).where(
+                (OperationChannel.channel_id == channel_id) | (OperationChannel.thread_id == channel_id)))).scalars().first()
 
     async def known(self) -> set[int]:
         """The operations the bot still draws (for a reset: those missing from it are gone)."""
@@ -331,6 +379,9 @@ class OperationChannels:
     async def _messages(self, row: OperationChannel, channel: Any, files: dict[str, Path]) -> None:
         ctx = render.Context(self.language, self.clock(), files, row.thread_id)
         messages = render.messages(row.operation, ctx)
+        pages = [key for key in messages if key.startswith("orbat:")]
+        if pages:  # the sign-up buttons under the last ORBAT message (None: removed, as on a cancelled operation)
+            messages[pages[-1]].view = signup_ui.buttons(row.operation, self.language, ctx.now)
         attached = dict(row.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
@@ -426,6 +477,7 @@ class OperationChannels:
                                           payload={"at": op["signup_opens_at"]})
         elif not published:
             await self.scheduler.cancel(f"{SIGNUP_KIND}:{op_id}")
+        await self._schedule_reminders(op, published, now)
         if row.archived_at is not None:
             return
         if op["status"] == "cancelled":
@@ -434,9 +486,25 @@ class OperationChannels:
             await self.scheduler.schedule(ARCHIVE_KIND, ends + timedelta(hours=self.store.current.times.archive_hours),
                                           key=f"{ARCHIVE_KIND}:{op_id}", operation_id=op_id)
 
+    async def _schedule_reminders(self, op: dict[str, Any], published: bool, now: datetime) -> None:
+        """At the configured offsets before the assembly, while ahead (one already due runs, late or not, and its
+        handler decides); one for an offset /reload removed is dropped, all of them when no longer published."""
+        op_id, offsets = int(op["id"]), self.store.current.times.reminder_minutes
+        keys = {minutes: f"{REMINDER_KIND}:{op_id}:{minutes}" for minutes in offsets}
+        await self.scheduler.cancel_all(REMINDER_KIND, op_id, keep=set(keys.values()) if published else set())
+        assembly = render.when(op, "assembly_at")
+        if not published or assembly is None:
+            return
+        for minutes, key in keys.items():
+            due = assembly - timedelta(minutes=minutes)
+            if due > now:
+                await self.scheduler.schedule(REMINDER_KIND, due, key=key, operation_id=op_id,
+                                              payload={"minutes": minutes})
+
     async def _remove(self, row: OperationChannel) -> None:
         """Gone in the supervisor: a channel never published is deleted, one that was is archived."""
         channel = self._channel(row)
+        await self.scheduler.cancel_all(REMINDER_KIND, row.operation_id)
         for kind in (ARCHIVE_KIND, CLOSE_KIND, SIGNUP_KIND, DRAW_KIND):
             await self.scheduler.cancel(f"{kind}:{row.operation_id}")
         if channel is not None and row.thread_id and row.archived_at is None:
@@ -520,6 +588,53 @@ class OperationChannels:
                                                               title=op["title"])
         await thread.send(text, allowed_mentions=discord.AllowedMentions(
             roles=[discord.Object(r) for r in roles], users=False, everyone=False))
+
+    async def _reminder_action(self, action: Action, now: datetime) -> None:
+        """The slot holders (or Coming) in the thread; skipped once the assembly or a later reminder has come."""
+        self._connected()
+        row = await self.row(action.operation_id)  # type: ignore[arg-type]
+        op = row.operation if row is not None else {}
+        assembly = render.when(op, "assembly_at") if op else None
+        if op.get("status") != "published" or assembly is None or now >= assembly:
+            return
+        later = [m for m in self.store.current.times.reminder_minutes if m < int(action.payload.get("minutes", 0))]
+        if any(now >= assembly - timedelta(minutes=m) for m in later):
+            return  # a later reminder is due already: that one speaks
+        members = attending(op)
+        if members:
+            await self.ping(row.operation_id, t("Reminder: {title}, assembly {when}.", self.language,
+                                                title=op["title"], when=render.ts(assembly, "R")), members)
+
+    async def ping(self, op_id: int, text: str, member_ids: list[int], view: discord.ui.View | None = None) -> Any:
+        """``text`` and the members' mentions in the operation's thread, split before Discord's 2000 characters; a
+        view goes on the first message, which is returned. An archived thread (a cancelled operation) is opened for
+        it and closed again. Without a thread (a draft): by DM, and None is returned."""
+        guild = self._connected()
+        row = await self.row(op_id)
+        thread = await self._thread(guild, row) if row is not None else None
+        if thread is None:
+            for member_id in dict.fromkeys(member_ids):
+                member = guild.get_member(member_id)
+                try:
+                    if member is not None:
+                        await member.send(text, **({"view": view} if view is not None else {}))
+                except discord.HTTPException as exc:
+                    log.info("A DM to %s about OP-%s failed: %s", member_id, op_id, exc)
+            return None
+        reopened = bool(getattr(thread, "archived", False))
+        if reopened:
+            await thread.edit(archived=False)
+        first = None
+        try:
+            for index, content in enumerate(mention_chunks(text, list(dict.fromkeys(member_ids)))):
+                extra = {"view": view} if view is not None and index == 0 else {}
+                sent = await thread.send(content, allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=False, everyone=False), **extra)
+                first = first or sent
+        finally:
+            if reopened:
+                await thread.edit(archived=True, locked=True)
+        return first
 
     async def _thread(self, guild: Any, row: OperationChannel) -> Any | None:
         thread = guild.get_thread(row.thread_id) if row.thread_id else None

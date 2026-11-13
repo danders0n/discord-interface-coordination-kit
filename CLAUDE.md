@@ -17,10 +17,10 @@ read its `CLAUDE.md` and `README.md` before touching the integration.
 Status: the bot of [docs/PLAN.md](docs/PLAN.md) (phases 1–8) was built and is on `master`. On `feature/front-end`
 it is being rebuilt as **the supervisor's Discord front end** ([docs/PLAN-front-end.md](docs/PLAN-front-end.md)):
 the supervisor owns operations (the bot's events), sign-ups, approval, attendance, Steam links and who may do what;
-the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–4 are done: the roster, notices, live events,
-Steam links, the supervisor check, and the operation channels drawn from the change feed (the old event stack is
-deleted). Next: the sign-up buttons, offers, moderation thread, wizard and panel against the supervisor's phase 4
-(*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
+the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–5 are done: the roster, notices, live events,
+Steam links, the supervisor check, the operation channels drawn from the change feed (the old event stack is
+deleted), and the ORBAT with its sign-up buttons, `/slot`, offers, reminders and the moderation thread. Next: the
+wizard, the organiser panel and the file commands (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
 data rules moved to the supervisor. Read the relevant section before implementing a feature, and keep the plans and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
 
@@ -86,18 +86,26 @@ exactly the settings.
 - `app/operations/`: `feed.py` (`Feed`: `GET /api/operations/changes` oldest first into the channels, the cursor in
   `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`),
   `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next day, aware UTC
-  out; for the wizard).
+  out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
+  `discord_util.supervisor_words`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
-  `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `discussion` (the thread
+  `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
+  or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread
   link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place, append /
   delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
   pass `view`, as leaving it out keeps old buttons), `order.py` (a category's channels: `Ids.top` first, then the
   rest, then the operations by start; one bulk position request, only when the order differs), `service.py`
   (`OperationChannels`: `apply(op)` / `gone(id)` from the feed; a redraw converges on the operation: the channel, the
   overwrites (organisers and `meta`'s staff roles), the messages, the thread at publishing (Discord's card last,
-  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the archive by quarter;
-  batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart). `EventBot.build_operations` wires
-  channels, header and feed.
+  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the reminders, the archive by
+  quarter; batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart; the sign-up buttons on the
+  last ORBAT message; `ping()` in the thread (a draft: DMs); `by_channel()`; `watchers` hear `changed(op)` /
+  `gone(id)`). `EventBot.build_operations` wires channels, header and feed.
+- `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, the private `SlotPicker`, `act()`:
+  an act-as call through `Roster.as_member`), `cog.py` (`/slot take | leave`), `offers.py` (`Offers`: the `offer`
+  notice by DM or thread, `delivered`, the message closed when the offer ends; table `offer_message`).
+- `app/approval/`: `ui.py` (the request embed, `ApprovalAction`, `RejectModal`), `moderation.py` (`Moderation`: the
+  moderation thread, the request / decision / stale-draft notices; table `moderation_message`).
 - `app/links/` (the links and squad.xml are the supervisor's): `service.py` (`LinkService`: the member's own link
   through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` read from `GET /api/members`,
   and the reminder bookkeeping in `link_reminder` with the rollout flag), `ui.py` (*Link now* `link:now`, the

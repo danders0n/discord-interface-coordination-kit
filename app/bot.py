@@ -15,6 +15,8 @@ from discord.ext import commands
 
 from app import heartbeat, startup_checks, supervisor_check
 from app.admin.cog import AdminCog
+from app.approval.moderation import Moderation
+from app.approval.ui import ApprovalAction
 from app.archive.cog import ArchiveCog
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService
@@ -35,6 +37,9 @@ from app.roster.service import Member as RosterMember
 from app.roster.service import Role as RosterRole
 from app.roster.service import Roster
 from app.services import Services
+from app.signup.cog import SlotCog
+from app.signup.offers import Offers
+from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
@@ -100,7 +105,10 @@ class EventBot(commands.Bot):
         s = self.services
         s.roster = Roster(s.supervisor, s.scheduler, self.roster_members, self.roster_roles, self.roster_one)
         s.notices = Notices(s.db, s.supervisor, s.scheduler.clock)
-        Delivery(s, self.guild).install(s.notices)
+        s.offers = Offers(s, self.guild, self.get_partial_messageable)
+        s.moderation = Moderation(s, self.guild)
+        Delivery(s, self.guild).install(s.notices, s.offers, s.moderation)
+        s.channels.watchers += [s.offers, s.moderation]  # (offers closed, requests drawn as the feed changes them)
         s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake(),
                                      "operation": lambda _event: s.feed.wake()})
 
@@ -168,11 +176,11 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(LinkNow)  # outlives a restart
+        self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),
-                    ArchiveCog(self.services)):
+                    ArchiveCog(self.services), SlotCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before

@@ -13,21 +13,13 @@ from contract_check import CONTRACT, problems, request_problems, routes
 from fake_supervisor import make_app
 
 SUPERVISOR = Path(__file__).resolve().parents[2] / "arma-server-supervisior" / "docs" / "api" / "openapi-bot.json"
-# The supervisor's phase 4 (ORBAT, sign-ups, offers, templates, approval): the fake serves them with the bot's
-# sign-up buttons and moderation thread (docs/PLAN-front-end.md, phase 4). Every other contract route it serves now.
+# The supervisor's phase 5 (attendance, ratings, reports, erasure): the fake serves them with the bot's members and
+# history step (docs/PLAN-front-end.md, phase 5). Every other contract route it serves now.
 PENDING = {
-    ("GET", "/api/operations/requests"), ("POST", "/api/operations/requests/{request_id}/approve"),
-    ("POST", "/api/operations/requests/{request_id}/reject"), ("GET", "/api/operations/templates"),
-    ("POST", "/api/operations/templates"), ("DELETE", "/api/operations/templates/{template_id}"),
-    ("PATCH", "/api/operations/templates/{template_id}"), ("POST", "/api/operations/{op_id}/offers/{offer_id}/accept"),
-    ("POST", "/api/operations/{op_id}/offers/{offer_id}/decline"),
-    ("POST", "/api/operations/{op_id}/offers/{offer_id}/delivered"), ("DELETE", "/api/operations/{op_id}/orbat"),
-    ("GET", "/api/operations/{op_id}/orbat"), ("PUT", "/api/operations/{op_id}/orbat"),
-    ("DELETE", "/api/operations/{op_id}/signup"), ("PUT", "/api/operations/{op_id}/signup"),
-    ("PUT", "/api/operations/{op_id}/signups/{person_id}"), ("POST", "/api/operations/{op_id}/slots/{slot_id}/assign"),
-    ("DELETE", "/api/operations/{op_id}/slots/{slot_id}/holder"), ("PUT", "/api/operations/{op_id}/slots/{slot_id}/lock"),
-    ("POST", "/api/operations/{op_id}/slots/{slot_id}/take"), ("POST", "/api/operations/{op_id}/submit"),
-    ("POST", "/api/operations/{op_id}/withdraw"),
+    ("GET", "/api/operations/reports/attendance"), ("GET", "/api/operations/reports/group/{group_id}"),
+    ("GET", "/api/operations/reports/maker/{who}"), ("GET", "/api/operations/reports/member/{who}"),
+    ("POST", "/api/members/erase"), ("POST", "/api/operations/{op_id}/end"),
+    ("PUT", "/api/operations/{op_id}/attendance"), ("PUT", "/api/operations/{op_id}/rating"),
 }
 
 

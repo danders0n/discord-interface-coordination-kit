@@ -1,6 +1,7 @@
 """Saying the supervisor's notices on Discord (docs/PLAN-front-end.md, *Notices*): one handler per kind, added to
-:class:`~app.notices.service.Notices` by :func:`install`. So far the kinds the supervisor's phase 1 sends: the login
-link (a DM) and the held roster push (a staff-log note). The operation notices come with the operations API."""
+:class:`~app.notices.service.Notices` by :meth:`Delivery.install`: the login link (a DM), staff-log notes (the held
+roster push, Steam links, ``activity``), and the pings of ``cancelled`` and ``slot_lost`` in the operation's thread.
+Offers are app.signup.offers's, requests, decisions and stale drafts app.approval.moderation's."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from typing import Any
 
 import discord
 
+from app.channel import render
 from app.i18n import t
 from app.notices.service import Later, Notices, Outcome, delivered, failed
 from app.supervisor_client import SupervisorError, SupervisorUnreachable
@@ -35,11 +37,24 @@ class Delivery:
     def language(self) -> str:
         return self.s.settings.language
 
-    def install(self, notices: Notices) -> None:
+    def install(self, notices: Notices, offers: Any = None, moderation: Any = None) -> None:
+        """``offers`` (app.signup.offers.Offers) and ``moderation`` (app.approval.moderation.Moderation) say the
+        operation notices of their own."""
         notices.register("login_link", self.login_link)
         notices.register("roster_guard", self.roster_guard)
         notices.register("link_request", self.link_request)
         notices.register("link_duplicate", self.link_duplicate)
+        notices.register("activity", self.activity)
+        notices.register("cancelled", self.cancelled)
+        notices.register("slot_lost", self.slot_lost)
+        if offers is not None:
+            notices.register("offer", offers.deliver)
+        if moderation is not None:
+            for kind in ("approval_requested", "proposal_requested"):
+                notices.register(kind, moderation.requested)
+            for kind in ("approval_decided", "proposal_decided"):
+                notices.register(kind, moderation.decided)
+            notices.register("stale_draft", moderation.stale)
 
     async def _member(self, discord_id: Any) -> Any | None:
         guild = self.guild()
@@ -92,6 +107,42 @@ class Delivery:
         self.s.staff.post(t("{member} tried to link Steam ID {steam}, which {owner} holds.", self.language,
                             member=self._who(notice), steam=data.get("steam_uid"), owner=data.get("owner") or "?"))
         return delivered()
+
+    async def activity(self, notice: dict[str, Any]) -> Outcome:
+        """One staff-log line of what changed (who, what, old -> new), as the supervisor wrote it; no mentions."""
+        text = str((notice.get("data") or {}).get("text") or "").strip()
+        if text:
+            self.s.staff.post(text[:1900])
+        return delivered()
+
+    def _persons(self, notice: dict[str, Any]) -> list[int]:
+        return [int(p) for p in notice.get("persons") or [] if str(p).isdigit()]
+
+    async def _ping(self, notice: dict[str, Any], text: str) -> Outcome:
+        """``text`` and the notice's persons in the operation's thread (a draft: by DM)."""
+        if self.guild() is None:
+            raise Later("not connected to the server yet")
+        persons = self._persons(notice)
+        if persons:
+            await self.s.channels.ping(int(notice["operation_id"]), text, persons)
+        return delivered()
+
+    async def cancelled(self, notice: dict[str, Any]) -> Outcome:
+        """The slot holders and those Coming, with the reason."""
+        data = notice.get("data") or {}
+        title = render.plain(data.get("title") or "?")
+        if data.get("reason"):
+            text = t("{title} is cancelled. Reason: {reason}", self.language, title=title,
+                     reason=render.plain(data["reason"]))
+        else:
+            text = t("{title} is cancelled.", self.language, title=title)
+        return await self._ping(notice, text)
+
+    async def slot_lost(self, notice: dict[str, Any]) -> Outcome:
+        """The ORBAT changed under them: now first on the reserve list."""
+        title = render.plain((notice.get("data") or {}).get("title") or "?")
+        return await self._ping(notice, t("Your slot in {title} was removed from the ORBAT; you are first on the "
+                                          "reserve list.", self.language, title=title))
 
     async def roster_guard(self, notice: dict[str, Any]) -> Outcome:
         data = notice.get("data") or {}
