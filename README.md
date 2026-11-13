@@ -1,28 +1,17 @@
-# Event bot
+# Operations bot
 
-A Discord bot for one Arma 3 group: events with ORBAT sign-ups, host reservations and event profiles on
-[arma-server-supervisor](../arma-server-supervisior), attendance from the supervisor's player stats, and the group's
-squad.xml. The design is in [docs/PLAN.md](docs/PLAN.md).
+A Discord bot for one Arma 3 group, the Discord front end of [arma-server-supervisor](../arma-server-supervisior):
+the supervisor owns the operations (the group's missions), sign-ups, approval, attendance, Steam links and squad.xml;
+the bot draws them on Discord and passes members' actions to the supervisor in their name. The design is in
+[docs/PLAN-front-end.md](docs/PLAN-front-end.md); how things look on Discord is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status: all phases of the plan (1–8).** The bot starts, checks its configuration on the server, keeps its database, backups,
-logs and staff threads, reports to the supervisor, and answers `/reload`, `/privacy` and `/server start | stop |
-restart | say`. Host reservations, the ORBAT format, templates, the sign-up rules and the event rules
-(drafts, approval, times, cancelling, timed actions) work, and an event gets its channel: marked DRAFT
-without sign-up until it is published with an announcement, its messages kept in order and redrawn as sign-ups change, archived
-by quarter. *Create event* in the header channel starts a wizard; *Organiser panel* under an event's info
-edits it, publishes or sends it for approval; moderators decide in the moderation thread. `/event preset` and
-`/event image` attach the launcher preset and the briefing image. Members sign up with the buttons under the
-ORBAT or `/slot take | leave`, freed slots are offered to the reserve list, and `/events` lists what is coming.
-Members link their Steam account with `/link` (or *Link now* in a reminder) and `/unlink` removes it; the link is
-held, confirmed and written into squad.xml by the supervisor (the app's Members page). After a mission the
-bot ends the event (a finished mission, the reservation's end, or *End event*), reads who played from the
-supervisor and posts the attendance report in the event channel, where the organisers correct it with *Edit
-attendance*. Attendees rate the mission under the report; `/attendance`, `/profile`, `/mission-maker` and
-`/group` show the totals, and bot admins get `/attendance-report` with a CSV and `/privacy-erase`. Mission
-makers set the mission with `/event mission` and build the event's server profile in the panel (*Server profile*):
-the bot clones `BOT_SUPERVISOR__BASE_PROFILE`, imports the preset, sets the mission, puts the profile on the event
-server for the reservation and deletes it some days later. A year on, the oldest quarter's channels move into
-the database (transcripts and attachments) and are deleted; `/archive event` gives an event back as an HTML file.
+**Status: being rebuilt on `feature/front-end`** (*As built* in the front-end plan). Working now: the configuration
+check, the database, backups, logs and staff threads, the roster pushed to the supervisor, the supervisor's notices
+(login links, staff notes), `/link` and `/unlink` with the reminders, and the operation channels drawn from the
+supervisor's change feed: an operation made in the app gets its channel (marked DRAFT, then published with its
+thread and announcement), its OPORD and preset, a ping when sign-up opens, and the archive by quarter, with
+`/archive event` reading old ones back. Coming next: the wizard and panel, the sign-up buttons, offers and the
+moderation thread (the supervisor's phase 4), then attendance and ratings.
 
 ## Install
 
@@ -51,9 +40,9 @@ copy .env.example .env      # then fill it in, see below
    *Staff log* and *Moderacja* (names in `.env`). Put each channel and role into `.env` by **name or id**: a name is
    quicker, an id survives renames (turn on Developer Mode in *Settings → Advanced*, then right-click → *Copy ID*).
    A name that matches nothing, or more than one channel or role, is reported in the staff log.
-4. Staff commands (`/reload`, `/server`, `/links`, `/attendance-report`, `/privacy-erase`) are hidden from
-   everyone but admins at first. In *Server Settings → Integrations → the bot*, allow them for the roles you gave
-   those permissions in `.env`. The bot still checks the roles on every use.
+4. Staff commands (`/reload`, `/links`, `/privacy-erase`) are hidden from everyone but admins at first. In
+   *Server Settings → Integrations → the bot*, allow them for the roles in `BOT_PERMISSIONS__BOT_ADMIN`. The bot
+   still checks the roles on every use.
 
 ### The supervisor account
 

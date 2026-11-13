@@ -51,7 +51,7 @@ class LinkCog(commands.Cog):
 
     @links.command(name="remind", description="Send a member the Steam link reminder now")
     @app_commands.describe(member="The member")
-    @require(Perm.MANAGE_LINKS)
+    @require(Perm.BOT_ADMIN)
     async def remind(self, interaction: discord.Interaction, member: discord.Member) -> None:
         s, locale = self.services, interaction.locale
         await thinking(interaction)
@@ -74,7 +74,7 @@ class LinkCog(commands.Cog):
 
     @links.command(name="reminders", description="Turn a member's automatic Steam link reminders off or on")
     @app_commands.describe(member="The member", on="Off: no DMs, pings or sign-up questions until they link")
-    @require(Perm.MANAGE_LINKS)
+    @require(Perm.BOT_ADMIN)
     async def reminders(self, interaction: discord.Interaction, member: discord.Member, on: bool) -> None:
         s, locale = self.services, interaction.locale
         await s.links.mute(member.id, not on)

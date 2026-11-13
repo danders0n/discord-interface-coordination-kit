@@ -31,15 +31,16 @@ class PrivacyCog(commands.Cog):
         for part in chunks(body, EMBED_LIMIT)[:5]:
             await reply(interaction, embed=discord.Embed(description=part))
 
-    @app_commands.command(name="privacy-erase", description="Erase a member's data: Steam link, ids in every table")
+    @app_commands.command(name="privacy-erase", description="Erase what the bot holds of a member: reminders, "
+                                                            "archived messages")
     @app_commands.describe(member="The member (or their user id, if they left)")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.guild_only()
     @require(Perm.BOT_ADMIN)
     async def erase(self, interaction: discord.Interaction, member: discord.User) -> None:
-        await reply(interaction, t("Erase the data of {member}? Their ids are replaced by a pseudonym everywhere in the "
-                                   "bot. This can't be undone. Their Steam link is in the app: remove it there.",
-                                   interaction.locale,
+        await reply(interaction, t("Erase what the bot holds of {member}? Their link reminders are deleted and their "
+                                   "archived messages emptied. This can't be undone. Their account, sign-ups and "
+                                   "Steam link are in the app: erase them there.", interaction.locale,
                                    member=member.mention), view=ConfirmErase(self.services, member.id, interaction.locale))
 
 
@@ -53,11 +54,8 @@ class ConfirmErase(discord.ui.View):
 
     async def _erase(self, interaction: discord.Interaction) -> None:
         s = self.services
-        done = await erase(s.db, self.member_id, s.scheduler.clock)
+        done = await erase(s.db, self.member_id)
         self.stop()
-        if s.channels is not None:
-            for event_id in done.events:
-                await s.channels.changed(event_id)
         # The staff log keeps that it ran, not whom it was about.
         s.staff.post(t("{admin} ran a data erasure; the member is now former:{number}.", s.settings.language,
                        admin=interaction.user.mention, number=done.number))

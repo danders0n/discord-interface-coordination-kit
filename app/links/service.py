@@ -8,8 +8,6 @@ app; staff manage every link there. What stays in the bot is delivery:
   every N days, at most so many per run; the first rollout counts as everyone's first reminder; a member's first
   sign-up without a link asks once; staff can turn a member's reminders off (``muted``) until they link. The
   bookkeeping is the ``link_reminder`` table.
-- the Steam IDs the bot's own attendance report matches (confirmed links only, as the supervisor counts them), until
-  the attendance moves to the supervisor too.
 
 Refusals the member can fix are :class:`LinkError` codes the Discord layer words; anything else is the supervisor's
 :class:`~app.supervisor_client.SupervisorError`."""
@@ -89,12 +87,6 @@ class LinkService:
         """Members on the server with a squad.xml rank role and no Steam link."""
         body = await self.client.members(unlinked=True, limit=PAGE)
         return {int(p["discord_id"]) for p in body.get("members", []) if str(p.get("discord_id", "")).isdigit()}
-
-    async def steam_ids(self) -> dict[int, str]:
-        """Discord id -> confirmed Steam ID, for the attendance report."""
-        body = await self.client.members(state="all", limit=PAGE)
-        return {int(p["discord_id"]): p["steam_uid"] for p in body.get("members", [])
-                if p.get("steam_uid") and p.get("steam_state") == "confirmed" and str(p.get("discord_id", "")).isdigit()}
 
     # ---------------------------------------------------------------- reminders
 

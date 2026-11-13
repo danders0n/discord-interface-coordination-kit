@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 from app import logs, settings as settings_module
 from app.db import Database, backup, migrate
-from app.reservations.service import ReservationService
 from app.scheduler import Scheduler
 from app.settings import Settings, SettingsStore
 from app.staff_log import StaffLog
@@ -63,8 +62,7 @@ async def run(settings: Settings, env_file: str) -> None:
     await backup.register(scheduler, store)
     token = settings.supervisor.token.get_secret_value() if settings.supervisor.token else None
     client = SupervisorClient(settings.supervisor.url, token)
-    services = Services(store, db, scheduler, staff, client, StaffThreads(db, store),
-                        ReservationService(db, client, store, scheduler, staff.post))
+    services = Services(store, db, scheduler, staff, client, StaffThreads(db, store))
     async with EventBot(services) as bot:
         await bot.start(settings.discord_token.get_secret_value())
 

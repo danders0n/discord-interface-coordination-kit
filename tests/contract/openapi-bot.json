@@ -1,6 +1,222 @@
 {
   "components": {
     "schemas": {
+      "AssignIn": {
+        "properties": {
+          "person_id": {
+            "title": "Person Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "person_id"
+        ],
+        "title": "AssignIn",
+        "type": "object"
+      },
+      "Body_upload_image_api_operations__op_id__images__slot__put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_image_api_operations__op_id__images__slot__put",
+        "type": "object"
+      },
+      "Body_upload_mission_api_operations__op_id__mission_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "the mission (.pbo)",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_mission_api_operations__op_id__mission_put",
+        "type": "object"
+      },
+      "Body_upload_preset_api_operations__op_id__preset_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Arma 3 Launcher preset (.html)",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_preset_api_operations__op_id__preset_put",
+        "type": "object"
+      },
+      "CancelIn": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "CancelIn",
+        "type": "object"
+      },
+      "CopyIn": {
+        "properties": {
+          "assembly_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "default: a week after the copied one",
+            "title": "Assembly At"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CopyIn",
+        "type": "object"
+      },
+      "DeliveredIn": {
+        "properties": {
+          "via": {
+            "enum": [
+              "dm",
+              "thread"
+            ],
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "via"
+        ],
+        "title": "DeliveredIn",
+        "type": "object"
+      },
+      "DiscordIn": {
+        "properties": {
+          "channel_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "pattern": "^https://\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Url"
+          },
+          "thread_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "pattern": "^https://\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Url"
+          }
+        },
+        "title": "DiscordIn",
+        "type": "object"
+      },
+      "GroupIn": {
+        "properties": {
+          "acronym": {
+            "maxLength": 10,
+            "minLength": 1,
+            "title": "Acronym",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acronym",
+          "name"
+        ],
+        "title": "GroupIn",
+        "type": "object"
+      },
+      "GroupPatch": {
+        "properties": {
+          "acronym": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acronym"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "GroupPatch",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -37,6 +253,19 @@
           "interval_s"
         ],
         "title": "HeartbeatIn",
+        "type": "object"
+      },
+      "LockIn": {
+        "properties": {
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "locked"
+        ],
+        "title": "LockIn",
         "type": "object"
       },
       "MemberPush": {
@@ -104,6 +333,659 @@
           "state"
         ],
         "title": "NoticeDone",
+        "type": "object"
+      },
+      "OperationIn": {
+        "properties": {
+          "assembly_at": {
+            "description": "without a zone: local time",
+            "format": "date-time",
+            "title": "Assembly At",
+            "type": "string"
+          },
+          "author_person_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the mission's author (a person); default: the creator",
+            "title": "Author Person Id"
+          },
+          "base_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the base of the event profile; default: Settings → Operations",
+            "title": "Base Profile Id"
+          },
+          "climate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A name from the climate list (stored by value)",
+            "title": "Climate"
+          },
+          "dont_end_automatically": {
+            "default": false,
+            "title": "Dont End Automatically",
+            "type": "boolean"
+          },
+          "duration_minutes": {
+            "default": 180,
+            "maximum": 1440.0,
+            "minimum": 15.0,
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "hosted: the invited groups",
+            "title": "Group Ids"
+          },
+          "hold": {
+            "default": "on",
+            "description": "hold the host; without Publish operations it is a request",
+            "enum": [
+              "on",
+              "off"
+            ],
+            "title": "Hold",
+            "type": "string"
+          },
+          "host_group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "guest: the group whose server it is",
+            "title": "Host Group Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "default: <acronym> | <title>",
+            "title": "Hostname"
+          },
+          "how_to_join": {
+            "default": "",
+            "description": "guest: server, password, contacts",
+            "maxLength": 1024,
+            "title": "How To Join",
+            "type": "string"
+          },
+          "kind": {
+            "default": "internal",
+            "enum": [
+              "internal",
+              "guest",
+              "hosted",
+              "zeus",
+              "training"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_players": {
+            "anyOf": [
+              {
+                "maximum": 256.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "default: the mission's playable slots",
+            "title": "Max Players"
+          },
+          "note": {
+            "default": "",
+            "description": "for staff",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "public": {
+            "default": true,
+            "description": "on the status page and the calendar",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the event server; default: Settings → Operations",
+            "title": "Server Id"
+          },
+          "signup_limit": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus / training: how many may come (0 / null: no limit)",
+            "title": "Signup Limit"
+          },
+          "signup_opens_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Opens At"
+          },
+          "start_at": {
+            "format": "date-time",
+            "title": "Start At",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "verify_signatures": {
+            "default": true,
+            "title": "Verify Signatures",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title",
+          "assembly_at",
+          "start_at"
+        ],
+        "title": "OperationIn",
+        "type": "object"
+      },
+      "OperationPatch": {
+        "properties": {
+          "assembly_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assembly At"
+          },
+          "author_person_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Person Id"
+          },
+          "base_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Profile Id"
+          },
+          "climate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Climate"
+          },
+          "confirm": {
+            "default": false,
+            "description": "go on with a change of frozen parts (Manage operations)",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "dont_end_automatically": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dont End Automatically"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 15.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
+          },
+          "group_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Ids"
+          },
+          "hold": {
+            "anyOf": [
+              {
+                "enum": [
+                  "on",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold"
+          },
+          "host_group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Group Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "how_to_join": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "How To Join"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "internal",
+                  "guest",
+                  "hosted",
+                  "zeus",
+                  "training"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "max_players": {
+            "anyOf": [
+              {
+                "maximum": 256.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Players"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "profile_keep": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "keep the event profile after the operation",
+            "title": "Profile Keep"
+          },
+          "public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          },
+          "signup_limit": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Limit"
+          },
+          "signup_opens_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Opens At"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "verify_signatures": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Signatures"
+          }
+        },
+        "title": "OperationPatch",
+        "type": "object"
+      },
+      "OpordIn": {
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Command & signal",
+            "title": "Command"
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution"
+          },
+          "mission": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mission"
+          },
+          "situation": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Situation"
+          },
+          "sustainment": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sustainment"
+          }
+        },
+        "title": "OpordIn",
+        "type": "object"
+      },
+      "OrbatIn": {
+        "properties": {
+          "text": {
+            "description": "# Squad lines, then slots: 'Name [Role] xN', '!' closes one",
+            "maxLength": 4000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "OrbatIn",
+        "type": "object"
+      },
+      "OrganisersIn": {
+        "properties": {
+          "person_ids": {
+            "description": "the co-organisers (persons); the creator organises anyway",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 50,
+            "title": "Person Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "person_ids"
+        ],
+        "title": "OrganisersIn",
+        "type": "object"
+      },
+      "PickIn": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "a .pbo in the server's missions folder",
+            "maxLength": 200,
+            "minLength": 5,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PickIn",
+        "type": "object"
+      },
+      "PlaceIn": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "maybe",
+                  "cant",
+                  "reserve",
+                  "coming"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null: off every list",
+            "title": "Status"
+          }
+        },
+        "title": "PlaceIn",
+        "type": "object"
+      },
+      "RejectIn": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "RejectIn",
         "type": "object"
       },
       "RoleIn": {
@@ -207,6 +1089,26 @@
         "title": "RosterMember",
         "type": "object"
       },
+      "SignupIn": {
+        "properties": {
+          "status": {
+            "description": "maybe, cant (a zeus operation's Not coming), reserve (no slot free for you) or coming (zeus / training)",
+            "enum": [
+              "maybe",
+              "cant",
+              "reserve",
+              "coming"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "SignupIn",
+        "type": "object"
+      },
       "SteamBody": {
         "properties": {
           "steam": {
@@ -221,6 +1123,60 @@
           "steam"
         ],
         "title": "SteamBody",
+        "type": "object"
+      },
+      "TemplateIn": {
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "text"
+        ],
+        "title": "TemplateIn",
+        "type": "object"
+      },
+      "TemplatePatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "TemplatePatch",
         "type": "object"
       },
       "ValidationError": {
@@ -268,7 +1224,7 @@
   "info": {
     "description": "Routes marked x-act-as accept the header X-Act-As: discord:<id>.",
     "title": "Arma 3 Server Supervisor: the Discord bot's routes",
-    "x-api-level": 1
+    "x-api-level": 2
   },
   "openapi": "3.1.0",
   "paths": {
@@ -314,7 +1270,7 @@
         "operationId": "stream_api_events_stream_get",
         "parameters": [
           {
-            "description": "Comma separated: server, reservation, job, servers, member, notice (default: all)",
+            "description": "Comma separated: server, operation, job, servers, member, notice (default: all)",
             "in": "query",
             "name": "kinds",
             "required": false,
@@ -327,7 +1283,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Comma separated: server, reservation, job, servers, member, notice (default: all)",
+              "description": "Comma separated: server, operation, job, servers, member, notice (default: all)",
               "title": "Kinds"
             }
           },
@@ -1087,6 +2043,3190 @@
         "tags": [
           "members"
         ]
+      }
+    },
+    "/api/operations": {
+      "get": {
+        "description": "The operations the caller may see, latest first (``upcoming``: soonest first). OPORD paragraphs are only\nflags here (set or not).",
+        "operationId": "list_operations_api_operations_get",
+        "parameters": [
+          {
+            "description": "comma separated: draft, pending, published, ended, cancelled",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "comma separated: draft, pending, published, ended, cancelled",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "only those not over (soonest first)",
+            "in": "query",
+            "name": "upcoming",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "only those not over (soonest first)",
+              "title": "Upcoming",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Operations Api Operations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Operations",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "post": {
+        "description": "A new draft. Hold the host is on by default (without Publish operations: a request); its window is checked\nagainst the other operations' (409, code clash).",
+        "operationId": "create_operation_api_operations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Operation Api Operations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Create Operation",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/changes": {
+      "get": {
+        "description": "Every change after ``after``, oldest first: ``{seq, operation}`` (the whole operation as it is now) or\n``{seq, deleted}`` (a tombstone, kept 30 days). ``seq``: the newest number; ``more``: call again with the last\nitem's seq. ``reset``: ``after`` is older than the tombstones kept (or unknown): the list holds every operation\nnot over for long, and anything missing from it is gone.",
+        "operationId": "changes_api_operations_changes_get",
+        "parameters": [
+          {
+            "description": "the last seq seen",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "the last seq seen",
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Changes Api Operations Changes Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Changes",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/operations/groups": {
+      "get": {
+        "operationId": "list_groups_api_operations_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Groups Api Operations Groups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Groups",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "post": {
+        "description": "Another group (a guest operation's host, a hosted operation's guest). Groups are renamed, never deleted.",
+        "operationId": "add_group_api_operations_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Group Api Operations Groups Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Add Group",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/groups/{group_id}": {
+      "patch": {
+        "operationId": "rename_group_api_operations_groups__group_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rename Group Api Operations Groups  Group Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Rename Group",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/meta": {
+      "get": {
+        "description": "What a client needs to draw and edit operations: the kinds and their names, the climates, the other groups,\nthe Discord roles table and the roles whose app role may manage or approve operations (for channel\noverwrites), the defaults, the window's minutes, the limits, the time zone and ``api_level``.",
+        "operationId": "meta_api_operations_meta_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Meta Api Operations Meta Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Meta",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/missions": {
+      "get": {
+        "description": "The missions (.pbo) in the server's missions folder, to pick one.",
+        "operationId": "server_missions_api_operations_missions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Server Missions Api Operations Missions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Server Missions",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/persons": {
+      "get": {
+        "description": "Members of the Discord guild, for the organiser and author pickers.",
+        "operationId": "persons_api_operations_persons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Persons Api Operations Persons Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Persons",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/requests": {
+      "get": {
+        "description": "Approval requests (``publish``, ``hold``, ``times``): all of them for Approve operations, else those on the\noperations the caller organises. ``blocked``: why approving would be refused now (a clash); ``may_decide``.",
+        "operationId": "list_requests_api_operations_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "withdrawn",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Requests Api Operations Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Requests",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/requests/{request_id}/approve": {
+      "post": {
+        "description": "Approve (Approve operations; not one's own request): ``publish`` publishes the operation and releases its\nstaged files, ``hold`` holds the host, ``times`` moves it. A clash refuses it (409, code clash: nothing\nchanges); a request decided meanwhile is 409 (code not_pending).",
+        "operationId": "approve_request_api_operations_requests__request_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Request Api Operations Requests  Request Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Approve Request",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/requests/{request_id}/reject": {
+      "post": {
+        "description": "Reject with a reason: a pending operation is a draft again, a hold request is turned off, a proposal is\ndropped.",
+        "operationId": "reject_request_api_operations_requests__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Request Api Operations Requests  Request Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Reject Request",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/templates": {
+      "get": {
+        "description": "The shared ORBAT templates (``mine``: the caller may rename, overwrite or delete it).",
+        "operationId": "list_templates_api_operations_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Templates Api Operations Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "List Templates",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "post": {
+        "description": "Save an ORBAT as a template (checked like an ORBAT, 422 code bad_orbat with ``problems``). A name that\nexists is overwritten when the caller may change that template, else 409 (code name_taken).",
+        "operationId": "save_template_api_operations_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Save Template Api Operations Templates Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Save Template",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_template_api_operations_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Delete Template",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "patch": {
+        "description": "Rename or overwrite a template (who saved it, or Manage operations).",
+        "operationId": "change_template_api_operations_templates__template_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplatePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Change Template Api Operations Templates  Template Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Change Template",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}": {
+      "delete": {
+        "description": "Only a draft that was never published (its organisers or Manage operations); it leaves a tombstone in the\nfeed. A published operation is cancelled instead.",
+        "operationId": "delete_operation_api_operations__op_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Delete Operation",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "get": {
+        "description": "The whole operation (``ETag``: its revision), with ``my``: whether the caller organises it and what they may\ndo now (``actions``).",
+        "operationId": "get_operation_api_operations__op_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Operation Api Operations  Op Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Get Operation",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "patch": {
+        "description": "Change details (fields left out stay). From the quiet period the times can't move, and the server, base and\nevent profile settings change only with Manage operations and ``confirm`` (409, code frozen / confirm). New\ntimes for a published operation from someone without Publish operations are a proposal for a moderator\n(``proposal``: the request's id; the operation keeps its times until it is approved).",
+        "operationId": "update_operation_api_operations__op_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Operation Api Operations  Op Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Update Operation",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/cancel": {
+      "post": {
+        "description": "A published operation becomes ``cancelled`` (kept as history; a window it has in progress ends now); a\ndraft that was never published is deleted (the answer is null).",
+        "operationId": "cancel_api_operations__op_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Cancel Api Operations  Op Id  Cancel Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Cancel",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/copy": {
+      "post": {
+        "description": "*Copy operation*: a new draft with the same details, OPORD, files and organisers, a week later unless the\ntimes are given.",
+        "operationId": "copy_api_operations__op_id__copy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Copy Api Operations  Op Id  Copy Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Copy",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/discord": {
+      "put": {
+        "description": "The bot's plumbing: the operation's channel and thread (the app links to them). Fields left out stay; null\nclears one. No revision: only a new place in the feed.",
+        "operationId": "set_discord_api_operations__op_id__discord_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Discord Api Operations  Op Id  Discord Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Discord",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/operations/{op_id}/files/{name}": {
+      "get": {
+        "description": "A file of the operation by the name its ``files`` give (preset.html, map.png, banner.jpg).",
+        "operationId": "get_file_api_operations__op_id__files__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Get File",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/files/{slot}": {
+      "delete": {
+        "operationId": "remove_file_api_operations__op_id__files__slot__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "enum": [
+                "map",
+                "banner",
+                "preset"
+              ],
+              "title": "Slot",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove File Api Operations  Op Id  Files  Slot  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Remove File",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/images/{slot}": {
+      "put": {
+        "description": "The OPORD's map or banner: PNG, JPEG or WebP, at most 8 MB.",
+        "operationId": "upload_image_api_operations__op_id__images__slot__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "enum": [
+                "map",
+                "banner"
+              ],
+              "title": "Slot",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_image_api_operations__op_id__images__slot__put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Image Api Operations  Op Id  Images  Slot  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Upload Image",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/mission": {
+      "delete": {
+        "operationId": "clear_mission_api_operations__op_id__mission_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clear Mission Api Operations  Op Id  Mission Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Clear Mission",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "put": {
+        "description": "Upload the mission with its report (``mission.report``) and the warnings (missing mods or DLC, errors; they\nnever block). Without Publish operations, before the operation is published, it waits in the operation's folder\n(``mission.staged``); else it goes into the missions folder (409, code name_in_use, when another profile uses a\nmission of that name).",
+        "operationId": "upload_mission_api_operations__op_id__mission_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_mission_api_operations__op_id__mission_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Mission Api Operations  Op Id  Mission Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Upload Mission",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/mission/pick": {
+      "post": {
+        "description": "A mission already on the server (``GET /api/operations/missions``).",
+        "operationId": "pick_mission_api_operations__op_id__mission_pick_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pick Mission Api Operations  Op Id  Mission Pick Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Pick Mission",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/offers/{offer_id}/accept": {
+      "post": {
+        "description": "*Take it*: the offered slot (409, code offer_gone, when the offer ended).",
+        "operationId": "accept_offer_api_operations__op_id__offers__offer_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Accept Offer Api Operations  Op Id  Offers  Offer Id  Accept Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Accept Offer",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/offers/{offer_id}/decline": {
+      "post": {
+        "description": "Decline a personal offer: it goes to the next one on the reserve list.",
+        "operationId": "decline_offer_api_operations__op_id__offers__offer_id__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decline Offer Api Operations  Op Id  Offers  Offer Id  Decline Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Decline Offer",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/offers/{offer_id}/delivered": {
+      "post": {
+        "description": "The bot delivered an offer (``dm``, or a ping in the thread when DMs are closed): a personal offer's clock\n(``operations.offer_timeout_minutes``) starts now. Reporting it again changes nothing.",
+        "operationId": "offer_delivered_api_operations__op_id__offers__offer_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveredIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Offer Delivered Api Operations  Op Id  Offers  Offer Id  Delivered Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Offer Delivered",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/operations/{op_id}/opord": {
+      "put": {
+        "description": "The OPORD's paragraphs (Markdown); those left out stay. Situation and Mission are needed to publish.",
+        "operationId": "set_opord_api_operations__op_id__opord_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpordIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Opord Api Operations  Op Id  Opord Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Opord",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/orbat": {
+      "delete": {
+        "operationId": "clear_orbat_api_operations__op_id__orbat_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clear Orbat Api Operations  Op Id  Orbat Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Clear Orbat",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "get": {
+        "description": "The ORBAT as text (roles by their current name), for the editor.",
+        "operationId": "get_orbat_api_operations__op_id__orbat_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Orbat Api Operations  Op Id  Orbat Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Get Orbat",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "put": {
+        "description": "Replace the ORBAT (organisers; not zeus / training). Every problem is named by line (422, code bad_orbat,\n``problems``). Holders keep the slot that matches by squad, name and position among same-named slots; the\nothers go to the top of the reserve list (``outcome.displaced``).",
+        "operationId": "set_orbat_api_operations__op_id__orbat_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrbatIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Orbat Api Operations  Op Id  Orbat Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Orbat",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/organisers": {
+      "put": {
+        "operationId": "set_organisers_api_operations__op_id__organisers_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganisersIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Organisers Api Operations  Op Id  Organisers Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Set Organisers",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/preset": {
+      "put": {
+        "description": "The launcher preset: kept and parsed at once (422, code bad_preset, without mods or DLC). Without Publish\noperations, before the operation is published, it only waits (``files.preset.staged``).",
+        "operationId": "upload_preset_api_operations__op_id__preset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The revision the change was made on: 409 (code stale) if it moved on",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The revision the change was made on: 409 (code stale) if it moved on",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_preset_api_operations__op_id__preset_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Preset Api Operations  Op Id  Preset Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Upload Preset",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/publish": {
+      "post": {
+        "description": "Publish a draft (Publish operations): Situation and Mission must be written (422, code incomplete,\n``missing``). Staged files are released (the mission goes into the missions folder) and the event profile is\nbuilt.",
+        "operationId": "publish_api_operations__op_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Publish Api Operations  Op Id  Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Publish",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/signup": {
+      "delete": {
+        "description": "Leave your slot or the lists (until the start). A freed slot is offered to the reserve list.",
+        "operationId": "leave_api_operations__op_id__signup_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Leave Api Operations  Op Id  Signup Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Leave",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      },
+      "put": {
+        "description": "Maybe, Can't come (Not coming), the reserve list (only when no slot is free for you), or Coming (zeus /\ntraining; code full at the limit). Maybe and Can't come work before sign-up opens.",
+        "operationId": "answer_api_operations__op_id__signup_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Answer Api Operations  Op Id  Signup Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Answer",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/signups/{person_id}": {
+      "put": {
+        "description": "Organisers: put a person on a list (Coming past the limit too) or off every list (``status`` null).",
+        "operationId": "place_person_api_operations__op_id__signups__person_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "title": "Person Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Place Person Api Operations  Op Id  Signups  Person Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Place Person",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/slots/{slot_id}/assign": {
+      "post": {
+        "description": "Organisers: put a person (anyone on the Discord server) in a slot, locked. A previous holder goes to the top\nof the reserve list.",
+        "operationId": "assign_slot_api_operations__op_id__slots__slot_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Assign Slot Api Operations  Op Id  Slots  Slot Id  Assign Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Assign Slot",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/slots/{slot_id}/holder": {
+      "delete": {
+        "description": "Organisers: take the holder out of a slot; it is offered to the reserve list.",
+        "operationId": "remove_holder_api_operations__op_id__slots__slot_id__holder_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove Holder Api Operations  Op Id  Slots  Slot Id  Holder Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Remove Holder",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/slots/{slot_id}/lock": {
+      "put": {
+        "description": "Organisers: lock a free slot closed (or a held one as an assignment), or unlock it.",
+        "operationId": "lock_slot_api_operations__op_id__slots__slot_id__lock_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Lock Slot Api Operations  Op Id  Slots  Slot Id  Lock Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Lock Slot",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/slots/{slot_id}/take": {
+      "post": {
+        "description": "Take a slot (Sign up for operations; moves you from your other slot and off the lists). Refusals (409 / 403)\ncarry a ``code``: not_published, not_open, closed, taken, offered, locked, role, overlap (``other``), already,\nno_person, not_allowed.",
+        "operationId": "take_slot_api_operations__op_id__slots__slot_id__take_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Take Slot Api Operations  Op Id  Slots  Slot Id  Take Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Take Slot",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/submit": {
+      "post": {
+        "description": "*Send for approval*: a draft of an organiser without Publish operations becomes ``pending`` (locked until a\nmoderator decides or it is withdrawn). Needs Situation and Mission (422, code incomplete); a zeus or training\noperation, or a caller who may publish, gets 409 (code publish_instead).",
+        "operationId": "submit_api_operations__op_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Api Operations  Op Id  Submit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Submit",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/withdraw": {
+      "post": {
+        "description": "*Withdraw request*: a pending operation is a draft again.",
+        "operationId": "withdraw_api_operations__op_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Api Operations  Op Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Withdraw",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
       }
     },
     "/api/system/info": {

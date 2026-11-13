@@ -71,7 +71,8 @@ class Sent:
 
     @property
     def embeds(self) -> list[Any]:
-        return (self.edits[-1] if self.edits else self.kwargs).get("embeds", [])
+        now = self.edits[-1] if self.edits else self.kwargs
+        return now.get("embeds") or ([now["embed"]] if now.get("embed") else [])
 
     @property
     def text(self) -> str:
@@ -93,6 +94,7 @@ class FakeMessage:
     type: discord.MessageType = discord.MessageType.default
     channel: Any = None  # set for a message the bot may delete from ``posts``
     components: list[Any] = field(default_factory=list)  # action rows with ``children``
+    embeds: list[Any] = field(default_factory=list)
 
     async def delete(self) -> None:
         self.channel.posts.remove(self)
@@ -110,7 +112,7 @@ def _components(message: Sent) -> list[Any]:
 
 def _bot_messages(sent: list[Sent]) -> list[FakeMessage]:
     return [FakeMessage(SimpleNamespace(id=BOT_ID, name="bot", display_name="bot"), m.content or "", id=m.id,
-                        type=m.type, components=_components(m)) for m in sent if not m.deleted]
+                        type=m.type, components=_components(m), embeds=list(m.embeds)) for m in sent if not m.deleted]
 
 
 def _not_found(what: str) -> discord.NotFound:

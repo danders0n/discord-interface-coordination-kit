@@ -1,7 +1,9 @@
-"""The Discord client: intents, the guild's slash commands, and the background tasks (docs/PLAN.md, phase 1).
+"""The Discord client: intents, the guild's slash commands, and the background tasks (docs/PLAN.md, phase 1;
+docs/PLAN-front-end.md).
 
 Commands are synced to the one guild only. The scheduler, the staff log and the heartbeat run as tasks next to
-the gateway connection. Cogs get the shared :class:`~app.services.Services`."""
+the gateway connection; the supervisor work (the roster push, the notices, the operations feed, the live events)
+starts once the supervisor check passes. Cogs get the shared :class:`~app.services.Services`."""
 
 from __future__ import annotations
 
@@ -12,27 +14,13 @@ import discord
 from discord.ext import commands
 
 from app import heartbeat, startup_checks, supervisor_check
-from app.activity import Activity
 from app.admin.cog import AdminCog
-from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
-from app.i18n import Translator, t
-from app.privacy.cog import PrivacyCog
-from app.servers.cog import ServerCog
-from app.eventchannel.service import EventChannels
-from app.events.cog import EventCog
-from app.feedback.service import FeedbackService
-from app.profiles.service import ProfileService
-from app.events.header import Header
-from app.events.service import EventService
-from app.events.ui import CreateEvent, PanelAction, PanelButton, expired
-from app.approval.ui import ApprovalAction
 from app.archive.cog import ArchiveCog
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService
-from app.attendance.cog import AttendanceCog
-from app.attendance.service import AttendanceService
-from app.attendance.stats import StatsReader
-from app.attendance.ui import ReportAction
+from app.channel.service import OperationChannels
+from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
+from app.i18n import Translator, t
 from app.links.cog import LinkCog
 from app.links.service import LinkService
 from app.links.ui import LinkNow
@@ -40,19 +28,20 @@ from app.links.watch import LinkWatch
 from app.live import Live
 from app.notices.deliver import Delivery
 from app.notices.service import Notices
+from app.operations.feed import Feed
+from app.operations.header import Header
+from app.privacy.cog import PrivacyCog
 from app.roster.service import Member as RosterMember
 from app.roster.service import Role as RosterRole
 from app.roster.service import Roster
-from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.services import Services
-from app.signup.service import Member, SignupService
 from app.staff_threads import KINDS
 
 log = logging.getLogger(__name__)
 
 
 def intents() -> discord.Intents:
-    """Server Members for role changes and departures (squad.xml, sign-ups); Message Content for the archive's
+    """Server Members for the roster (joins, departures, role changes); Message Content for the archive's
     transcripts. Both are privileged and switched on in the Discord developer portal."""
     chosen = discord.Intents.default()
     chosen.members = True
@@ -78,9 +67,9 @@ class EventBot(commands.Bot):
         self._tasks: list[asyncio.Task] = []
         self._started = False
         services.roles_of = self.roles_of
+        self.build_operations()
         self.build_front_end()
         self.build_links()
-        self.build_events()
         services.archive = ArchiveService(services.db, services.store, services.scheduler.clock)
         services.exporter = Exporter(services, self.guild)
 
@@ -92,37 +81,19 @@ class EventBot(commands.Bot):
         return self.get_guild(self.services.settings.guild_id)
 
     def roles_of(self, member_id: int) -> frozenset[int] | None:
-        """A member's role ids now, or None when they are not on the server (for offers and flags)."""
+        """A member's role ids now, or None when they are not on the server."""
         guild = self.guild()
         member = guild.get_member(member_id) if guild is not None else None
         return frozenset(role.id for role in member.roles) if member is not None else None
 
-    def build_events(self) -> None:
-        """The event stack (docs/PLAN.md, phase 4): the channels are the notifier of the event and sign-up
-        services, and need the guild, so the bot puts them together."""
+    def build_operations(self) -> None:
+        """The operation channels, drawn from the supervisor's change feed (docs/PLAN-front-end.md, *Sync and
+        drawing*), and the header's calendar."""
         s = self.services
-        channels = EventChannels(s.db, s.store, lambda: s.ids, s.scheduler, self.guild)
-        events = EventService(s.db, s.store, lambda: s.ids, s.scheduler, s.reservations, channels, link=channels.link)
-        signups = SignupService(s.db, s.store, lambda: s.ids, s.scheduler, channels, self.roles_of)
-        channels.events, channels.signups = events, signups
-        channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
-        channels.staff, channels.threads, channels.services, channels.roles_of = s.staff, s.threads, s, self.roles_of
-        events.attendance = AttendanceService(s.db, s.store, s.scheduler, s.reservations, StatsReader(s.supervisor),
-                                              s.links, events, channels, self.names_of)
-        s.feedback = channels.feedback = events.attendance.feedback = FeedbackService(s.db, s.store, s.scheduler.clock)
-        s.profiles = events.profiles = ProfileService(s.db, s.store, s.scheduler, s.supervisor, events, channels)
-        s.channels, s.events, s.signups, s.attendance = channels, events, signups, events.attendance
-        activity = Activity(s.db, s.store, s.staff.post, s.scheduler.clock)  # docs/PLAN.md, *Notifications*
-        for service in (events, signups, events.attendance, s.feedback, s.profiles):
-            service.activity = activity
-
-    def names_of(self, member_id: int) -> list[str]:
-        """A member's names on the server (nick, display name, username), for matching an in-game name."""
-        guild = self.guild()
-        member = guild.get_member(member_id) if guild is not None else None
-        if member is None:
-            return []
-        return [n for n in (member.nick, member.global_name, member.display_name, member.name) if n]
+        s.channels = OperationChannels(s.db, s.store, lambda: s.ids, s.scheduler, self.guild, s.supervisor)
+        s.channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
+        s.channels.staff = s.staff
+        s.feed = Feed(s.db, s.supervisor, s.channels, s.scheduler.clock)
 
     def build_front_end(self) -> None:
         """The roster push, the notices and the live events (docs/PLAN-front-end.md)."""
@@ -130,7 +101,8 @@ class EventBot(commands.Bot):
         s.roster = Roster(s.supervisor, s.scheduler, self.roster_members, self.roster_roles, self.roster_one)
         s.notices = Notices(s.db, s.supervisor, s.scheduler.clock)
         Delivery(s, self.guild).install(s.notices)
-        s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake()})
+        s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake(),
+                                     "operation": lambda _event: s.feed.wake()})
 
     def roster_members(self) -> list[RosterMember] | None:
         """The guild's people for the roster push; None until Discord has sent the member list."""
@@ -176,13 +148,10 @@ class EventBot(commands.Bot):
         s.link_watch = LinkWatch(s, self.guild)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if not self._ours(before.guild):
+        """The supervisor frees a member's slots when they lose the sign-up role; the bot only pushes the change."""
+        if not self._ours(before.guild) or after.bot:
             return
-        if before.roles != after.roles:
-            previous = frozenset(r.id for r in before.roles)
-            await self.services.signups.member_changed(Member(after.id, frozenset(r.id for r in after.roles)),
-                                                       previous=previous)
-        if not after.bot and (before.roles != after.roles or before.display_name != after.display_name):
+        if before.roles != after.roles or before.display_name != after.display_name:
             await self.services.roster.member_changed(roster_member(after, after.guild.id))
             if set(after.roles) - set(before.roles):  # (after the push: the supervisor knows the new roles)
                 await self.services.link_watch.roles_gained(after)
@@ -193,27 +162,21 @@ class EventBot(commands.Bot):
             if member is not None:
                 await self.services.roster.member_changed(member)
 
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        await expired(interaction)  # a wizard from before a restart
-
     async def on_member_remove(self, member: discord.Member) -> None:
-        if self._ours(member.guild):
-            await self.services.signups.member_left(member.id)
-            if not member.bot:
-                await self.services.roster.member_left(roster_member(member, member.guild.id))
+        if self._ours(member.guild) and not member.bot:
+            await self.services.roster.member_left(roster_member(member, member.guild.id))
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(CreateEvent, PanelButton, PanelAction, SignupAction, SquadList, OfferAction,  # outlive a restart
-                               ApprovalAction, LinkNow, ReportAction)
+        self.add_dynamic_items(LinkNow)  # outlives a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
-        for cog in (AdminCog(self.services), PrivacyCog(self.services), ServerCog(self.services), EventCog(self.services),
-                    LinkCog(self.services), AttendanceCog(self.services), ArchiveCog(self.services)):
+        for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),
+                    ArchiveCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before
-        # them would be marked done having done nothing (an archive, a stale draft's channel, a ping).
+        # them would be marked done having done nothing (an archive, a ping).
         self._tasks = [
             asyncio.create_task(self.services.staff.run(self._send_staff), name="staff-log"),
             asyncio.create_task(heartbeat.run(self.services.supervisor), name="heartbeat"),
@@ -233,11 +196,14 @@ class EventBot(commands.Bot):
             self.start_front_end), name="supervisor-check"))
 
     async def start_front_end(self) -> None:
-        """The roster push (now, then daily), the notices worker and the live events: after on_ready, as notices
-        need the guild, and after the supervisor check."""
-        await self.services.roster.start()
+        """The roster push (now, then daily), the redraw of what was drawn before, the notices worker, the operations
+        feed and the live events: after on_ready, as they need the guild, and after the supervisor check (a redraw
+        fetches files and writes the channels' places there)."""
+        s = self.services
+        await s.roster.start()
+        await s.channels.refresh_all()  # what was drawn before; the feed brings what changed meanwhile
         names = {task.get_name() for task in self._tasks}
-        for name, job in (("notices", self.services.notices.run), ("live", self.services.live.run)):
+        for name, job in (("notices", s.notices.run), ("operations", s.feed.run), ("live", s.live.run)):
             if name not in names:
                 self._tasks.append(asyncio.create_task(job(), name=name))
 
@@ -279,9 +245,6 @@ class EventBot(commands.Bot):
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
         try:
-            await self.services.events.resume()  # drafts without their cancel action
-            await self.services.attendance.resume()  # ended events without their attendance read
-            await self.services.channels.refresh_all()  # whatever changed while the bot was down
             self.services.channels.header.request()
             try:
                 await self.services.link_watch.start()  # the hourly reminders, the first rollout

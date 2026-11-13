@@ -29,16 +29,9 @@ class Ids:
     announcements: int | None = None
     staff: int | None = None
     link_reminder: int | None = None
-    top: tuple[int, ...] = ()  # channels above the events, in order (the header first unless listed)
-    member: frozenset[int] = frozenset()
-    mission_maker: int | None = None
+    top: tuple[int, ...] = ()  # channels above the operations, in order (the header first unless listed)
     announcement: int | None = None
-    signup: frozenset[int] = frozenset()
     permissions: Mapping[str, frozenset[int]] = field(default_factory=dict)
-    dlc: Mapping[str, int] = field(default_factory=dict)  # Creator DLC key -> role
-    climates: Mapping[int, str] = field(default_factory=dict)  # climate role -> its name, in config order
-    rank: frozenset[int] = frozenset()  # membership ranks: squad.xml, link reminders
-    remark: Mapping[int, str] = field(default_factory=dict)  # squad.xml remark role -> its name, in config order
 
 
 def _variable(path: str) -> str:
@@ -104,22 +97,11 @@ def resolve(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
                               if (i := r.channel(ref, "channels.top", False)) is not None))
     if channels["header"] is not None and channels["header"] not in top:
         top = (channels["header"], *top)
-    roles = settings.roles
     ids = Ids(
         **channels,
         top=top,
-        member=r.roles(roles.member, "roles.member"),
-        mission_maker=r.role(roles.mission_maker, "roles.mission_maker"),
-        announcement=r.role(roles.announcement, "roles.announcement"),
-        signup=r.roles(roles.signup, "roles.signup"),
+        announcement=r.role(settings.roles.announcement, "roles.announcement"),
         permissions={name: r.roles(refs, f"permissions.{name}")
                      for name, refs in settings.permissions.model_dump().items()},
-        dlc={key: role for key, ref in settings.dlc_roles.model_dump().items()
-             if (role := r.role(ref, f"dlc_roles.{key}")) is not None},
-        climates={role: guild.get_role(role).name for ref in settings.events.climate_roles
-                  if (role := r.role(ref, "events.climate_roles")) is not None},
-        rank=r.roles(roles.rank, "roles.rank"),
-        remark={role: guild.get_role(role).name for ref in roles.remark
-                if (role := r.role(ref, "roles.remark")) is not None},
     )
     return ids, r.problems

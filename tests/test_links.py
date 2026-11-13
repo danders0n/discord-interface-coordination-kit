@@ -34,7 +34,7 @@ async def stack(services, guild, clock, fake):
     fake.rank_roles = {str(RANK)}
     base = services.settings
     settings = make_settings(base.data_dir, channels=base.channels.model_dump() | {"link_reminder": REMINDERS},
-                             permissions=base.permissions.model_dump() | {"manage_links": [LINKS_ROLE]})
+                             permissions={"bot_admin": [LINKS_ROLE]})
     services.store.current = settings
     services.ids, _ = resolve(guild, settings)
 
@@ -198,23 +198,14 @@ async def test_gaining_a_rank_reminds_at_once_and_closed_dms_ping_the_channel(st
     assert cid.dms == []
 
 
-async def test_a_first_slot_without_a_link_asks_for_it(stack, guild, fake):
-    from app.signup.service import Outcome
-    from app.signup.ui import answer
-
-    anna = person(guild, fake, 1, "anna_dc", RANK)
-    first = asking(stack, guild, anna)
-    await answer(first, Outcome(), "You have the slot.", ask_link=True)
-    assert "Link your Steam account" in first.replies[0].content
-    assert first.replies[0].kwargs["view"].children[0].custom_id == "link:now"
-    second = asking(stack, guild, anna)
-    await answer(second, Outcome(), "You have the slot.", ask_link=True)
-    assert second.replies[0].content == "You have the slot." and "view" not in second.replies[0].kwargs
-    bob = person(guild, fake, 2, "bob_dc", RANK)
+async def test_a_first_sign_up_without_a_link_asks_once(stack, guild, fake):
+    """The sign-up buttons (docs/PLAN-front-end.md, phase 4) ask with *Link now* when this says so."""
+    person(guild, fake, 1, "anna_dc", RANK)
+    assert await stack.links.ask_at_signup(1) is True
+    assert await stack.links.ask_at_signup(1) is False
+    person(guild, fake, 2, "bob_dc", RANK)
     fake.persons["2"].update(steam_uid=BOB, steam_state="unconfirmed")
-    linked = asking(stack, guild, bob)
-    await answer(linked, Outcome(), "You have the slot.", ask_link=True)
-    assert linked.replies[0].content == "You have the slot."  # linked already, even if not confirmed yet
+    assert await stack.links.ask_at_signup(2) is False  # linked already, even if not confirmed yet
 
 
 def staff_asking(stack, guild, fake) -> FakeInteraction:
@@ -282,9 +273,3 @@ async def test_one_failed_reminder_doesnt_stop_the_others_and_is_tried_again(sta
     assert len(open_.dms) == 1
     reminders = await stack.links.reminders()
     assert 2 in reminders and 1 not in reminders  # asked again next hour
-
-
-async def test_the_attendance_counts_only_confirmed_links(stack, fake):
-    fake.person(1, "anna", steam_uid=ANNA, steam_state="confirmed")
-    fake.person(2, "bob", steam_uid=BOB, steam_state="unconfirmed")
-    assert await stack.links.steam_ids() == {1: ANNA}

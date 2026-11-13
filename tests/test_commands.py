@@ -84,21 +84,6 @@ async def test_plain_replies_disappear_and_ones_to_use_or_read_stay(services):
     assert deferred.original_edits == [{"content": "Done.", "view": None}]
 
 
-async def test_slow_panel_work_answers_thinking_first(services, monkeypatch):
-    """Discord drops an interaction not answered within 3 seconds; cancelling archives the channel, which takes longer."""
-    from app.events import ui
-
-    async def slow_cancel():
-        assert interaction.response.deferred_with == {"ephemeral": True, "thinking": True}  # answered before the work
-        return True
-
-    interaction = FakeInteraction(services, FakeMember(1), ENGLISH)
-    modal = ui.TextModal(interaction, "Cancel event", "", 500, lambda _text: slow_cancel(), done="Cancelled.")
-    modal.text._value = "no Zeus"
-    await modal.on_submit(interaction)
-    assert interaction.followup.sent[0].content == "Cancelled."
-
-
 async def test_a_failing_command_answers_and_logs(services, caplog, monkeypatch):
     cog = AdminCog(services)
     monkeypatch.setattr(services.store, "reload", lambda: 1 / 0)
@@ -123,9 +108,3 @@ async def test_a_failing_button_or_modal_answers_the_member(services, caplog):
     await modal.on_error(submitted, RuntimeError("boom"))
     assert submitted.replies[0].content.startswith("Something went wrong")
     assert "boom" in caplog.text
-
-
-def test_a_display_name_never_becomes_a_spreadsheet_formula():
-    from app.attendance.cog import cell
-
-    assert cell("=HYPERLINK(\"x\")") == "'=HYPERLINK(\"x\")" and cell("@cmd") == "'@cmd" and cell("Anna") == "Anna"

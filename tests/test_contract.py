@@ -1,7 +1,7 @@
 """The fake supervisor against the supervisor's contract (docs/PLAN-front-end.md, *Tests and the fake supervisor*).
 
-The fake serves every route of ``tests/contract/openapi-bot.json``, and nothing else but the old routes the
-clean-up deletes; requests on contract routes are checked by the fake itself (``contract_check``)."""
+The fake serves every route of ``tests/contract/openapi-bot.json`` and nothing else; requests on them are checked by
+the fake itself (``contract_check``)."""
 
 from __future__ import annotations
 
@@ -12,10 +12,23 @@ import pytest
 from contract_check import CONTRACT, problems, request_problems, routes
 from fake_supervisor import make_app
 
-# Routes of the bot as it was before the supervisor took over (reservations, profiles, stats, server control):
-# deleted with their services in the clean-up phase of docs/PLAN-front-end.md.
-LEGACY = re.compile(r"^/api/(servers|reservations|profiles|jobs|missions|stats)(/|$)")
 SUPERVISOR = Path(__file__).resolve().parents[2] / "arma-server-supervisior" / "docs" / "api" / "openapi-bot.json"
+# The supervisor's phase 4 (ORBAT, sign-ups, offers, templates, approval): the fake serves them with the bot's
+# sign-up buttons and moderation thread (docs/PLAN-front-end.md, phase 4). Every other contract route it serves now.
+PENDING = {
+    ("GET", "/api/operations/requests"), ("POST", "/api/operations/requests/{request_id}/approve"),
+    ("POST", "/api/operations/requests/{request_id}/reject"), ("GET", "/api/operations/templates"),
+    ("POST", "/api/operations/templates"), ("DELETE", "/api/operations/templates/{template_id}"),
+    ("PATCH", "/api/operations/templates/{template_id}"), ("POST", "/api/operations/{op_id}/offers/{offer_id}/accept"),
+    ("POST", "/api/operations/{op_id}/offers/{offer_id}/decline"),
+    ("POST", "/api/operations/{op_id}/offers/{offer_id}/delivered"), ("DELETE", "/api/operations/{op_id}/orbat"),
+    ("GET", "/api/operations/{op_id}/orbat"), ("PUT", "/api/operations/{op_id}/orbat"),
+    ("DELETE", "/api/operations/{op_id}/signup"), ("PUT", "/api/operations/{op_id}/signup"),
+    ("PUT", "/api/operations/{op_id}/signups/{person_id}"), ("POST", "/api/operations/{op_id}/slots/{slot_id}/assign"),
+    ("DELETE", "/api/operations/{op_id}/slots/{slot_id}/holder"), ("PUT", "/api/operations/{op_id}/slots/{slot_id}/lock"),
+    ("POST", "/api/operations/{op_id}/slots/{slot_id}/take"), ("POST", "/api/operations/{op_id}/submit"),
+    ("POST", "/api/operations/{op_id}/withdraw"),
+}
 
 
 def fake_routes() -> set[tuple[str, str]]:
@@ -30,12 +43,11 @@ def fake_routes() -> set[tuple[str, str]]:
 
 
 def test_the_fake_serves_every_contract_route():
-    assert routes() - fake_routes() == set()
+    assert routes() - fake_routes() == PENDING
 
 
-def test_the_fake_serves_nothing_outside_the_contract_but_the_old_routes():
-    extra = {(m, p) for m, p in fake_routes() - routes() if not LEGACY.match(p)}
-    assert extra == set()
+def test_the_fake_serves_nothing_outside_the_contract():
+    assert fake_routes() - routes() == set()
 
 
 def test_the_copy_is_the_supervisors_current_contract():

@@ -1,13 +1,15 @@
 """Is the supervisor ready for this bot? (docs/PLAN-front-end.md, *Start-up checks*.)
 
-- ``GET /api/system/info`` reports an ``api_level`` of at least :data:`API_LEVEL`;
+- ``GET /api/system/info`` reports an ``api_level`` of at least :data:`API_LEVEL` and the capabilities in
+  :data:`CAPABILITIES` (the operations, their change feed and files);
 - the bot's own account holds ``integration.act_as`` (``GET /api/auth/me``), which the roster push, the notices and
   every act-as call need;
 - the supervisor's zone has the same UTC offset now as ``BOT_TIMEZONE`` (a warning only: times typed here are sent
   zone-aware, but staff reading both should see the same clock).
 
 Until the check passes, the bot stays on Discord but holds back its supervisor work (the roster push, the notices,
-the live events) and checks again every minute: refusing to start would only make the service manager restart it in
+the operations feed, the live events) and checks again every minute: refusing to start would only make the service
+manager restart it in
 a loop. A blocking problem goes to the staff log once (not a supervisor that is merely down: the supervisor's own
 webhook reports that); so does a warning, and the moment it passes after being held back."""
 
@@ -24,7 +26,8 @@ from app.i18n import t
 from app.supervisor_client import SupervisorClient, SupervisorError, SupervisorUnreachable
 
 log = logging.getLogger(__name__)
-API_LEVEL = 1  # raised when this bot needs routes an older supervisor lacks (the operations API)
+API_LEVEL = 2  # the operations API (the supervisor's phase 3); raised when the bot needs newer routes
+CAPABILITIES = ("operations", "operation_feed", "operation_files")
 ACT_AS = "integration.act_as"
 RECHECK = 60.0
 
@@ -58,6 +61,10 @@ async def check(client: SupervisorClient, tz: ZoneInfo, language: str, now: date
     if info.api_level < API_LEVEL:
         blocking.append(t("The supervisor's API level is {have}; this bot needs {need}. Update the supervisor.",
                           language, have=info.api_level, need=API_LEVEL))
+    missing = [name for name in CAPABILITIES if not info.has(name)]
+    if missing:
+        blocking.append(t("The supervisor lacks what this bot needs ({capabilities}). Update the supervisor.",
+                          language, capabilities=", ".join(missing)))
     if ACT_AS not in (me.get("permissions") or []):
         blocking.append(t("The bot's supervisor account ({account}) lacks the permission {permission}: give it the "
                           "integration role.", language, account=me.get("username") or "?", permission=ACT_AS))

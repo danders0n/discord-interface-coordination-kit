@@ -9,7 +9,6 @@ import pytest
 from fakes import FakeChannel, FakeGuild, FakeRole
 
 from app.db import Database, migrate
-from app.reservations.service import ReservationService
 from app.resolve import resolve
 from app.scheduler import Scheduler
 from app.services import Services
@@ -19,7 +18,7 @@ from app.staff_threads import StaffThreads
 from app.supervisor_client import SupervisorClient
 
 # Ids used across the tests.
-GUILD, DRAFTS, EVENTS, HEADER, ANNOUNCE, STAFF = 100, 201, 202, 203, 204, 206
+GUILD, OTHER_CATEGORY, EVENTS, HEADER, ANNOUNCE, STAFF = 100, 201, 202, 203, 204, 206
 MEMBER, MISSION_MAKER, KADET, ANNOUNCEMENT, ADMIN, MODERATOR = 301, 302, 303, 304, 305, 306
 
 
@@ -29,12 +28,8 @@ def make_settings(data_dir: Path, **overrides) -> Settings:
         "group": {"acronym": "IBC", "name": "Test group"},
         "channels": {"events_category": EVENTS, "header": HEADER,
                      "announcements": ANNOUNCE, "staff": STAFF},
-        "roles": {"member": [MEMBER], "mission_maker": MISSION_MAKER, "announcement": ANNOUNCEMENT,
-                  "signup": [MEMBER, KADET]},
-        "permissions": {"bot_admin": [ADMIN], "approve_events": [MODERATOR], "manage_any_event": [ADMIN],
-                        "server_control": [ADMIN, MISSION_MAKER], "server_message": [MODERATOR],
-                        "server_override": [ADMIN]},
-        "supervisor": {"event_server": "event"},
+        "roles": {"announcement": ANNOUNCEMENT},
+        "permissions": {"bot_admin": [ADMIN]},
     } | overrides
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
 
@@ -42,8 +37,7 @@ def make_settings(data_dir: Path, **overrides) -> Settings:
 def make_guild() -> FakeGuild:
     """The server as `make_settings` describes it."""
     category = discord.ChannelType.category
-    channels = [FakeChannel(DRAFTS, "Szkice", category), FakeChannel(EVENTS, "Eventy", category),  # (Szkice: the old
-                # hidden drafts category, before 2026-11-11)
+    channels = [FakeChannel(OTHER_CATEGORY, "Szkice", category), FakeChannel(EVENTS, "Eventy", category),
                 FakeChannel(HEADER, "eventy"), FakeChannel(ANNOUNCE, "ogloszenia"), FakeChannel(STAFF, "staff")]
     names = {MEMBER: "Klanowicz", MISSION_MAKER: "Mission Maker", KADET: "Kadet", ANNOUNCEMENT: "Ogloszenia",
              ADMIN: "Admin", MODERATOR: "Moderator"}
@@ -88,15 +82,14 @@ async def services(settings: Settings, db: Database, clock: Clock, guild: FakeGu
     client = SupervisorClient("http://127.0.0.1:1", None)
     store = SettingsStore(settings)
     scheduler = Scheduler(db, clock)
-    built = Services(store, db, scheduler, staff, client, StaffThreads(db, store),
-                     ReservationService(db, client, store, scheduler, staff.post))
+    built = Services(store, db, scheduler, staff, client, StaffThreads(db, store))
     built.ids, _ = resolve(guild, settings)
     yield built
     await client.close()
 
 
 async def settle(channels) -> None:
-    """Let an event stack's background work finish (redraws, renames) before the database closes."""
+    """Let the channels' background work finish (redraws, renames) before the database closes."""
     for _ in range(3):  # (a redraw may ask for another)
         await channels.redrawer.settle()
         await channels.sorter.settle()

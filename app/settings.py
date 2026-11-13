@@ -43,13 +43,13 @@ class Group(BaseModel):
 
 
 class Channels(BaseModel):
-    events_category: Ref = Field(description="Category of the events: drafts (marked DRAFT, no sign-up yet), events "
-                                             "waiting for approval and published ones")
-    header: Ref = Field(description="Channel with the Create event button and the calendar")
+    events_category: Ref = Field(description="Category of the operations: drafts (marked DRAFT, no sign-up yet), "
+                                             "operations waiting for approval and published ones")
+    header: Ref = Field(description="Channel with the Create operation button and the calendar")
     announcements: Ref
     top: list[Ref] = Field(default_factory=list,
-                           description="Channels kept at the top of the events category, above the events, in "
-                                       "this order; the header goes first unless listed")
+                           description="Channels kept at the top of the operations category, above the operations, "
+                                       "in this order; the header goes first unless listed")
     staff: Ref = Field(description="Staff-only channel: the bot keeps the staff log and moderation threads in it")
     staff_log_thread: str = Field("Staff log", min_length=1, max_length=100)
     moderation_thread: str = Field("Moderacja", min_length=1, max_length=100, description="Approval requests")
@@ -59,101 +59,42 @@ class Channels(BaseModel):
 
 
 class Roles(BaseModel):
-    member: list[Ref] = Field(min_length=1, description="The group's member roles, e.g. Klanowicz: may use the wizard")
-    mission_maker: Ref
     announcement: Ref | None = Field(None, description="Mentioned in announcements and when sign-up opens")
-    signup: list[Ref] = Field(default_factory=list, description="Roles that may sign up for events")
-    rank: list[Ref] = Field(default_factory=list, description="Membership rank roles, shown in /profile (squad.xml's "
-                                                              "ranks are the supervisor's)")
-    remark: list[Ref] = Field(default_factory=list, description="Specialization roles shown in /profile, e.g. Pilot;Medic")
 
 
 class Permissions(BaseModel):
-    """Permission -> the roles that hold it."""
+    """Permission -> the roles that hold it. Only the bot's own commands: every other right is the supervisor's
+    (its role map from the Discord roles)."""
 
-    approve_events: list[Ref] = Field(default_factory=list)
-    manage_any_event: list[Ref] = Field(default_factory=list)
-    server_control: list[Ref] = Field(default_factory=list)
-    server_message: list[Ref] = Field(default_factory=list)
-    server_override: list[Ref] = Field(default_factory=list)
-    manage_links: list[Ref] = Field(default_factory=list)
-    bot_admin: list[Ref] = Field(default_factory=list)
-
-
-class DlcRoles(BaseModel):
-    """Creator DLC (the keys of the preset parser's table) -> the Discord role members who own it take."""
-
-    gm: Ref | None = Field(None, description="Global Mobilization")
-    vn: Ref | None = Field(None, description="S.O.G. Prairie Fire")
-    csla: Ref | None = Field(None, description="CSLA Iron Curtain")
-    ws: Ref | None = Field(None, description="Western Sahara")
-    spe: Ref | None = Field(None, description="Spearhead 1944")
-    rf: Ref | None = Field(None, description="Reaction Forces")
-    ef: Ref | None = Field(None, description="Expeditionary Forces")
+    bot_admin: list[Ref] = Field(default_factory=list, description="/reload, /privacy-erase, every archived "
+                                                                   "operation, Steam link reminders")
 
 
 class Supervisor(BaseModel):
     url: str = "http://localhost:8000"
     token: SecretStr | None = None
-    event_server: str | None = Field(None, description="Slug of the default event server")
-    base_profile: str | None = Field(None, description="Event profiles are cloned from this profile (name or id)")
-    profile_swap_minutes: int = Field(5, ge=1, le=25, description="Without the supervisor's reservation_profile: the "
-                                                                  "event profile goes onto the server this long "
-                                                                  "before the reservation")
-    profile_keep_days: int = Field(14, ge=0, description="An event profile is deleted this long after the event")
 
 
 class Times(BaseModel):
-    """Durations of the event rules (docs/PLAN.md, *Config contents*, times); more join them phase by phase."""
+    """The bot's own timing (the operations' rules are the supervisor's)."""
 
-    offer_timeout_minutes: int = Field(30, ge=1, description="How long a member has to take an offered slot")
-    offer_to_all_minutes: int = Field(60, ge=0, description="Before the assembly: a freed slot goes to the whole reserve list at once")
     default_duration_minutes: int = Field(180, ge=15, le=24 * 60, description="Pre-filled in the wizard")
-    max_days_ahead: int = Field(120, ge=1, description="A date further ahead is refused as a likely typo")
-    lead_minutes: int = Field(45, ge=0, description="The reservation starts this long before the assembly")
-    buffer_minutes: int = Field(30, ge=0, description="The reservation ends this long after start + duration")
-    stale_ping_hours: int = Field(48, ge=1, description="Still a draft (or waiting) this long before the assembly: ping")
-    stale_cancel_hours: int = Field(24, ge=0, description="Still not published this long before the assembly: cancelled")
     reminder_minutes: list[int] = Field(default_factory=lambda: [24 * 60, 60],
                                         description="Reminder pings, this long before the assembly")
-    archive_hours: int = Field(48, ge=0, description="After the attendance report (at the latest start + duration + "
-                                                     "this), the channel moves to the archive")
-    calendar_days: int = Field(14, ge=1, le=60, description="The header's calendar shows the events of this many days")
+    archive_hours: int = Field(48, ge=0, description="After the end of an operation, its channel moves to the "
+                                                     "archive this long later")
+    calendar_days: int = Field(14, ge=1, le=60, description="The header's calendar shows the operations of this "
+                                                            "many days")
     reply_seconds: int = Field(60, ge=0, le=840, description="The bot's private replies without buttons disappear "
                                                              "after this long; 0: they stay (Discord allows 15 min)")
 
 
-class KindNames(BaseModel):
-    """The kinds' names as members see them, in every language; empty: the bot's own (Internal / Wewnętrzny ...)."""
-
-    internal: str | None = Field(None, max_length=50)
-    guest: str | None = Field(None, max_length=50, description="Another group hosts")
-    hosted: str | None = Field(None, max_length=50, description="Ours, with invited groups")
-    zeus: str | None = Field(None, max_length=50)
-    training: str | None = Field(None, max_length=50)
-
-
 class Events(BaseModel):
-    """What the wizard offers (docs/PLAN.md, *Creating an event*)."""
+    """The operation channels."""
 
-    climate_roles: list[Ref] = Field(default_factory=list, description="Interest roles such as @WW2 and @Modern")
-    kind_names: KindNames = Field(default_factory=KindNames)
     discussion: str | None = Field(None, min_length=1, max_length=100,
-                                   description="Name of each event's discussion thread; default: Discussion / Dyskusja")
-
-
-class Attendance(BaseModel):
-    """Attendance from the supervisor's player stats (docs/PLAN.md, *Supervisor: attendance*)."""
-
-    min_minutes: int = Field(30, ge=0, description="Mission time that counts as attended")
-    settle_minutes: int = Field(10, ge=0, description="After the end, wait this long for the stats; a new mission in "
-                                                      "that time means the evening goes on")
-    finish_share_percent: int = Field(60, ge=0, le=100, description="A finished mission ends the event only after "
-                                                                    "start + this share of the duration")
-    deadline_hours: int = Field(24, ge=1, description="Retry reading the stats this long, then report them unavailable")
-    guest_confirm_days: int = Field(3, ge=1, description="A guest event's attendance still to confirm counts as "
-                                                         "attended after this many days")
-    rating_days: int = Field(3, ge=1, description="After the report, members rate the mission for this many days")
+                                   description="Name of each operation's discussion thread; default: Discussion / "
+                                               "Dyskusja")
 
 
 class Links(BaseModel):
@@ -192,13 +133,11 @@ class Settings(BaseSettings):
 
     group: Group
     channels: Channels
-    roles: Roles
+    roles: Roles = Field(default_factory=Roles)
     permissions: Permissions = Field(default_factory=Permissions)
-    dlc_roles: DlcRoles = Field(default_factory=DlcRoles)
     events: Events = Field(default_factory=Events)
     times: Times = Field(default_factory=Times)
     supervisor: Supervisor = Field(default_factory=Supervisor)
-    attendance: Attendance = Field(default_factory=Attendance)
     links: Links = Field(default_factory=Links)
     archive: Archive = Field(default_factory=Archive)
     backup: Backup = Field(default_factory=Backup)

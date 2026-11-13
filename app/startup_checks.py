@@ -11,7 +11,7 @@ from app.resolve import CATEGORY_CHANNELS, Ids, resolve
 from app.settings import Settings
 
 TEXT = ("view_channel", "send_messages", "embed_links", "read_message_history")
-# Event channels are made in the categories, inherit from them, and get their own overwrites and threads.
+# Operation channels are made in the categories, inherit from them, and get their own overwrites and threads.
 CATEGORY = ("view_channel", "manage_channels", "manage_roles", "send_messages", "send_messages_in_threads",
             "create_public_threads", "manage_threads", "embed_links", "attach_files", "read_message_history")
 # The bot keeps its staff log and moderation threads in the staff channel.
@@ -35,12 +35,9 @@ def check(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
             problems.append(t("{variable}: the bot lacks {permissions} in {name}", language,
                               variable=f"BOT_CHANNELS__{name.upper()}", permissions=", ".join(missing),
                               name=channel.name))
-    # Announcements and the sign-up ping mention the announcement role and the event's climate role.
-    for role_id in [ids.announcement, *ids.climates]:
-        role = guild.get_role(role_id) if role_id else None
-        if role is not None and not role.mentionable and not me.guild_permissions.mention_everyone:
-            problems.append(t("The bot can't mention {role}: make the role mentionable, or give the bot "
-                              "\"Mention @everyone, @here and All Roles\"", language, role=role.name))
-    if not ids.signup:
-        problems.append(t("BOT_ROLES__SIGNUP names no role on this server: nobody can sign up for events.", language))
+    # Announcements and the sign-up ping mention the announcement role (and the climate's, from the supervisor).
+    role = guild.get_role(ids.announcement) if ids.announcement else None
+    if role is not None and not role.mentionable and not me.guild_permissions.mention_everyone:
+        problems.append(t("The bot can't mention {role}: make the role mentionable, or give the bot "
+                          "\"Mention @everyone, @here and All Roles\"", language, role=role.name))
     return ids, problems

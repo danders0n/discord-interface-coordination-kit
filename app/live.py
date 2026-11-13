@@ -3,8 +3,7 @@ kept open, reconnecting with the last event id. Events only wake workers; the tr
 normal routes, so a lost event costs a minute at most (the workers also poll). A ``hello`` with ``gap: true`` (the
 supervisor restarted, or the bot was away too long) wakes every worker.
 
-So far it listens for ``notice``; ``operation`` joins when the operations API exists (the supervisor answers 422
-to a kind it doesn't know)."""
+It listens for ``notice`` (the notices worker) and ``operation`` (the operations feed)."""
 
 from __future__ import annotations
 

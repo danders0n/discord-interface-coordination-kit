@@ -1,10 +1,11 @@
 """Keeping the channel's messages in order (docs/PLAN.md, *Event channel*, *Order kept*).
 
-The bot stores every message id by key and edits in place. A continuation follows its first message (``briefing:1``
-after ``briefing``, ``orbat:1`` after ``orbat:0``); the report and the discussion link come last. A message that
-must go *before* messages already posted (a preset added after the ORBAT, a new ORBAT continuation before the
-discussion link) is the one case that re-posts: everything after it is deleted and posted again. A message someone deleted by hand is treated the same way: it and everything after it are posted
-again, so the order holds.
+The bot stores every message id by key and edits in place. A continuation follows its first message
+(``situation:1`` after ``situation``, ``orbat:1`` after ``orbat:0``); the report and the discussion link come last. A
+message that must go *before* messages already posted (a preset added after the ORBAT, an OPORD paragraph written
+later, a new ORBAT continuation before the discussion link) is the one case that re-posts: everything after it is
+deleted and posted again. A message someone deleted by hand is treated the same way: it and everything after it are
+posted again, so the order holds.
 
 The thread is made after the other messages, so Discord's own "started a thread" card is last; stored as ``card``,
 it stands in for the discussion link (decided 2026-11-02). Discord can't post that card again, so once a message
@@ -19,10 +20,12 @@ from typing import Any
 
 import discord
 
-from app.eventchannel.render import Message
+from app.channel.render import Message
 
-FIXED = {"info": 0, "briefing": 10, "preset": 100}
-PAGED = {"briefing": 10, "orbat": 1000}  # key:N is the first message's place + N
+# The OPORD's paragraphs at 10, 20 ... 50, each with room for its continuations; key:N is the first message's place + N.
+OPORD = {"situation": 10, "mission": 20, "execution": 30, "sustainment": 40, "command": 50}
+FIXED = {"info": 0, **OPORD, "preset": 100}
+PAGED = {**OPORD, "orbat": 1000}
 LAST = {"report": 100_000, "discussion": 200_000, "card": 200_000}  # the report comes once the ORBAT is final
 CARD, DISCUSSION = "card", "discussion"
 log = logging.getLogger(__name__)

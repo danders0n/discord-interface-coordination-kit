@@ -2,7 +2,7 @@
 
 A daily scheduled action (05:00, after the backup) looks for archived channels of a quarter that no longer stays.
 For each: every message not posted by the bot, in the channel and its thread, with its attachments downloaded to
-``<archive folder>/<event id>/<message id>-<file name>`` (Discord's links expire). Then the copy is checked (the
+``<archive folder>/<operation id>/<message id>-<file name>`` (Discord's links expire). Then the copy is checked (the
 message count matches, every attachment is on disk with its size) and only then is the channel deleted, its
 thread with it. A failure leaves the channel in place, goes to the staff log and is tried again the next day.
 Archive categories left empty are deleted at the end."""
@@ -54,38 +54,39 @@ class Exporter:
         if guild is None:
             return now + timedelta(hours=1)
         moved, quarters = 0, set()
-        for event in await self.s.archive.leaving():
+        for row in await self.s.archive.leaving():
             try:
-                await self.export(guild, event)
+                await self.export(guild, row)
             except Exception as exc:  # noqa: BLE001 - the channel stays; tomorrow's run tries again
-                log.exception("Moving event %s into the archive failed", event.id)
+                log.exception("Moving OP-%s into the archive failed", row.operation_id)
                 self.s.staff.post(t("Moving {title} into the database archive failed: {reason}. The channel stays; the "
-                                    "bot tries again tomorrow.", settings.language, title=event.title, reason=exc))
+                                    "bot tries again tomorrow.", settings.language, title=row.title, reason=exc))
                 continue
             moved += 1
-            quarters.add(quarter(event.start_at, settings.tz))
+            quarters.add(quarter(row.start_at or row.archived_at, settings.tz))
         if moved:
             await self._tidy(guild, quarters)
-            self.s.staff.post(t(("{count} event moved into the database archive.",
-                                 "{count} events moved into the database archive."), settings.language, count=moved))
+            self.s.staff.post(t(("{count} operation moved into the database archive.",
+                                 "{count} operations moved into the database archive."), settings.language,
+                                count=moved))
         return next_run(now, settings.tz)
 
-    async def export(self, guild: Any, event: Any) -> None:
-        channel = guild.get_channel(event.channel_id)
+    async def export(self, guild: Any, row: Any) -> None:
+        channel = guild.get_channel(row.channel_id)
         if channel is None:  # deleted by hand: nothing left to copy
-            await self.s.archive.exported(event.id)
+            await self.s.archive.exported(row.operation_id)
             return
         sources = [channel]
-        if event.thread_id:
-            thread = guild.get_thread(event.thread_id)
+        if row.thread_id:
+            thread = guild.get_thread(row.thread_id)
             if thread is None:
                 try:
-                    thread = await guild.fetch_channel(event.thread_id)
+                    thread = await guild.fetch_channel(row.thread_id)
                 except discord.NotFound:
                     thread = None
             if thread is not None:
                 sources.append(thread)
-        folder = self.s.archive.folder / str(event.id)
+        folder = self.s.archive.folder / str(row.operation_id)
         saved, expected = [], []
         for source in sources:
             async for message in source.history(limit=None, oldest_first=True):
@@ -102,12 +103,12 @@ class Exporter:
                                    (getattr(message.author, "display_name", None) or message.author.name)[:100],
                                    message.created_at, message.edited_at, message.content or "",
                                    reference.message_id if reference is not None else None, files))
-        stored = await self.s.archive.save_transcript(event.id, saved)
+        stored = await self.s.archive.save_transcript(row.operation_id, saved)
         missing = [p for p, size in expected if not p.is_file() or p.stat().st_size != size]
         if stored != len(saved) or missing:
             raise RuntimeError(f"the copy doesn't match ({stored} of {len(saved)} messages, {len(missing)} files missing)")
         await channel.delete(reason="Moved into the long-term archive")
-        await self.s.archive.exported(event.id)
+        await self.s.archive.exported(row.operation_id)
 
     async def _tidy(self, guild: Any, quarters: set[int]) -> None:
         """The leaving quarters' archive categories (overflows too), once empty."""

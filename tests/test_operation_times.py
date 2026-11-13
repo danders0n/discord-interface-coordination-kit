@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.events.times import Problem, TimeError, combine, parse, parse_date, parse_duration, parse_time
+from app.operations.times import Problem, TimeError, combine, parse, parse_date, parse_duration, parse_time
 
 WARSAW = ZoneInfo("Europe/Warsaw")
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)

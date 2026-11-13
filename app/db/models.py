@@ -1,12 +1,13 @@
-"""Tables (docs/PLAN.md, *Data model*). Phase 1 has the scheduled actions and the bot's own state; the event
-tables come with the phases that use them. Every schema change is an Alembic migration in ``migrations/``."""
+"""Tables (docs/PLAN-front-end.md, *Database*). The supervisor owns the operations and everything about them; the
+bot keeps its Discord plumbing (channels, threads, message ids), the delivery bookkeeping and the archive of members'
+messages. Every schema change is an Alembic migration in ``migrations/``."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, TypeDecorator, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Integer, String, Text, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -44,7 +45,7 @@ class ScheduledAction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50), index=True)
     key: Mapped[str | None] = mapped_column(String(200), unique=True)
-    event_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    operation_id: Mapped[int | None] = mapped_column(Integer, index=True)
     due_at: Mapped[datetime] = mapped_column(index=True)
     done_at: Mapped[datetime | None]
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -53,234 +54,61 @@ class ScheduledAction(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
-class Event(Base):
-    """An event (docs/PLAN.md, *Data model*). Phase 3 keeps what sign-up needs; phase 4 adds the Discord side
-    (channel, messages, briefing, preset, approval)."""
+class OperationChannel(Base):
+    """An operation's place on Discord (docs/PLAN-front-end.md, *Sync and drawing*): its channel, thread and the bot's
+    messages in it (key -> message id, keyed as app/channel/render.py keys them, ``card`` for the thread card), the
+    announcement. ``operation`` is the operation as last drawn (the supervisor's JSON): the header's calendar and the
+    archive read it, and it is never the truth. ``change_seq``: the feed's number of that copy."""
 
-    __tablename__ = "event"
+    __tablename__ = "operation_channel"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(String(10))  # internal | guest | hosted | zeus | training
-    title: Mapped[str] = mapped_column(String(100))
-    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | pending | published | ended | cancelled
-    assembly_at: Mapped[datetime]
-    start_at: Mapped[datetime]
-    duration_minutes: Mapped[int] = mapped_column(Integer)
-    signup_opens_at: Mapped[datetime | None]
-    signup_limit: Mapped[int | None] = mapped_column(Integer)  # Zeus: the most who may be Coming
-    required_dlc: Mapped[list[str]] = mapped_column(JSON, default=list)  # Creator DLC keys of the preset (gm, vn ...)
-    created_by: Mapped[int] = mapped_column(BigInteger)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    # Phase 4a: by value, so /reload can drop a climate without breaking the event.
-    climate: Mapped[str] = mapped_column(String(100), default="")
-    climate_role_id: Mapped[int | None] = mapped_column(BigInteger)
-    author_id: Mapped[int | None] = mapped_column(BigInteger)
-    host_group_id: Mapped[int | None] = mapped_column(ForeignKey("other_group.id"))  # a guest event's host
-    how_to_join: Mapped[str] = mapped_column(Text, default="")  # a guest event: server, password, contacts
-    briefing_situation: Mapped[str] = mapped_column(Text, default="")
-    briefing_mission: Mapped[str] = mapped_column(Text, default="")
-    briefing_notes: Mapped[str] = mapped_column(Text, default="")
-    dont_end_automatically: Mapped[bool] = mapped_column(Boolean, default=False)
-    cancel_reason: Mapped[str | None] = mapped_column(Text)
-    # Phase 4b: the event channel and the bot's messages in it, in order (key -> message id).
+    operation_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    title: Mapped[str] = mapped_column(String(100), default="")
+    start_at: Mapped[datetime | None] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
     channel_id: Mapped[int | None] = mapped_column(BigInteger)
     thread_id: Mapped[int | None] = mapped_column(BigInteger)
+    category_id: Mapped[int | None] = mapped_column(BigInteger)
     messages: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    announcement_id: Mapped[int | None] = mapped_column(BigInteger)
-    archived_at: Mapped[datetime | None]  # moved to an archive category
-    exported_at: Mapped[datetime | None]  # moved into the database (phase 8)
-    # Phase 4c-2: the launcher preset and the briefing image, as files in the data folder.
-    preset_name: Mapped[str | None] = mapped_column(String(200))
-    preset_mods: Mapped[list[Any]] = mapped_column(JSON, default=list)  # [[workshop id, name], ...]
-    preset_file: Mapped[str | None] = mapped_column(String(300))
-    briefing_image: Mapped[str | None] = mapped_column(String(300))
     attached: Mapped[dict[str, Any]] = mapped_column(default=dict)  # message key -> the files' tag last sent
-    # Phase 6a: attendance. state: waiting (triggered, stats not read yet) | reported | unavailable.
-    attendance_state: Mapped[str | None] = mapped_column(String(20))
-    attendance_trigger: Mapped[str | None] = mapped_column(String(20))  # finished | reservation | manual | fallback | guest
-    attendance_from: Mapped[datetime | None]  # the window read from the stats
-    attendance_to: Mapped[datetime | None]
-    attendance_guests: Mapped[int] = mapped_column(Integer, default=0)  # a hosted event's players we don't know
-    reported_at: Mapped[datetime | None]
-    # Phase 7: the event profile on the supervisor (docs/PLAN.md, *Supervisor: event profile*).
-    mission_name: Mapped[str | None] = mapped_column(String(200))  # the .pbo on the supervisor
-    mission_report: Mapped[dict[str, Any]] = mapped_column(default=dict)  # its inspection, trimmed (profiles.service)
-    hostname: Mapped[str | None] = mapped_column(String(200))  # None: the default
-    max_players: Mapped[int | None] = mapped_column(Integer)  # None: the default
-    verify_signatures: Mapped[bool] = mapped_column(Boolean, default=True)
-    profile_id: Mapped[int | None] = mapped_column(Integer)
-    profile_state: Mapped[str | None] = mapped_column(String(20))  # building | built | failed
-    profile_job_id: Mapped[int | None] = mapped_column(Integer)  # the preset import the supervisor runs
-    profile_error: Mapped[str | None] = mapped_column(Text)
-    profile_progress: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    profile_keep: Mapped[bool] = mapped_column(Boolean, default=False)
-    previous_profile_id: Mapped[int | None] = mapped_column(Integer)  # the swap fallback: the server's own profile
-    profile_swapped: Mapped[bool] = mapped_column(Boolean, default=False)
+    announcement_id: Mapped[int | None] = mapped_column(BigInteger)
+    operation: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    change_seq: Mapped[int] = mapped_column(Integer, default=0)
+    archived_at: Mapped[datetime | None]  # moved to an archive category
+    exported_at: Mapped[datetime | None]  # moved into the database (the long-term archive)
+    gone_at: Mapped[datetime | None]  # deleted in the supervisor (a tombstone, or missing from a reset)
 
 
-class AttendanceEntry(Base):
-    """One line of an event's attendance report (docs/PLAN.md, *Supervisor: attendance*): a slot holder (or someone
-    *Coming*) or someone who played without a slot, a member or only a Steam ID and in-game name. An unlinked
-    holder may carry a *probable* Steam ID whose in-game name matched theirs, for the organisers to confirm."""
+class ModerationMessage(Base):
+    """An approval request's message in the moderation thread (docs/PLAN-front-end.md, *Notices*)."""
 
-    __tablename__ = "attendance"
+    __tablename__ = "moderation_message"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    member_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
-    steam_id: Mapped[str | None] = mapped_column(String(17))
-    name: Mapped[str] = mapped_column(String(100), default="")  # in-game name
-    seconds: Mapped[int] = mapped_column(Integer, default=0)  # mission time in the window
-    holder: Mapped[bool] = mapped_column(Boolean, default=False)  # held a slot (or was Coming)
-    # to_confirm | attended | no_show | excused | not_linked | walk_in
-    status: Mapped[str] = mapped_column(String(12))
-    probable_steam_id: Mapped[str | None] = mapped_column(String(17))
-    probable_name: Mapped[str | None] = mapped_column(String(100))
-    corrected_by: Mapped[int | None] = mapped_column(BigInteger)
-    corrected_at: Mapped[datetime | None]
+    request_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    operation_id: Mapped[int] = mapped_column(Integer, index=True)
+    message_id: Mapped[int] = mapped_column(BigInteger)
 
 
-class OtherGroup(Base):
-    """Another group (docs/PLAN.md, *Event kinds*): a guest event's host or a hosted event's guest. Corrected,
-    never deleted, because events refer to it."""
+class OfferMessage(Base):
+    """A slot offer as the bot delivered it: by DM or in the thread (docs/PLAN-front-end.md, *Notices*)."""
 
-    __tablename__ = "other_group"
+    __tablename__ = "offer_message"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    acronym: Mapped[str] = mapped_column(String(10), unique=True)
-    name: Mapped[str] = mapped_column(String(100))
-    added_by: Mapped[int] = mapped_column(BigInteger)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-
-
-class EventOrganiser(Base):
-    __tablename__ = "event_organiser"
-
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
-    member_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-
-
-class EventGuestGroup(Base):
-    __tablename__ = "event_guest_group"
-
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), primary_key=True)
-    group_id: Mapped[int] = mapped_column(ForeignKey("other_group.id"), primary_key=True)
-
-
-class ApprovalRequest(Base):
-    """A request for the moderators (docs/PLAN.md, *Approval*): publishing a member's event, the host reservation
-    of a member's Zeus event, or new times for an approved member's event (``proposed``)."""
-
-    __tablename__ = "approval_request"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(20))  # publish | server | times
-    state: Mapped[str] = mapped_column(String(20), default="pending")  # pending | approved | rejected | withdrawn
-    proposed: Mapped[dict[str, Any]] = mapped_column(default=dict)  # times: assembly_at, start_at, duration_minutes
-    requested_by: Mapped[int] = mapped_column(BigInteger)
-    decided_by: Mapped[int | None] = mapped_column(BigInteger)
-    reason: Mapped[str | None] = mapped_column(Text)
-    message_id: Mapped[int | None] = mapped_column(BigInteger)  # the request in the moderation thread
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    decided_at: Mapped[datetime | None]
-
-
-class Squad(Base):
-    __tablename__ = "squad"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    position: Mapped[int] = mapped_column(Integer)
-    name: Mapped[str] = mapped_column(String(100))
-
-
-class Slot(Base):
-    """One place in the ORBAT. An organiser's assignment is a holder plus ``locked``; a slot locked closed (``!``)
-    is ``locked`` without one. One slot per member per event: the partial unique index."""
-
-    __tablename__ = "slot"
-    __table_args__ = (Index("ux_slot_holder", "event_id", "holder_id", unique=True,
-                            sqlite_where=text("holder_id IS NOT NULL")),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    squad_id: Mapped[int] = mapped_column(ForeignKey("squad.id", ondelete="CASCADE"), index=True)
-    position: Mapped[int] = mapped_column(Integer)
-    name: Mapped[str] = mapped_column(String(100))
-    required_role_id: Mapped[int | None] = mapped_column(BigInteger)
-    holder_id: Mapped[int | None] = mapped_column(BigInteger)
-    locked: Mapped[bool] = mapped_column(Boolean, default=False)
-    flagged: Mapped[bool] = mapped_column(Boolean, default=False)  # ⚠: the holder lost the required role
-
-
-class Signup(Base):
-    """A member's answer other than a slot: ``maybe``, ``cant``, ``reserve`` (with its place in the queue), or in
-    a Zeus event ``coming``."""
-
-    __tablename__ = "signup"
-    __table_args__ = (UniqueConstraint("event_id", "member_id"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    member_id: Mapped[int] = mapped_column(BigInteger)
-    status: Mapped[str] = mapped_column(String(10))
-    reserve_position: Mapped[int | None] = mapped_column(Integer)
-    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
-
-
-class Offer(Base):
-    """A freed slot offered to the reserve list: to one member, or (``member_id`` null) to all of it at once."""
-
-    __tablename__ = "offer"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    slot_id: Mapped[int] = mapped_column(ForeignKey("slot.id", ondelete="CASCADE"), index=True)
-    member_id: Mapped[int | None] = mapped_column(BigInteger)
-    state: Mapped[str] = mapped_column(String(10), default="open")  # open | taken | declined | expired | withdrawn
-    expires_at: Mapped[datetime]
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-
-
-class OrbatTemplate(Base):
-    """A shared ORBAT template: every creator uses them; the owner and *manage any event* change them."""
-
-    __tablename__ = "orbat_template"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
-    owner_id: Mapped[int] = mapped_column(BigInteger)
-    text: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
-
-
-class HostReservation(Base):
-    """An event's reservation of the host on the supervisor (docs/PLAN.md, *Supervisor: reservation*): what the bot
-    asked for, and how it went. One per event; the event table (phase 4) refers to it by ``event_id``."""
-
-    __tablename__ = "host_reservation"
-
-    event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    reservation_id: Mapped[int | None] = mapped_column(Integer)
-    state: Mapped[str] = mapped_column(String(20))  # booked | retrying | failed | ended | cancelling | cancelled
-    error: Mapped[str | None] = mapped_column(Text)
-    name: Mapped[str] = mapped_column(String(80))
-    starts_at: Mapped[datetime]
-    ends_at: Mapped[datetime]
-    link: Mapped[str | None] = mapped_column(String(500))
-    profile_id: Mapped[int | None] = mapped_column(Integer)
-    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    offer_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    operation_id: Mapped[int] = mapped_column(Integer, index=True)
+    via: Mapped[str] = mapped_column(String(10))  # dm | thread
+    channel_id: Mapped[int] = mapped_column(BigInteger)  # the DM channel or the thread
+    message_id: Mapped[int] = mapped_column(BigInteger)
 
 
 class ArchivedMessage(Base):
-    """A member's message in an event's channel or thread, copied before the channel is deleted (docs/PLAN.md,
+    """A member's message in an operation's channel or thread, copied before the channel is deleted (docs/PLAN.md,
     *Long-term archive*). ``attachments``: ``[{name, path, size}]``, the files downloaded to the archive folder."""
 
     __tablename__ = "archived_message"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
+    operation_id: Mapped[int] = mapped_column(Integer, index=True)
     channel_id: Mapped[int] = mapped_column(BigInteger)  # the channel or its thread
     message_id: Mapped[int] = mapped_column(BigInteger)
     author_id: Mapped[int] = mapped_column(BigInteger, index=True)
@@ -290,23 +118,6 @@ class ArchivedMessage(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     reply_to: Mapped[int | None] = mapped_column(BigInteger)
     attachments: Mapped[list[Any]] = mapped_column(JSON, default=list)
-
-
-class MissionRating(Base):
-    """A member's rating of an event (docs/PLAN.md, *Supervisor: attendance*, *Mission feedback*): of the mission,
-    or in a guest event of the cooperation with the host group. One per member and event, changeable while the
-    window is open."""
-
-    __tablename__ = "mission_rating"
-    __table_args__ = (UniqueConstraint("event_id", "member_id"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("event.id", ondelete="CASCADE"), index=True)
-    member_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    stars: Mapped[int] = mapped_column(Integer)
-    comment: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class LinkReminder(Base):
@@ -339,7 +150,7 @@ class NoticeDelivery(Base):
 
 
 class BotState(Base):
-    """Small values the bot keeps between restarts (the header message id, the last start)."""
+    """Small values the bot keeps between restarts (the feed's and the notices' cursors, the header message id)."""
 
     __tablename__ = "bot_state"
 

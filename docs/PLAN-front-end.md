@@ -1,6 +1,7 @@
 # Plan: the bot as the supervisor's Discord front end
 
-Status: building on `feature/front-end`; the additive first step is done (*As built*). Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
+Status: building on `feature/front-end`; steps 1–4 are done (*As built*): the old event stack is gone and the
+channels are drawn from the supervisor's change feed. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
 (`D:\Workspace\python\arma-server-supervisior`, interviews 2026-11-11 and 2026-11-12), which is the source of
 every rule about operations, people and permissions. This plan says what changes **in this repo**.
 
@@ -330,12 +331,74 @@ compares the supervisor's `utc_offset` with `BOT_TIMEZONE`'s now (a warning). De
 - The time zones are compared by today's UTC offset, as `system/info` gives an abbreviation (`CET`), not an IANA
   name.
 
-### Waiting for the supervisor
+### Step 4: the switch (2026-11-13)
 
-Everything left (the clean-up of phase 1, then phases 3–6) needs the supervisor's operations, change-feed, `meta`
-and file routes. As of 2026-11-12 they exist only as uncommitted work in the supervisor (`app/api/operations.py`,
-`app/operations/`) and are not in `openapi-bot.json`. Resume when its phase 3 is committed: run
-`python scripts/sync_contract.py`, then follow the contract.
+The supervisor's phase 3 (operations, the feed, `meta`, files) was committed, so phase 1's clean-up and phase 3's
+drawing went in together: the kept channel code depended on the deleted `EventService`, so neither could land alone.
+
+- **Gone** (phase 1's list): `app/events/service.py`, `groups.py`, `ui.py`, `cog.py`, `words.py`, `app/signup/`,
+  `app/orbat/`, `app/approval/`, `app/feedback/`, `app/attendance/`, `app/reservations/`, `app/profiles/`,
+  `app/presets.py`, `app/servers/`, `app/activity.py`, their tests, the 15 old migrations (one baseline now, `0001`),
+  the legacy routes of the fake supervisor and the client (servers, reservations, stats, profiles, missions), and the
+  settings of *Configuration* (`.env.example` follows; an old `.env` still loads, its removed names reported as
+  unknown). The UI modules the plan keeps (wizard, panel, sign-up and approval buttons, attendance UI) went too: they
+  are rebuilt against the supervisor's routes from git history in steps 5 and 6, since every line of them called
+  the deleted services.
+- **Renamed:** `app/events/` is `app/operations/` (`times.py`, `header.py`, `feed.py`), `app/eventchannel/` is
+  `app/channel/`; `scheduled_action.event_id` is `operation_id`.
+- **Feed** (`app/operations/feed.py`, `Feed`): as *Sync and drawing*; the cursor in `bot_state` `operations`; a
+  reset hands every listed operation over and treats those the bot still draws but the list misses as gone; `meta`
+  is read on the first run, after a reset and every ten minutes. Woken by the `operation` live event, and every
+  minute.
+- **Channels** (`app/channel/service.py`, `OperationChannels`): `apply(op)` keeps the operation in
+  `operation_channel` and asks for a redraw; `gone(id)` marks it. A redraw converges on what the operation says, so
+  it is safe after a crash, a restart or the echo: the channel (an open operation without one gets one, also when
+  deleted by hand), the overwrites, the messages, the thread at publishing, the plumbing back
+  (`PUT .../discord` only when the URLs differ, so the echo stops there), the announcement, the rename to the
+  supervisor's `channel_name`, then the actions (sign-up closing at the start, the sign-up ping, the archive at the
+  end + `archive_hours`, or at once when cancelled). A tombstone deletes a draft's channel; an operation gone after
+  being published (a reset) is archived.
+- **Render** (`app/channel/render.py`): the info embed from the JSON (`kind_name`, climate role or name, host and
+  invited groups, author, times, sign-up state, the preset's mods and Creator DLC names, the mission), the OPORD as
+  one message per written paragraph (`situation` ... `command`, each split past 2000 characters; nothing written: one
+  message saying so), the banner and the map with the first, the preset message, the thread link. Files are fetched
+  once per content to `<data>/files/<operation>/<hash>/<name>`; a fetch that fails schedules `draw_retry` a minute on.
+- **Header:** the calendar from `operation_channel` (published, starting within `calendar_days`), without *Create
+  operation* until the wizard returns; a header is recognised by being the bot's message with an embed.
+- **Archive:** `ArchiveService` and the exporter work on `operation_channel`; the HTML takes the operation as last
+  drawn (info, OPORD, transcript).
+- **Erasure:** `/privacy-erase` erases what the bot holds (link reminders, archived messages); the rest waits for
+  the supervisor's erasure (phase 5), as the confirmation says.
+- **Supervisor check:** `API_LEVEL` 2 and the capabilities `operations`, `operation_feed`, `operation_files`.
+- **Decisions taken while building:**
+  - **No separate cache.** `operation_channel.operation` holds the operation as last drawn, so the header, the
+    archive and a restart read it from the database; a first feed read (`after=0`) lists everything, so nothing reads
+    `GET /api/operations?upcoming=true`. The table also keeps `title`, `start_at` and `status` (for the order, the
+    quarters and autocomplete) and `gone_at`.
+  - An operation the bot never drew that is closed, or past its end + `archive_hours`, gets no channel (a first read
+    lists old ones).
+  - Until the feed has read `meta`, overwrites aren't rewritten (they would drop the staff roles); the start-up
+    redraw runs after the supervisor check, with the feed.
+  - **The creator** organises through their account, which the operation JSON names only by username (`created_by`),
+    not as a person with a Discord id. The overwrites use the author (the creator unless changed) and the
+    co-organisers. To ask the supervisor: a `creator` person in the operation.
+  - `/links remind | reminders` need *bot admin* (the only permission left in `.env`).
+  - `/archive event` is for the organisers (author, co-organisers) and *bot admin*; participants join when the
+    operation carries the sign-ups.
+  - The reminder pings wait for the sign-up step: they ping the slot holders, which the operation JSON doesn't carry
+    in the phase-3 contract.
+  - Polish: *Operacja* is feminine, so the markers are ODWOŁANA, ZAKOŃCZONA. The 479 translations nobody uses any
+    more were dropped (the test allows none); they come back from git history with their UI.
+- **Contract:** synced to the supervisor's phase 4 (`7366d28`, committed while this step was built). Its 22 new
+  routes (ORBAT, sign-ups, offers, templates, approval) are listed as `PENDING` in `tests/test_contract.py`: the fake
+  serves them with the sign-up step.
+
+### Next
+
+Step 5 (this plan's phase 4) on the supervisor's phase 4: the fake's sign-up, offer, template and approval routes
+(emptying `PENDING`), the operation's ORBAT and sign-up lists in `render.py`, the sign-up buttons and picker, `/slot`,
+offers (DM, `delivered`, take), the reminder pings, the moderation thread and the notices worker's operation kinds,
+then the wizard and the panel with `If-Match`, `/operation preset | image | mission`, `/operations`.
 
 ## Not in this plan
 

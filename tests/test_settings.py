@@ -14,8 +14,6 @@ BOT_CHANNELS__EVENTS_CATEGORY=3
 BOT_CHANNELS__HEADER=4
 BOT_CHANNELS__ANNOUNCEMENTS=5
 BOT_CHANNELS__STAFF=7
-BOT_ROLES__MEMBER=8
-BOT_ROLES__MISSION_MAKER=9
 """
 
 
@@ -33,13 +31,12 @@ def no_real_env(monkeypatch):
 
 
 def test_lists_take_semicolons_json_and_a_single_id(tmp_path):
-    env = write(tmp_path, "BOT_ROLES__SIGNUP=10;11\nBOT_PERMISSIONS__BOT_ADMIN=12\n"
-                          "BOT_PERMISSIONS__APPROVE_EVENTS=[13, 14]\nBOT_PERMISSIONS__SERVER_CONTROL=\n")
-    settings = load(env)
-    assert settings.roles.signup == [10, 11]
-    assert settings.permissions.bot_admin == [12]
-    assert settings.permissions.approve_events == [13, 14]
-    assert settings.permissions.server_control == []
+    settings = load(write(tmp_path, "BOT_PERMISSIONS__BOT_ADMIN=10;11\nBOT_TIMES__REMINDER_MINUTES=[60, 30]\n"
+                                    "BOT_CHANNELS__TOP=12\n"))
+    assert settings.permissions.bot_admin == [10, 11]
+    assert settings.times.reminder_minutes == [60, 30]
+    assert settings.channels.top == [12]
+    assert load(write(tmp_path, "BOT_PERMISSIONS__BOT_ADMIN=\n")).permissions.bot_admin == []
     assert settings.language == "pl" and str(settings.tz) == "Europe/Warsaw"
 
 
@@ -49,13 +46,13 @@ def test_environment_wins_over_the_file(tmp_path, monkeypatch):
 
 
 def test_errors_name_the_variable(tmp_path):
-    env = write(tmp_path, "BOT_TIMEZONE=Mars/Olympus\n").read_text().replace("BOT_ROLES__MEMBER=8\n", "")
+    env = write(tmp_path, "BOT_TIMEZONE=Mars/Olympus\n").read_text().replace("BOT_CHANNELS__HEADER=4\n", "")
     (tmp_path / ".env").write_text(env)
     with pytest.raises(ValidationError) as caught:
         load(tmp_path / ".env")
     lines = describe_errors(caught.value)
     assert any(line.startswith("BOT_TIMEZONE:") and "Mars/Olympus" in line for line in lines)
-    assert any(line.startswith("BOT_ROLES__MEMBER:") for line in lines)
+    assert any(line.startswith("BOT_CHANNELS__HEADER:") for line in lines)
 
 
 def test_reload_applies_and_keeps_restart_only_values(tmp_path):
@@ -71,8 +68,8 @@ def test_reload_applies_and_keeps_restart_only_values(tmp_path):
 
 def test_a_missing_section_names_its_variables(tmp_path):
     env = tmp_path / ".env"
-    env.write_text("BOT_DISCORD_TOKEN=a\nBOT_GUILD_ID=1\nBOT_GROUP__ACRONYM=IBC\nBOT_GROUP__NAME=x\n"
-                   "BOT_ROLES__MEMBER=1\nBOT_ROLES__MISSION_MAKER=2\n", encoding="utf-8")
+    env.write_text("BOT_DISCORD_TOKEN=a\nBOT_GUILD_ID=1\nBOT_GROUP__ACRONYM=IBC\nBOT_GROUP__NAME=x\n",
+                   encoding="utf-8")
     with pytest.raises(ValidationError) as caught:
         load(env)
     lines = describe_errors(caught.value)
@@ -81,13 +78,13 @@ def test_a_missing_section_names_its_variables(tmp_path):
 
 
 def test_ids_and_names_mix(tmp_path):
-    env = write(tmp_path, "BOT_ROLES__SIGNUP=Klanowicz;123; Kadet \nBOT_PERMISSIONS__BOT_ADMIN=@Admin\n"
-                          'BOT_PERMISSIONS__APPROVE_EVENTS=["Moderator", 5]\n')
+    env = write(tmp_path, "BOT_PERMISSIONS__BOT_ADMIN=@Admin;123; Zarzad \nBOT_ROLES__ANNOUNCEMENT=@Ogloszenia\n"
+                          'BOT_CHANNELS__TOP=["rules", 5]\n')
     env.write_text(env.read_text().replace("BOT_CHANNELS__STAFF=7", "BOT_CHANNELS__STAFF=#staff"))
     settings = load(env)
-    assert settings.roles.signup == ["Klanowicz", 123, "Kadet"]
-    assert settings.permissions.bot_admin == ["Admin"]
-    assert settings.permissions.approve_events == ["Moderator", 5]
+    assert settings.permissions.bot_admin == ["Admin", 123, "Zarzad"]
+    assert settings.roles.announcement == "Ogloszenia"
+    assert settings.channels.top == ["rules", 5]
     assert settings.channels.staff == "staff" and settings.channels.header == 4
     assert settings.channels.staff_log_thread == "Staff log"
 
@@ -103,9 +100,9 @@ def test_env_example_lists_every_setting_and_nothing_else():
 
 def test_unknown_variables_are_found(tmp_path, monkeypatch):
     from app.settings import unknown_variables
-    env = write(tmp_path, "BOT_CHANNELS__STAFF_LOG=7\nBOT_ROLES__MEMEBR=1\n")
+    env = write(tmp_path, "BOT_CHANNELS__STAFF_LOG=7\nBOT_ROLES__MEMBER=1\n")  # (a removed setting is unknown too)
     monkeypatch.setenv("BOT_LANGAUGE", "pl")
-    assert unknown_variables(env) == ["BOT_CHANNELS__STAFF_LOG", "BOT_LANGAUGE", "BOT_ROLES__MEMEBR"]
+    assert unknown_variables(env) == ["BOT_CHANNELS__STAFF_LOG", "BOT_LANGAUGE", "BOT_ROLES__MEMBER"]
 
 
 def test_reload_with_errors_changes_nothing(tmp_path):

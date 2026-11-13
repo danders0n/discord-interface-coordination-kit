@@ -21,7 +21,7 @@ async def test_capabilities_gate_the_heartbeat(supervisor):
     state, client = supervisor
     assert await heartbeat.beat_once(client, refresh=True) is True
     assert state.heartbeats == [{"name": "discord-bot", "interval_s": 60}]
-    state.capabilities = ["reservations"]
+    state.capabilities = ["operations"]
     assert await heartbeat.beat_once(client, refresh=True) is False
     assert len(state.heartbeats) == 1
 
@@ -52,15 +52,16 @@ async def test_an_unreachable_supervisor_is_its_own_error():
     await client.close()
 
 
-async def test_a_slug_is_one_path_segment_whatever_it_holds(supervisor):
-    """``..``, ``/``, ``?`` and ``#`` in a slug are quoted, so the request can't land on another route."""
+async def test_a_file_name_is_one_path_segment_whatever_it_holds(supervisor):
+    """``..``, ``/``, ``?`` and ``#`` in a name are quoted, so the request can't land on another route."""
     state, client = supervisor
-    state.server("event")["state"] = "running"
-    for slug in ("event/stop#", "../reservations/current/end#", "event/stop?"):
+    op = state.operation("Op")
+    state.set_file(op["id"], "preset", b"<html>preset</html>")
+    assert await client.operation_file(op["id"], "preset.html") == b"<html>preset</html>"
+    for name in ("../../changes", "preset.html?x=1", "x/../preset.html#"):
         with pytest.raises(SupervisorError) as caught:
-            await client.say(slug, "hi")
+            await client.operation_file(op["id"], name)
         assert caught.value.status == 404
-    assert state.server("event")["state"] == "running"
 
 
 async def test_the_heartbeat_notices_a_supervisor_updated_meanwhile(supervisor, monkeypatch):
@@ -68,13 +69,13 @@ async def test_the_heartbeat_notices_a_supervisor_updated_meanwhile(supervisor, 
     import asyncio
 
     state, client = supervisor
-    state.capabilities = ["reservations"]
+    state.capabilities = ["operations"]
     rounds = []
 
     async def sleep(_delay):
         rounds.append(1)
         if len(rounds) == 1:
-            state.capabilities = ["reservations", "heartbeat"]  # updated during the hour's wait
+            state.capabilities = ["operations", "heartbeat"]  # updated during the hour's wait
         else:
             raise asyncio.CancelledError
 

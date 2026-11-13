@@ -1,12 +1,6 @@
-"""A fake arma-server-supervisor (docs/PLAN.md, *Phases*): an aiohttp app speaking the routes the bot uses, with
-the supervisor's error shape (``{"detail": ...}``) and the behaviour the plan relies on, as read in its code:
-
-- an occurrence in its quiet period or under way keeps its times on ``PUT`` and refuses ``DELETE`` (409);
-- a create with a ``managed_by`` / ``external_ref`` that exists returns that reservation (200), body ignored;
-- overlapping active windows are refused (409);
-- a start of another server while a reservation is under way answers 409 with ``reservation``.
-
-And the front end's routes (docs/PLAN-front-end.md), as the supervisor's phase 1 built them:
+"""A fake arma-server-supervisor (docs/PLAN-front-end.md, *Tests and the fake supervisor*): an aiohttp app speaking
+the routes of the bot's contract, with the supervisor's error shape (``{"detail": ..., "code": ...}``) and the
+behaviour the bot relies on, as read in the supervisor's code:
 
 - the roster: a full push sets who is in the guild; one that would make more than ``roster_guard`` persons with an
   account leave answers 409 ``roster_guard``, changes nothing and adds a ``roster_guard`` notice;
@@ -14,22 +8,30 @@ And the front end's routes (docs/PLAN-front-end.md), as the supervisor's phase 1
   roster (403 ``unknown_person``) whose account isn't disabled (403 ``account_disabled``);
 - notices: listed oldest first after ``after`` (only ``new`` ones; expired ones marked so), ``done``, and ``claim``
   of a login link's URL once (410 after that);
-- ``/api/events/stream``: ``hello``, then what :meth:`State.publish` sends.
+- operations: two counters (``revision`` for what organisers edit, checked by ``If-Match``: 409 ``stale`` with the
+  operation; ``change_seq`` for every change, the plumbing too), the change feed with tombstones and ``reset``, a
+  draft never published is deleted rather than cancelled, files by name, ``meta``;
+- ``/api/events/stream``: ``hello``, then what :meth:`State.publish` sends (``operation`` on every change).
 
 Every request on a contract route is checked against ``tests/contract/openapi-bot.json`` (``contract_check``):
-unknown query names or a body the real supervisor would refuse answer 422 with ``contract`` in the detail.
+unknown query names or a JSON body the real supervisor would refuse answer 422 with ``contract`` in the detail.
 
-Run on its own for the test Discord server: ``python -m tests.fake_supervisor [port]``."""
+Tests change operations as the app would through :meth:`State.operation`, :meth:`State.change` and
+:meth:`State.delete_operation`. Run on its own for the test Discord server: ``python -m tests.fake_supervisor
+[port]``."""
 
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import json
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiohttp import web
 
@@ -39,44 +41,50 @@ except ImportError:  # run as python -m tests.fake_supervisor
     from tests import contract_check
 
 TOKEN = "test-token"
-ALL = ["reservations", "integration_role", "managed_refs", "reservation_end_by_id", "reservation_profile",
-       "events_stream", "attendance_window", "player_uid_lookup", "heartbeat"]
+ALL = ["events_stream", "heartbeat", "members", "act_as", "notices", "steam_links", "operations", "operation_feed",
+       "operation_files"]
+TZ = ZoneInfo("Europe/Warsaw")
+KINDS = ("internal", "guest", "hosted", "zeus", "training")
+COMING = ("zeus", "training")
+PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
+KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
+EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "assembly_at", "start_at",
+            "duration_minutes", "signup_opens_at", "signup_limit", "how_to_join", "dont_end_automatically", "public",
+            "hold", "note")
+TIMES = ("assembly_at", "start_at", "signup_opens_at")
+PUBLISH = "operations.publish"
 
 
-def _server(number: int, slug: str, state: str = "stopped", players: int = 0) -> dict[str, Any]:
-    return {"server": {"id": number, "slug": slug, "name": slug.title(), "protected": False, "assigned_profile": None},
-            "state": state,
-            "players_online": [{"name": f"player{i}"} for i in range(players)]}
+def iso(value: datetime | str | None) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    if value.tzinfo is None:
+        raise ValueError("naive time")
+    return value.astimezone(UTC).isoformat()
+
+
+def _time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise ValueError("naive time")  # the real one reads it as local time: the bot must never send one
+    return parsed.astimezone(UTC)
 
 
 @dataclass
 class State:
     capabilities: list[str] = field(default_factory=lambda: list(ALL))
     has_system_info: bool = True
-    api_level: int = 1
+    api_level: int = 2
     timezone: str = "CET"
     utc_offset: str | None = None  # None: the system info has none (the bot then can't compare)
     bot_permissions: list[str] = field(default_factory=lambda: ["integration.act_as"])
     heartbeats: list[dict[str, Any]] = field(default_factory=list)
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
-    servers: list[dict[str, Any]] = field(default_factory=lambda: [_server(1, "server-1"), _server(2, "event")])
-    reservations: dict[int, dict[str, Any]] = field(default_factory=dict)
-    players: list[dict[str, Any]] = field(default_factory=list)  # player stats: uid, name, last_seen
-    # Mission plays: id, server_id, started_at, ended_at (aware datetimes; None: running), end, and their players
-    # (uid, name, seconds), for the attendance window and the plays fallback.
-    plays: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, str]] = field(default_factory=list)
-    next_id: int = 1
-    # Phase 7: profiles (id -> name, managed_by, external_ref, config, presets imported), jobs (id -> status,
-    # progress, error), missions (name -> report), and the profiles servers run now (refused deletes).
-    profiles: dict[int, dict[str, Any]] = field(default_factory=lambda: {
-        1: {"id": 1, "name": "IBC base", "managed_by": None, "external_ref": None, "config": {}, "presets": []}})
-    jobs: dict[int, dict[str, Any]] = field(default_factory=dict)
-    missions: dict[str, dict[str, Any]] = field(default_factory=dict)
-    running_profiles: set[int] = field(default_factory=set)
     # The front end: persons by Discord id (username, display_name, roles, in_guild, account: None or
-    # {"username", "disabled"}), the guild's roles, the guard (None: off), the notices, the login links' URLs by
-    # notice id (popped when claimed), the act-as calls made (method, path, discord id), and the open streams.
+    # {"username", "disabled"}, permissions: the app permissions of their account), the guild's roles, the guard
+    # (None: off), the notices, the login links' URLs by notice id (popped when claimed), the act-as calls made
+    # (method, path, discord id), and the open streams.
     persons: dict[str, dict[str, Any]] = field(default_factory=dict)
     roles: list[dict[str, Any]] = field(default_factory=list)
     roster_guard: int | None = None
@@ -87,6 +95,20 @@ class State:
     streams: list[asyncio.Queue] = field(default_factory=list)
     stream_gap: bool = False  # what the next hello says
     down: bool = False  # True: every route answers 503 (a supervisor that is restarting)
+    # Operations: stored as the fields the real one keeps (times as aware datetimes), drawn by ``out()``; the feed's
+    # counter, the tombstones (seq, id, title, deleted_at) and the highest pruned seq; files by (operation, name).
+    operations: dict[int, dict[str, Any]] = field(default_factory=dict)
+    seq: int = 0
+    tombstones: list[dict[str, Any]] = field(default_factory=list)
+    pruned_seq: int = 0
+    files: dict[tuple[int, str], bytes] = field(default_factory=dict)
+    groups: list[dict[str, Any]] = field(default_factory=list)
+    climates: list[dict[str, Any]] = field(default_factory=list)
+    staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
+    acronym: str = "IBC"
+    server_missions: list[str] = field(default_factory=list)
+
+    # ------------------------------------------------------------ the front end
 
     def person(self, discord_id: Any, username: str = "member", *, account: bool | dict[str, Any] = True,
                **extra: Any) -> dict[str, Any]:
@@ -94,8 +116,9 @@ class State:
         account as a dict."""
         if account is True:
             account = {"username": username, "disabled": False}
-        row = {"discord_id": str(discord_id), "username": username, "display_name": username, "roles": [],
-               "in_guild": True, "account": account or None} | extra
+        row = {"id": len(self.persons) + 1, "discord_id": str(discord_id), "username": username,
+               "display_name": username, "roles": [], "in_guild": True, "account": account or None,
+               "permissions": []} | extra
         self.persons[str(discord_id)] = row
         return row
 
@@ -125,53 +148,152 @@ class State:
         for queue in self.streams:
             queue.put_nowait(None)
 
-    def mission_report(self, name: str, playable: int = 10) -> dict[str, Any]:
-        """What the supervisor's inspection returns, with nothing wrong."""
-        return {"name": name, "template": name[:-4], "terrain": name.split(".")[-2] if name.count(".") >= 2 else "",
-                "status": "ok", "meta": {"briefingName": name.split(".")[0], "author": "Anna"}, "playable": playable,
-                "requirements": [], "issues": [], "index": {"built": True, "built_at": None, "job_id": None}}
+    # ------------------------------------------------------------ operations, as the app changes them
 
-    def using(self, template: str) -> list[str]:
-        return [p["name"] for p in self.profiles.values()
-                if any(m.get("template") == template for m in p["config"].get("server", {}).get("missions", []))]
+    def _next(self) -> int:
+        self.seq += 1
+        return self.seq
 
-    def server(self, ref: Any) -> dict[str, Any] | None:
-        return next((s for s in self.servers if ref in (s["server"]["id"], s["server"]["slug"], str(s["server"]["id"]))), None)
+    def _touch(self, op: dict[str, Any], actor: str, fields: list[str], action: str, revision: bool) -> None:
+        op["change_seq"] = self._next()
+        op["changed_by"], op["changed_fields"], op["changed_at"] = actor, sorted(set(fields)), self.now
+        if revision:
+            op["revision"] += 1
+        self.publish("operation", {"id": op["id"], "key": f"OP-{op['id']}", "action": action,
+                                   "revision": op["revision"], "seq": op["change_seq"], "changed_by": actor,
+                                   "changed_fields": op["changed_fields"]})
 
-    def under_way(self, r: dict[str, Any]) -> bool:
-        return not r["ended"] and r["starts_at"] - timedelta(minutes=r["quiet_minutes"]) <= self.now < r["ends_at"]
+    def operation(self, title: str = "Operation", *, assembly: datetime | None = None, start: datetime | None = None,
+                  kind: str = "internal", status: str = "draft", by: str = "anna", **fields: Any) -> dict[str, Any]:
+        """A new operation, as one made in the app (``status`` published: published at once)."""
+        assembly = assembly or self.now + timedelta(days=3)
+        op = {"id": max(self.operations, default=0) + 1, "kind": kind, "title": title, "status": "draft",
+              "climate": "", "climate_role_id": None, "host_group_id": None, "group_ids": [], "created_by": by,
+              "author_person_id": None, "organisers": [], "assembly_at": assembly,
+              "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
+              "signup_opens_at": None, "signup_limit": None, "how_to_join": "", "dont_end_automatically": False,
+              "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
+              "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
+              "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
+              "published_at": None, "ended_at": None}
+        op |= fields
+        self.operations[op["id"]] = op
+        self._touch(op, by, ["created"], "created", revision=False)
+        if status != "draft":
+            self.change(op["id"], status=status, by=by)
+        return op
 
-    def current(self) -> dict[str, Any] | None:
-        return next((r for r in self.reservations.values() if self.under_way(r)), None)
+    def change(self, op_id: int, *, by: str = "anna", revision: bool = True, **fields: Any) -> dict[str, Any]:
+        """Change an operation as the app would: ``published`` sets ``published_at``, a new seq, an event."""
+        op = self.operations[op_id]
+        if fields.get("status") == "published" and op["published_at"] is None:
+            op["published_at"] = self.now
+        if fields.get("status") in ("cancelled", "ended"):
+            op["ended_at"] = self.now
+        op.update(fields)
+        self._touch(op, by, list(fields), "updated", revision)
+        return op
+
+    def set_file(self, op_id: int, slot: str, content: bytes, name: str | None = None, **info: Any) -> None:
+        """A file of the operation (``preset``, ``map``, ``banner``) as an upload in the app leaves it."""
+        name = name or {"preset": "preset.html", "map": "map.png", "banner": "banner.png"}[slot]
+        self.files[(op_id, name)] = content
+        kind = "text/html" if name.endswith(".html") else "image/png"
+        entry = {"file": name, "hash": hashlib.sha256(content).hexdigest(), "size": len(content), "type": kind} | info
+        files = dict(self.operations[op_id]["files"]) | {slot: entry}
+        self.change(op_id, files=files)
+
+    def delete_operation(self, op_id: int) -> None:
+        """A draft deleted (or a stale one cancelled): a tombstone in the feed."""
+        op = self.operations.pop(op_id)
+        seq = self._next()
+        self.tombstones.append({"seq": seq, "id": op_id, "title": op["title"], "deleted_at": self.now})
+        self.publish("operation", {"id": op_id, "key": f"OP-{op_id}", "action": "deleted", "revision": 0,
+                                   "seq": seq, "changed_by": "anna", "changed_fields": ["deleted"]})
+
+    def prune(self, before_seq: int) -> None:
+        """The tombstones up to ``before_seq`` pruned: a feed read after an older seq answers ``reset``."""
+        self.tombstones = [t for t in self.tombstones if t["seq"] > before_seq]
+        self.pruned_seq = max(self.pruned_seq, before_seq)
+
+    # ------------------------------------------------------------ drawing an operation
+
+    def _person(self, person_id: int | None) -> dict[str, Any] | None:
+        row = next((p for p in self.persons.values() if p["id"] == person_id), None) if person_id else None
+        if row is None:
+            return None
+        return {"id": row["id"], "username": row["username"], "display_name": row["display_name"] or row["username"],
+                "discord_id": row["discord_id"]}
+
+    def _group(self, group_id: int | None) -> dict[str, Any] | None:
+        return next((dict(g) for g in self.groups if g["id"] == group_id), None) if group_id else None
+
+    def channel_name(self, op: dict[str, Any]) -> str:
+        acronym = self.acronym or "op"
+        if op["kind"] in COMING:
+            acronym = op["kind"]
+        elif op["kind"] == "guest" and op["host_group_id"]:
+            acronym = (self._group(op["host_group_id"]) or {}).get("acronym", acronym)
+        return f"{op['assembly_at'].astimezone(TZ):%d-%m}-{acronym}".lower()
+
+    def organises(self, op: dict[str, Any], person: dict[str, Any] | None) -> bool:
+        if person is None:
+            return False
+        account = (person.get("account") or {}).get("username")
+        return op["created_by"] == account or person["id"] in op["organisers"]
+
+    def actions(self, op: dict[str, Any], person: dict[str, Any]) -> list[str]:
+        out, organiser = [], self.organises(op, person)
+        if op["status"] in ("draft", "published") and organiser:
+            out += ["edit", "opord", "files", "preset", "mission", "profile"]
+        if op["status"] == "draft" and organiser and PUBLISH in person["permissions"]:
+            out.append("publish")
+        if op["status"] in ("draft", "pending", "published") and organiser:
+            out.append("delete" if op["published_at"] is None else "cancel")
+        return out + ["copy"]
+
+    def out(self, op: dict[str, Any], person: dict[str, Any] | None = None, *, full: bool = True) -> dict[str, Any]:
+        ends = op["start_at"] + timedelta(minutes=op["duration_minutes"])
+        files = {name: dict(info) | {"url": f"api/operations/{op['id']}/files/{info['file']}"}
+                 for name, info in op["files"].items()}
+        data = {
+            "id": op["id"], "key": f"OP-{op['id']}", "kind": op["kind"], "kind_name": KIND_NAMES[op["kind"]],
+            "title": op["title"], "status": op["status"], "climate": op["climate"],
+            "climate_role_id": op["climate_role_id"], "host_group": self._group(op["host_group_id"]),
+            "groups": [g for g in map(self._group, op["group_ids"]) if g], "created_by": op["created_by"],
+            "author": self._person(op["author_person_id"]),
+            "organisers": [p for p in map(self._person, op["organisers"]) if p],
+            "assembly_at": iso(op["assembly_at"]), "start_at": iso(op["start_at"]),
+            "duration_minutes": op["duration_minutes"], "ends_at": iso(ends),
+            "signup_opens_at": iso(op["signup_opens_at"]), "signup_limit": op["signup_limit"],
+            "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
+            "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
+            {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
+            "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
+                                       "ends_at": iso(ends + timedelta(minutes=30)), "state": "planned",
+                                       "hold": op["hold"] == "on"},
+            "frozen": False, "channel_name": self.channel_name(op), "discord": dict(op["discord"]),
+            "cancel_reason": op["cancel_reason"], "revision": op["revision"], "change_seq": op["change_seq"],
+            "changed_by": op["changed_by"], "changed_fields": list(op["changed_fields"]),
+            "changed_at": iso(op["changed_at"]), "created_at": iso(op["created_at"]),
+            "published_at": iso(op["published_at"]), "ended_at": iso(op["ended_at"]), "note": op["note"],
+            "opord": {p: (op["opord"].get(p, "") if full else bool(op["opord"].get(p))) for p in PARAGRAPHS},
+        }
+        if person is not None:
+            data["my"] = {"organiser": self.organises(op, person), "actions": self.actions(op, person)}
+        return data
+
+    def may_see(self, op: dict[str, Any], person: dict[str, Any] | None) -> bool:
+        return person is None or op["status"] not in ("draft", "pending") or self.organises(op, person)
 
 
 STATE = web.AppKey("state", State)
 PERSON = web.RequestKey("person", dict)
+ACT_AS = re.compile(r"^discord:(\d{1,25})$")
 
 
 def _error(status: int, detail: Any, **extra: Any) -> web.Response:
     return web.json_response({"detail": detail, **extra}, status=status)
-
-
-def _time(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        raise ValueError("naive time")  # the real one reads it as local time: the bot must never send one
-    return parsed.astimezone(UTC)
-
-
-def _out(r: dict[str, Any]) -> dict[str, Any]:
-    out = {k: v for k, v in r.items() if k not in ("starts_at", "ends_at", "ended")}
-    return out | {"starts_at": r["starts_at"].isoformat(), "ends_at": r["ends_at"].isoformat()}
-
-
-def _occurrence(r: dict[str, Any], state: State) -> dict[str, Any]:
-    return {"reservation_id": r["id"], "name": r["name"], "server_id": r["server_id"],
-            "starts_at": r["starts_at"].isoformat(), "ends_at": r["ends_at"].isoformat(),
-            "state": "ended" if r["ended"] else ("active" if state.now >= r["starts_at"] else "quiet")}
-
-
-ACT_AS = re.compile(r"^discord:(\d{1,25})$")
 
 
 def _contract_path(request: web.Request) -> str:
@@ -193,9 +315,9 @@ def make_app(state: State | None = None) -> web.Application:
             return _error(503, "The supervisor is restarting")
         path = _contract_path(request)
         op = contract_check.operation(request.method, path)
-        if op is not None:  # a front-end route: hold the request to the contract
+        if op is not None:  # hold the request to the contract
             body = None
-            if request.can_read_body:
+            if request.can_read_body and request.content_type == "application/json":
                 text = await request.text()
                 body = json.loads(text) if text else None
             found = contract_check.request_problems(request.method, path, dict(request.query), body)
@@ -233,272 +355,7 @@ def make_app(state: State | None = None) -> web.Application:
         state.heartbeats.append(body)
         return web.json_response({"name": body["name"], "silent": False})
 
-    # ------------------------------------------------------------ servers
-
-    def _status(request: web.Request) -> dict[str, Any] | None:
-        return state.server(request.match_info["slug"])
-
-    async def servers(_request: web.Request) -> web.Response:
-        return web.json_response(state.servers)
-
-    async def status(request: web.Request) -> web.Response:
-        found = _status(request)
-        return web.json_response(found) if found else _error(404, "Server not found")
-
-    async def start(request: web.Request) -> web.Response:
-        found = _status(request)
-        if found is None:
-            return _error(404, "Server not found")
-        body = await request.json() if request.can_read_body else {}
-        held = state.current()
-        if held is not None and held["server_id"] != found["server"]["id"] and not body.get("override"):
-            return _error(409, f"'{held['name']}' has the host until {held['ends_at']:%H:%M}",
-                          reservation={"id": held["id"], "name": held["name"], "server_id": held["server_id"],
-                                       "starts_at": held["starts_at"].isoformat(), "until": held["ends_at"].isoformat()})
-        found["state"] = "running"
-        return web.json_response({"run_id": 1, "status": found})
-
-    async def stop(request: web.Request) -> web.Response:
-        found = _status(request)
-        if found is None:
-            return _error(404, "Server not found")
-        found["state"], found["players_online"] = "stopped", []
-        return web.json_response(found)
-
-    async def say(request: web.Request) -> web.Response:
-        found = _status(request)
-        if found is None:
-            return _error(404, "Server not found")
-        if found["state"] != "running":
-            return _error(409, f"{found['server']['slug']} is not running")
-        return web.json_response({"sent": (await request.json())["message"]})
-
-    # ------------------------------------------------------------ reservations
-
-    def _clash(r: dict[str, Any], starts: datetime, ends: datetime) -> dict[str, Any] | None:
-        return next((o for o in state.reservations.values() if o["id"] != r.get("id") and o["enabled"]
-                     and not o["ended"] and o["starts_at"] < ends and starts < o["ends_at"]), None)
-
-    def _fields(body: dict[str, Any]) -> dict[str, Any] | web.Response:
-        server = state.server(body.get("server_id"))
-        if server is None:
-            return _error(404, f"Server {body.get('server_id')} not found")
-        if not 1 <= len(body.get("name") or "") <= 80:
-            return _error(422, [{"msg": "name: 1-80 characters"}])
-        try:
-            starts, ends = _time(body["starts_at"]), _time(body["ends_at"])
-        except (KeyError, ValueError) as exc:
-            return _error(422, [{"msg": f"times: {exc}"}])
-        if ("managed_by" in body) != ("external_ref" in body) or (body.get("managed_by") is None) != (body.get("external_ref") is None):
-            return _error(422, "managed_by and external_ref go together")
-        return {"name": body["name"], "server_id": server["server"]["id"], "starts_at": starts, "ends_at": ends,
-                "quiet_minutes": body.get("quiet_minutes", 30), "warn_minutes": body.get("warn_minutes", 15),
-                "enabled": body.get("enabled", True), "note": body.get("note"), "link": body.get("link"),
-                "profile_id": body.get("profile_id")} | {k: body[k] for k in ("managed_by", "external_ref") if k in body}
-
-    async def list_reservations(request: web.Request) -> web.Response:
-        q = request.query
-        return web.json_response([_out(r) for r in state.reservations.values()
-                                  if all(r.get(k) == q[k] for k in ("managed_by", "external_ref") if k in q)])
-
-    async def create(request: web.Request) -> web.Response:
-        body = await request.json()
-        if body.get("managed_by") is not None:
-            for r in state.reservations.values():
-                if (r.get("managed_by"), r.get("external_ref")) == (body["managed_by"], body.get("external_ref")):
-                    return web.json_response(_out(r), status=200)
-        fields = _fields(body)
-        if isinstance(fields, web.Response):
-            return fields
-        clash = _clash({}, fields["starts_at"], fields["ends_at"])
-        if clash is not None:
-            return _error(409, f"Overlaps '{clash['name']}'")
-        r = fields | {"id": state.next_id, "repeat": "once", "ended": False}
-        state.next_id += 1
-        state.reservations[r["id"]] = r
-        return web.json_response(_out(r), status=201)
-
-    def _get(request: web.Request) -> dict[str, Any] | None:
-        return state.reservations.get(int(request.match_info["id"]))
-
-    async def update(request: web.Request) -> web.Response:
-        r = _get(request)
-        if r is None:
-            return _error(404, "Reservation not found")
-        fields = _fields(await request.json())
-        if isinstance(fields, web.Response):
-            return fields
-        if state.under_way(r):  # "an occurrence under way keeps its times and its server"
-            for key in ("starts_at", "ends_at", "server_id"):
-                fields.pop(key)
-        clash = _clash(r, fields.get("starts_at", r["starts_at"]), fields.get("ends_at", r["ends_at"]))
-        if clash is not None:
-            return _error(409, f"Overlaps '{clash['name']}'")
-        r.update(fields)
-        return web.json_response(_out(r))
-
-    async def delete(request: web.Request) -> web.Response:
-        r = _get(request)
-        if r is None:
-            return _error(404, "Reservation not found")
-        if state.under_way(r):
-            return _error(409, f"'{r['name']}' is under way until {r['ends_at']:%H:%M}: end it first")
-        del state.reservations[r["id"]]
-        return web.Response(status=204)
-
-    async def end_by_id(request: web.Request) -> web.Response:
-        r = _get(request)
-        if r is None:
-            return _error(404, "Reservation not found")
-        if not state.under_way(r):
-            return _error(409, f"'{r['name']}' is not under way or about to begin")
-        r["ended"] = True
-        return web.json_response(_occurrence(r, state))
-
-    async def current(_request: web.Request) -> web.Response:
-        r = state.current()
-        return web.json_response(_occurrence(r, state) if r else None)
-
-    async def end_current(_request: web.Request) -> web.Response:
-        r = state.current()
-        if r is None:
-            return _error(404, "No reservation is under way or about to begin")
-        r["ended"] = True
-        return web.json_response(_occurrence(r, state))
-
-    # ------------------------------------------------------------ player stats
-
-    async def players(request: web.Request) -> web.Response:
-        """``uid=``: exactly that Steam ID; ``q=``: also part of a name or ID, as the real search."""
-        uid, q = request.query.get("uid"), request.query.get("q", "")
-        if uid is not None:
-            found = [p for p in state.players if p["uid"] == uid]
-        else:
-            found = [p for p in state.players if q.casefold() in p["name"].casefold() or q in p["uid"]]
-        return web.json_response({"total": len(found), "players": found})
-
-    def _play_out(play: dict[str, Any]) -> dict[str, Any]:
-        return {"id": play["id"], "server_id": play["server_id"], "started_at": play["started_at"].isoformat(),
-                "ended_at": play["ended_at"].isoformat() if play["ended_at"] else None, "end": play["end"],
-                "running": play["ended_at"] is None, "counted": True}
-
-    def _server_id(value: str) -> int | None:
-        found = state.server(value)
-        return found["server"]["id"] if found else None
-
-    async def attendance(request: web.Request) -> web.Response:
-        """Mission time per player in the plays overlapping the window (not cut to it: the tests keep plays inside)."""
-        start, end = _time(request.query["from"]), _time(request.query["to"])
-        if end <= start or end - start > timedelta(hours=24):
-            return _error(422, "The window ends after its start and is at most 24 hours long")
-        server = _server_id(request.query.get("server", ""))
-        plays = [p for p in state.plays if p["server_id"] == server and p["started_at"] <= end
-                 and (p["ended_at"] is None or p["ended_at"] >= start)]
-        players: dict[str, dict[str, Any]] = {}
-        for play in plays:
-            for p in play["players"]:
-                row = players.setdefault(p["uid"] or f"name:{p['name']}", {"uid": p["uid"], "name": p["name"], "mission_s": 0})
-                row["mission_s"] += p["seconds"]
-        return web.json_response({"players": list(players.values()), "plays": [_play_out(p) for p in plays]})
-
-    async def missions(request: web.Request) -> web.Response:
-        server, offset = int(request.query["server"]), int(request.query.get("offset", 0))
-        limit = int(request.query.get("limit", 100))
-        rows = sorted((p for p in state.plays if p["server_id"] == server), key=lambda p: p["started_at"], reverse=True)
-        return web.json_response({"total": len(rows), "missions": [_play_out(p) for p in rows[offset:offset + limit]]})
-
-    async def mission(request: web.Request) -> web.Response:
-        play = next((p for p in state.plays if p["id"] == int(request.match_info["id"])), None)
-        if play is None:
-            return _error(404, "Mission session not found")
-        return web.json_response(_play_out(play) | {"players": play["players"]})
-
-    # ------------------------------------------------------------ profiles, jobs, missions (phase 7)
-
-    def _profile_out(profile: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in profile.items() if k not in ("config", "presets")}
-
-    async def list_profiles(_request: web.Request) -> web.Response:
-        return web.json_response([_profile_out(p) for p in state.profiles.values()])
-
-    async def get_profile(request: web.Request) -> web.Response:
-        profile = state.profiles.get(int(request.match_info["id"]))
-        return web.json_response(_profile_out(profile)) if profile else _error(404, "Profile not found")
-
-    async def clone_profile(request: web.Request) -> web.Response:
-        base = state.profiles.get(int(request.match_info["id"]))
-        if base is None:
-            return _error(404, "Profile not found")
-        body = await request.json()
-        found = next((p for p in state.profiles.values() if body.get("external_ref") and
-                      (p["managed_by"], p["external_ref"]) == (body.get("managed_by"), body["external_ref"])), None)
-        if found is not None:
-            return web.json_response(_profile_out(found))
-        new_id = max(state.profiles) + 1
-        state.profiles[new_id] = {"id": new_id, "name": body["name"], "managed_by": body.get("managed_by"),
-                                  "external_ref": body.get("external_ref"),
-                                  "config": {k: dict(v) for k, v in base["config"].items()}, "presets": []}
-        return web.json_response(_profile_out(state.profiles[new_id]), status=201)
-
-    async def patch_config(request: web.Request) -> web.Response:
-        profile = state.profiles.get(int(request.match_info["id"]))
-        if profile is None:
-            return _error(404, "Profile not found")
-        profile["config"].setdefault(request.match_info["kind"], {}).update(await request.json())
-        return web.json_response(profile["config"][request.match_info["kind"]])
-
-    async def import_preset(request: web.Request) -> web.Response:
-        profile = state.profiles.get(int(request.match_info["id"]))
-        if profile is None:
-            return _error(404, "Profile not found")
-        form = await request.post()
-        profile["presets"].append({"mode": form["mode"], "download": form["download"], "file": form["file"].filename})
-        job_id = len(state.jobs) + 1
-        state.jobs[job_id] = {"id": job_id, "kind": "preset_import", "status": "queued", "progress": {}, "error": None}
-        return web.json_response({"job": state.jobs[job_id], "restart_needed": False}, status=202)
-
-    async def delete_profile(request: web.Request) -> web.Response:
-        profile_id = int(request.match_info["id"])
-        if profile_id not in state.profiles:
-            return _error(404, "Profile not found")
-        if profile_id in state.running_profiles:
-            return _error(409, "The profile is running on a server")
-        del state.profiles[profile_id]
-        return web.Response(status=204)
-
-    async def get_job(request: web.Request) -> web.Response:
-        job = state.jobs.get(int(request.match_info["id"]))
-        return web.json_response(job) if job else _error(404, "Job not found")
-
-    async def list_missions(_request: web.Request) -> web.Response:
-        return web.json_response([{"name": name, "template": name[:-4], "title": m["report"]["meta"].get("briefingName"),
-                                   "players": m["report"]["playable"], "profiles": state.using(name[:-4])}
-                                  for name, m in sorted(state.missions.items())])
-
-    async def upload_mission(request: web.Request) -> web.Response:
-        form = await request.post()
-        upload = form["files"]
-        if upload.filename in state.missions and request.query.get("overwrite") != "true":
-            return _error(409, f"'{upload.filename}' already exists (use overwrite=true)")
-        report = state.mission_report(upload.filename)
-        state.missions[upload.filename] = {"report": report, "size": len(upload.file.read())}
-        return web.json_response([{"name": upload.filename, "template": upload.filename[:-4], "report": report}],
-                                 status=201)
-
-    async def mission_report(request: web.Request) -> web.Response:
-        mission = state.missions.get(request.match_info["name"])
-        return web.json_response(mission["report"]) if mission else _error(404, "Mission not found")
-
-    async def patch_server(request: web.Request) -> web.Response:
-        found = state.server(request.match_info["slug"])
-        if found is None:
-            return _error(404, "Server not found")
-        profile_id = (await request.json()).get("profile_id")
-        found["server"]["assigned_profile"] = {"id": profile_id, "name": state.profiles[profile_id]["name"]} \
-            if profile_id else None
-        return web.json_response(found)
-
-    # ------------------------------------------------------------ the front end: identity, roster, notices, stream
+    # ------------------------------------------------------------ identity, roster, notices, stream
 
     async def me(request: web.Request) -> web.Response:
         person = request.get(PERSON)
@@ -507,11 +364,12 @@ def make_app(state: State | None = None) -> web.Application:
                                       "permissions": sorted(state.bot_permissions), "acting_via": None})
         account = person["account"] or {}
         return web.json_response({"username": account.get("username") or person["username"], "role": "member",
-                                  "permissions": [], "via": "discord-bot", "discord_id": person["discord_id"]})
+                                  "permissions": list(person["permissions"]), "via": "discord-bot",
+                                  "discord_id": person["discord_id"]})
 
     def _mine(request: web.Request) -> dict[str, Any]:
         person = request[PERSON]
-        return {"person_id": int(person["discord_id"]), "discord_id": person["discord_id"],
+        return {"person_id": person["id"], "discord_id": person["discord_id"],
                 "username": person["username"], "display_name": person["display_name"],
                 "steam_uid": person.get("steam_uid"), "steam_state": person.get("steam_state"),
                 "nick": person.get("nick"), "squadxml_url": "https://app.example/squad/squad.xml"}
@@ -546,8 +404,9 @@ def make_app(state: State | None = None) -> web.Application:
         return web.json_response(_mine(request))
 
     def _apply(discord_id: str, member: dict[str, Any], in_guild: bool) -> dict[str, Any]:
-        row = state.persons.get(discord_id) or {"discord_id": discord_id, "account": {"username": member["username"],
-                                                                                       "disabled": False}}
+        row = state.persons.get(discord_id) or {"id": len(state.persons) + 1, "discord_id": discord_id,
+                                                "account": {"username": member["username"], "disabled": False},
+                                                "permissions": []}
         row.update(username=member["username"], display_name=member.get("display_name", ""),
                    roles=list(member.get("roles", [])), in_guild=in_guild)
         state.persons[discord_id] = row
@@ -644,50 +503,362 @@ def make_app(state: State | None = None) -> web.Application:
             state.streams.remove(queue)
         return response
 
+    # ------------------------------------------------------------ operations: reference data and the feed
+
+    def _person(request: web.Request) -> dict[str, Any] | None:
+        return request.get(PERSON)
+
+    def _actor(request: web.Request) -> str:
+        person = _person(request)
+        return (person["account"] or {}).get("username", person["username"]) if person else "discord-bot"
+
+    async def meta(_request: web.Request) -> web.Response:
+        return web.json_response({
+            "api_level": state.api_level, "timezone": state.timezone, "utc_offset": state.utc_offset or "+0100",
+            "kinds": [{"id": k, "name": KIND_NAMES[k]} for k in KINDS], "climates": state.climates,
+            "groups": state.groups, "discord_roles": [], "staff_roles": state.staff_roles,
+            "squadxml_url": "https://app.example/squad/squad.xml",
+            "defaults": {"server": {"id": 2, "slug": "event", "name": "Event"}, "base_profile": None,
+                         "duration_minutes": 180, "hold": "on"},
+            "window": {"lead_minutes": 45, "buffer_minutes": 30, "quiet_minutes": 30, "warn_minutes": 15},
+            "max_days_ahead": 120, "acronym": state.acronym, "paragraphs": list(PARAGRAPHS),
+            "image_slots": ["map", "banner"], "limits": {"title": 100, "paragraph": 4000}})
+
+    async def changes(request: web.Request) -> web.Response:
+        after, limit = int(request.query.get("after", 0)), int(request.query.get("limit", 100))
+        reset = 0 < after < state.pruned_seq or after > state.seq
+        if reset:
+            cutoff = state.now - timedelta(days=30)
+            ops = sorted((o for o in state.operations.values()
+                          if o["status"] in ("draft", "pending", "published") or o["changed_at"] > cutoff),
+                         key=lambda o: o["change_seq"])
+            items = [{"seq": o["change_seq"], "operation": state.out(o)} for o in ops[:limit]]
+            return web.json_response({"seq": state.seq, "reset": True, "more": len(ops) > limit, "changes": items})
+        merged = sorted([(o["change_seq"], "op", o) for o in state.operations.values() if o["change_seq"] > after]
+                        + [(t["seq"], "stone", t) for t in state.tombstones if t["seq"] > after],
+                        key=lambda item: item[0])
+        items = []
+        for seq, what, row in merged[:limit]:
+            if what == "op":
+                items.append({"seq": seq, "operation": state.out(row)})
+            else:
+                items.append({"seq": seq, "deleted": {"id": row["id"], "key": f"OP-{row['id']}", "title": row["title"],
+                                                      "deleted_at": iso(row["deleted_at"])}})
+        return web.json_response({"seq": state.seq, "reset": False, "more": len(merged) > limit, "changes": items})
+
+    async def persons(request: web.Request) -> web.Response:
+        q = request.query.get("q", "").casefold()
+        rows = [p for p in state.persons.values() if p["in_guild"]
+                and (not q or q in p["username"].casefold() or q in p["display_name"].casefold())]
+        return web.json_response([{"id": p["id"], "username": p["username"], "display_name": p["display_name"]}
+                                  for p in rows[:int(request.query.get("limit", 50))]])
+
+    async def missions(_request: web.Request) -> web.Response:
+        return web.json_response([{"name": name, "terrain": name.split(".")[-2] if name.count(".") >= 2 else "",
+                                   "size": 1000} for name in sorted(state.server_missions)])
+
+    async def list_groups(_request: web.Request) -> web.Response:
+        return web.json_response(state.groups)
+
+    async def add_group(request: web.Request) -> web.Response:
+        body = await request.json()
+        if any(g["acronym"].casefold() == body["acronym"].casefold() for g in state.groups):
+            return _error(409, f"{body['acronym']} exists already", code="exists")
+        group = {"id": len(state.groups) + 1, "acronym": body["acronym"], "name": body["name"]}
+        state.groups.append(group)
+        return web.json_response(group, status=201)
+
+    async def rename_group(request: web.Request) -> web.Response:
+        group = next((g for g in state.groups if g["id"] == int(request.match_info["group_id"])), None)
+        if group is None:
+            return _error(404, "Group not found", code="not_found")
+        group.update({k: v for k, v in (await request.json()).items() if v is not None})
+        return web.json_response(group)
+
+    # ------------------------------------------------------------ operations
+
+    def _get(request: web.Request) -> dict[str, Any] | web.Response:
+        op = state.operations.get(int(request.match_info["op_id"]))
+        if op is None or not state.may_see(op, _person(request)):
+            return _error(404, f"OP-{request.match_info['op_id']} not found", code="not_found")
+        return op
+
+    def _reply(op: dict[str, Any], request: web.Request, status: int = 200) -> web.Response:
+        return web.json_response(state.out(op, _person(request)), status=status, headers={"ETag": f'"{op["revision"]}"'})
+
+    def _editable(op: dict[str, Any], request: web.Request) -> web.Response | None:
+        """Organisers edit (the bot's own account: never, it has no operations.create); If-Match is checked."""
+        person = _person(request)
+        if person is None or not state.organises(op, person):
+            return _error(403, f"Only the organisers of OP-{op['id']} may change it", code="not_allowed")
+        if op["status"] not in ("draft", "published"):
+            return _error(409, f"OP-{op['id']} is {op['status']}", code="locked")
+        wanted = request.headers.get("If-Match")
+        if wanted and wanted.strip().strip('"') != str(op["revision"]):
+            return _error(409, f"OP-{op['id']} changed meanwhile", code="stale", operation=state.out(op, person))
+        return None
+
+    def _fields(body: dict[str, Any]) -> dict[str, Any] | web.Response:
+        fields = {k: v for k, v in body.items() if k in EDITABLE}
+        try:
+            for name in TIMES:
+                if fields.get(name) is not None:
+                    fields[name] = _time(fields[name])
+        except ValueError as exc:
+            return _error(422, [{"msg": f"times: {exc}"}])
+        return fields
+
+    def _check_times(op: dict[str, Any]) -> web.Response | None:
+        if op["start_at"] < op["assembly_at"]:
+            return _error(422, "The start is before the assembly", code="start_before_assembly")
+        if op["assembly_at"] <= state.now:
+            return _error(422, "That time is over: the assembly must be in the future", code="past")
+        return None
+
+    async def list_operations(request: web.Request) -> web.Response:
+        statuses = [s for s in request.query.get("status", "").split(",") if s]
+        upcoming = request.query.get("upcoming") == "true"
+        rows = [o for o in state.operations.values() if state.may_see(o, _person(request))
+                and (not statuses or o["status"] in statuses)
+                and (not upcoming or o["start_at"] + timedelta(minutes=o["duration_minutes"]) > state.now)]
+        rows.sort(key=lambda o: o["start_at"], reverse=not upcoming)
+        return web.json_response([state.out(o, _person(request), full=False)
+                                  for o in rows[:int(request.query.get("limit", 200))]])
+
+    async def create_operation(request: web.Request) -> web.Response:
+        person = _person(request)
+        if person is None:
+            return _error(403, "Creating operations needs operations.create", code="forbidden")
+        fields = _fields(await request.json())
+        if isinstance(fields, web.Response):
+            return fields
+        if fields.get("kind") == "guest" and PUBLISH not in person["permissions"]:
+            return _error(403, "A guest operation needs Publish operations", code="kind_not_allowed")
+        draft = {"assembly_at": fields["assembly_at"], "start_at": fields["start_at"]}
+        problem = _check_times(draft)
+        if problem is not None:
+            return problem
+        op = state.operation(fields.pop("title"), assembly=fields.pop("assembly_at"), start=fields.pop("start_at"),
+                             by=_actor(request), author_person_id=person["id"], **fields)
+        return _reply(op, request, 201)
+
+    async def get_operation(request: web.Request) -> web.Response:
+        op = _get(request)
+        return op if isinstance(op, web.Response) else _reply(op, request)
+
+    async def update_operation(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        fields = _fields(await request.json())
+        if isinstance(fields, web.Response):
+            return fields
+        trial = op | fields
+        problem = _check_times(trial) if any(k in fields for k in ("assembly_at", "start_at")) else None
+        if problem is not None:
+            return problem
+        state.change(op["id"], by=_actor(request), **fields)
+        return _reply(op, request)
+
+    async def delete_operation(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        if not state.organises(op, _person(request)):
+            return _error(403, f"Only the organisers of OP-{op['id']} may delete it", code="not_allowed")
+        if op["published_at"] is not None:
+            return _error(409, f"OP-{op['id']} was published: cancel it instead", code="published")
+        state.delete_operation(op["id"])
+        return web.Response(status=204)
+
+    async def set_opord(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        body = await request.json()
+        state.change(op["id"], by=_actor(request), opord=dict(op["opord"]) | {k: v for k, v in body.items() if v is not None})
+        return _reply(op, request)
+
+    async def set_organisers(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        state.change(op["id"], by=_actor(request), organisers=list((await request.json())["person_ids"]))
+        return _reply(op, request)
+
+    async def publish(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        person = _person(request)
+        if person is None or PUBLISH not in person["permissions"]:
+            return _error(403, "Publishing needs Publish operations: send it for approval", code="needs_approval")
+        if op["status"] != "draft":
+            return _error(409, f"OP-{op['id']} is {op['status']}", code="not_draft")
+        missing = [p for p in ("situation", "mission") if not op["opord"].get(p)]
+        if missing:
+            return _error(422, "Write the OPORD's Situation and Mission first", code="incomplete", missing=missing)
+        state.change(op["id"], by=_actor(request), status="published")
+        return _reply(op, request)
+
+    async def cancel(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        if not state.organises(op, _person(request)):
+            return _error(403, f"Only the organisers of OP-{op['id']} may cancel it", code="not_allowed")
+        if op["published_at"] is None:
+            state.delete_operation(op["id"])
+            return web.json_response(None)
+        state.change(op["id"], by=_actor(request), status="cancelled", cancel_reason=(await request.json()).get("reason") or None)
+        return _reply(op, request)
+
+    async def copy_operation(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        body = await request.json() if request.can_read_body else {}
+        shift = timedelta(days=7)
+        assembly = _time(body["assembly_at"]) if body.get("assembly_at") else op["assembly_at"] + shift
+        start = _time(body["start_at"]) if body.get("start_at") else assembly + (op["start_at"] - op["assembly_at"])
+        made = state.operation(body.get("title") or op["title"], assembly=assembly, start=start, kind=op["kind"],
+                               by=_actor(request), opord=dict(op["opord"]), files=copy.deepcopy(op["files"]),
+                               organisers=list(op["organisers"]), author_person_id=op["author_person_id"])
+        return _reply(made, request, 201)
+
+    async def set_discord(request: web.Request) -> web.Response:
+        if PERSON in request:
+            return _error(403, "The plumbing is the bot's own", code="act_as_route")
+        op = state.operations.get(int(request.match_info["op_id"]))
+        if op is None:
+            return _error(404, f"OP-{request.match_info['op_id']} not found", code="not_found")
+        plumbing = dict(op["discord"]) | await request.json()
+        if plumbing != op["discord"]:
+            state.change(op["id"], by="discord-bot", revision=False, discord=plumbing)
+        return _reply(op, request)
+
+    async def get_file(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        content = state.files.get((op["id"], request.match_info["name"]))
+        if content is None:
+            return _error(404, f"OP-{op['id']} has no file '{request.match_info['name']}'", code="not_found")
+        return web.Response(body=content, content_type="text/html" if request.match_info["name"].endswith(".html")
+                            else "image/png")
+
+    async def _upload(request: web.Request, slot: str) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        form = await request.post()
+        upload = form["file"]
+        content = upload.file.read()
+        if slot == "mission":
+            state.change(op["id"], by=_actor(request), mission={"name": upload.filename, "staged": False})
+        else:
+            name = "preset.html" if slot == "preset" else f"{slot}.png"
+            state.set_file(op["id"], slot, content, name)
+        return _reply(op, request)
+
+    async def upload_preset(request: web.Request) -> web.Response:
+        return await _upload(request, "preset")
+
+    async def upload_image(request: web.Request) -> web.Response:
+        return await _upload(request, request.match_info["slot"])
+
+    async def upload_mission(request: web.Request) -> web.Response:
+        return await _upload(request, "mission")
+
+    async def pick_mission(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        name = (await request.json())["name"]
+        if name not in state.server_missions:
+            return _error(404, f"No mission '{name}' on the server", code="not_found")
+        state.change(op["id"], by=_actor(request), mission={"name": name, "staged": False})
+        return _reply(op, request)
+
+    async def clear_mission(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        state.change(op["id"], by=_actor(request), mission={})
+        return _reply(op, request)
+
+    async def remove_file(request: web.Request) -> web.Response:
+        op = _get(request)
+        if isinstance(op, web.Response):
+            return op
+        refused = _editable(op, request)
+        if refused is not None:
+            return refused
+        slot = request.match_info["slot"]
+        if slot in op["files"]:
+            state.change(op["id"], by=_actor(request), files={k: v for k, v in op["files"].items() if k != slot})
+        return _reply(op, request)
+
     app = web.Application(middlewares=[auth])
     app[STATE] = state
-    app.router.add_get("/api/system/info", system_info)
-    app.router.add_post("/api/integrations/heartbeat", heartbeat)
-    app.router.add_get("/api/servers", servers)
-    app.router.add_get("/api/servers/{slug}/status", status)
-    app.router.add_post("/api/servers/{slug}/start", start)
-    app.router.add_post("/api/servers/{slug}/restart", start)
-    app.router.add_post("/api/servers/{slug}/stop", stop)
-    app.router.add_post("/api/servers/{slug}/say", say)
-    app.router.add_get("/api/reservations", list_reservations)
-    app.router.add_post("/api/reservations", create)
-    app.router.add_get("/api/reservations/current", current)
-    app.router.add_post("/api/reservations/current/end", end_current)
-    app.router.add_put("/api/reservations/{id:\\d+}", update)
-    app.router.add_delete("/api/reservations/{id:\\d+}", delete)
-    app.router.add_post("/api/reservations/{id:\\d+}/end", end_by_id)
-    app.router.add_get("/api/stats/players", players)
-    app.router.add_get("/api/profiles", list_profiles)
-    app.router.add_get("/api/profiles/{id:\\d+}", get_profile)
-    app.router.add_post("/api/profiles/{id:\\d+}/clone", clone_profile)
-    app.router.add_patch("/api/profiles/{id:\\d+}/config/{kind}", patch_config)
-    app.router.add_post("/api/profiles/{id:\\d+}/mods/import-preset", import_preset)
-    app.router.add_delete("/api/profiles/{id:\\d+}", delete_profile)
-    app.router.add_get("/api/jobs/{id:\\d+}", get_job)
-    app.router.add_get("/api/missions", list_missions)
-    app.router.add_post("/api/missions", upload_mission)
-    app.router.add_get("/api/missions/{name}/report", mission_report)
-    app.router.add_patch("/api/servers/{slug}", patch_server)
-    app.router.add_get("/api/stats/attendance", attendance)
-    app.router.add_get("/api/stats/missions", missions)
-    app.router.add_get("/api/stats/missions/{id:\d+}", mission)
-    app.router.add_get("/api/auth/me", me)
-    app.router.add_get("/api/events/stream", stream)
-    app.router.add_put("/api/members/roster", push_roster)
-    app.router.add_put("/api/members/roles", push_roles)
-    app.router.add_get("/api/members/me", my_member)
-    app.router.add_put("/api/members/me/steam", link_steam)
-    app.router.add_delete("/api/members/me/steam", unlink_steam)
-    app.router.add_put("/api/members/{discord_id:\\d{1,25}}", push_member)
-    app.router.add_get("/api/members", list_members)
-    app.router.add_get("/api/notices", list_notices)
-    app.router.add_post("/api/notices/{notice_id:\\d+}/done", notice_done)
-    app.router.add_post("/api/notices/{notice_id:\\d+}/claim", notice_claim)
+    add = app.router
+    add.add_get("/api/system/info", system_info)
+    add.add_post("/api/integrations/heartbeat", heartbeat)
+    add.add_get("/api/auth/me", me)
+    add.add_get("/api/events/stream", stream)
+    add.add_put("/api/members/roster", push_roster)
+    add.add_put("/api/members/roles", push_roles)
+    add.add_get("/api/members/me", my_member)
+    add.add_put("/api/members/me/steam", link_steam)
+    add.add_delete("/api/members/me/steam", unlink_steam)
+    add.add_put("/api/members/{discord_id:\\d{1,25}}", push_member)
+    add.add_get("/api/members", list_members)
+    add.add_get("/api/notices", list_notices)
+    add.add_post("/api/notices/{notice_id:\\d+}/done", notice_done)
+    add.add_post("/api/notices/{notice_id:\\d+}/claim", notice_claim)
+    add.add_get("/api/operations", list_operations)
+    add.add_post("/api/operations", create_operation)
+    add.add_get("/api/operations/changes", changes)
+    add.add_get("/api/operations/meta", meta)
+    add.add_get("/api/operations/persons", persons)
+    add.add_get("/api/operations/missions", missions)
+    add.add_get("/api/operations/groups", list_groups)
+    add.add_post("/api/operations/groups", add_group)
+    add.add_patch("/api/operations/groups/{group_id:\\d+}", rename_group)
+    add.add_get("/api/operations/{op_id:\\d+}", get_operation)
+    add.add_patch("/api/operations/{op_id:\\d+}", update_operation)
+    add.add_delete("/api/operations/{op_id:\\d+}", delete_operation)
+    add.add_put("/api/operations/{op_id:\\d+}/opord", set_opord)
+    add.add_put("/api/operations/{op_id:\\d+}/organisers", set_organisers)
+    add.add_post("/api/operations/{op_id:\\d+}/publish", publish)
+    add.add_post("/api/operations/{op_id:\\d+}/cancel", cancel)
+    add.add_post("/api/operations/{op_id:\\d+}/copy", copy_operation)
+    add.add_put("/api/operations/{op_id:\\d+}/discord", set_discord)
+    add.add_get("/api/operations/{op_id:\\d+}/files/{name}", get_file)
+    add.add_delete("/api/operations/{op_id:\\d+}/files/{slot}", remove_file)
+    add.add_put("/api/operations/{op_id:\\d+}/images/{slot}", upload_image)
+    add.add_put("/api/operations/{op_id:\\d+}/preset", upload_preset)
+    add.add_put("/api/operations/{op_id:\\d+}/mission", upload_mission)
+    add.add_delete("/api/operations/{op_id:\\d+}/mission", clear_mission)
+    add.add_post("/api/operations/{op_id:\\d+}/mission/pick", pick_mission)
     return app
 
 

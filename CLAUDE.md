@@ -14,18 +14,14 @@ mission), reports attendance from the supervisor's player stats, and generates t
 group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
 read its `CLAUDE.md` and `README.md` before touching the integration.
 
-Status: **phases 1–8 are built**: settings, database and migrations, backups, i18n, permissions, the
-scheduled-action loop, logging and the staff threads, start-up checks, the heartbeat, `/reload`, `/privacy`, the
-supervisor client, host reservations as a service (`app/reservations/`), `/server`, and the ORBAT format,
-templates and sign-up logic as services (`app/orbat/`, `app/signup/`), and the event service
-(`app/events/`, phase 4a), the event channel (`app/eventchannel/`, phase 4b), and the header, wizard and
-organiser panel (4c-1), `/event image` and `/event preset` (4c-2), and the sign-up buttons, offers, approval
-messages, `/slot` and `/events` (4d), the Steam link and squad.xml (phase 5), and the attendance trigger,
-report and corrections (6a), the ratings with `/attendance`, `/profile`, `/mission-maker` and `/group` (6b), and
-`/privacy-erase` (6c), the event profile on the supervisor (phase 7) and the long-term archive (phase 8):
-every phase of the plan is built. The
-full design is in [docs/PLAN.md](docs/PLAN.md), with every decision, the assumptions made while planning, a draft
-data model, and the build phases. Read the relevant section before implementing a feature, and keep the plan and
+Status: the bot of [docs/PLAN.md](docs/PLAN.md) (phases 1–8) was built and is on `master`. On `feature/front-end`
+it is being rebuilt as **the supervisor's Discord front end** ([docs/PLAN-front-end.md](docs/PLAN-front-end.md)):
+the supervisor owns operations (the bot's events), sign-ups, approval, attendance, Steam links and who may do what;
+the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–4 are done: the roster, notices, live events,
+Steam links, the supervisor check, and the operation channels drawn from the change feed (the old event stack is
+deleted). Next: the sign-up buttons, offers, moderation thread, wizard and panel against the supervisor's phase 4
+(*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
+data rules moved to the supervisor. Read the relevant section before implementing a feature, and keep the plans and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
 
 ## Stack
@@ -72,92 +68,49 @@ exactly the settings.
   replies disappear after `times.reply_seconds`), `finish()` (a last word replacing a pressed message), the
   command error handler.
 - `app/settings.py`: `.env` model and `SettingsStore` (`/reload`; restart-only values keep their old value).
-  Channels and roles are `Ref`s: an id or a name.
+  Channels and roles are `Ref`s: an id or a name. Only the bot's own settings are left (front-end plan,
+  *Configuration*).
 - `app/resolve.py`: turns the `Ref`s into `Ids` on the server (start-up, `/reload`); code reads `services.ids`,
   never the raw settings, for channels and roles.
-- `app/permissions.py`: `Access` from role ids against `Ids` (no discord.py); per-event rights come later.
+- `app/permissions.py`: `Access` from role ids against `Ids` (no discord.py); only *bot admin* is left, every other
+  right is the supervisor's (act-as).
 - `app/staff_threads.py`: the staff log and moderation threads in the staff channel (made, remembered, reopened).
 - `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
 - `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
 - `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue (notes waiting together go out joined).
-- `app/activity.py`: `Activity`, the staff log's activity entries (who signed up where, who edited what, old → new
-  from `snapshot` / `edited`); set as `.activity` on the event, sign-up, attendance, feedback and profile services
-  by `EventBot.build_events` (`Activity.off()` otherwise). It never raises. Organisers' slot actions pass `by`.
-- `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (servers, reservations, `ReservationRefused` for a
-  409 with `reservation`), capabilities, heartbeat loop.
-- `app/reservations/service.py`: an event's host reservation: `book` (create or move; `Frozen` from the quiet
-  period), `retry`, `end`, `cancel` (ends one under way first); unreachable → scheduled retries, refused →
-  `failed` + staff note. State in `host_reservation`. Its `listener` (set by `EventService` to the notifier's
-  `reservation_changed`) hears changes made in the background, so the info embed and approval requests redraw.
-- Domains so far: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a
-  confirmation, `erase.py` replacing the member by `former:<n>` everywhere, stored as `-n` in id columns and shown
-  by `render.mention()`), `app/servers/` (`/server` with confirmation and override buttons).
-- `app/orbat/parser.py`: the ORBAT text format (`parse` names every problem's line; `render` writes it back with
-  `xN`; `!` only for slots locked closed, never for assignments). `app/orbat/templates.py`: shared templates.
-- `app/signup/service.py`: `SignupService`, the sign-up rules (see its docstring): atomic claims, the partial
-  unique index, offers with expiry actions, Zeus's limit in one statement, `set_orbat` matching after sign-ups,
-  role changes. `COMING` lists the kinds without an ORBAT (Zeus, training): check `kind in COMING`, never `== "zeus"`. It talks to Discord only through the `Notifier` protocol and `roles_of`; refusals are `Refusal`
-  codes for the Discord layer to word. Only one instance per scheduler (it registers the offer-expiry handler).
-- `app/events/`: `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next
-  day, aware UTC out), `groups.py` (other groups), `service.py` (`EventService`: the kinds, create, update with proposals
-  for members' new times, publish or send for approval, approve / reject / withdraw, cancel, end, and the timed
-  actions; refusals are `Problem` codes; the Discord side listens through `EventNotifier`).
-- `app/eventchannel/`: `render.py` (pure: event + board -> `Message`s keyed `info` (embed), `briefing[:N]`,
-  `preset`, `orbat:N` (plain text, split by `texts()` at 2000 characters), `report` (embed), `discussion` (the
-  thread link, last); `kind_label` takes the configured names), `sync.py` (keeps them in order: edit in place,
-  append / delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always pass `view`, as leaving it out keeps old buttons),
-  `order.py` (a category's channels: `Ids.top` first, then the rest, then the events by start; one bulk position
-  request, only when the order differs),
-  `service.py` (`EventChannels`: the channel in the events category from the draft on (marked DRAFT, no sign-up; an old hidden draft moves there at start-up), the thread at publishing (Discord's card last, stored as `card`; a draft's pings by DM), overwrites that follow the co-organisers,
-  batched redraws via `Redrawer` (and `sorter`, one by category id, for the order), background renames, publish + announcement, a redraw at the start (sign-up
-  closes) and the archive, both moved with the event's times, cancel + thread ping, archive by quarter with
-  overflow categories, the 45 / 50 channel room of the categories; it is the notifier of `EventService` and
-  `SignupService`). `EventBot.
-  build_events` wires the three together; `refresh_all` redraws after a restart.
-- `app/events/ui.py`: the wizard (`Choices` + `DetailsModal`, in memory; `expired()` answers its buttons after a
-  restart), the persistent `CreateEvent`, `PanelButton` and `PanelAction` (`event:act:<id>:<action>`, one
-  `_<action>` method each), and the panel's modals and tools (templates renamed / deleted by their author, other groups corrected by
-  *manage any event*, which redraws their events through `EventChannels.group_changed`). `guarded()` turns service refusals into words
-  (`app/events/words.py`). `app/events/header.py`: the header message and its calendar. `app/events/cog.py`:
-  `/event preset | image` (in the event's channel or thread, found by `EventService.by_channel`), `/slot take |
-  leave`, `/events`.
-- `app/presets.py`: the Arma 3 Launcher preset parser (ported from the supervisor) with the Creator DLC table;
-  presets and images are files under `data/presets/` and `data/images/`, sent with the event's messages.
-- `app/signup/ui.py`: the sign-up buttons under `orbat:0` (`signup:<id>:<action>`, a squad-then-slot picker),
-  the offer buttons (`offer:<id>:take|decline`, by DM or in the thread), and `answer()` (refusal or done, plus
-  the DLC warning); the buttons are off before sign-up opens, after the start, and (*Coming*) at a Zeus limit.
-  `app/approval/ui.py`: the request message in the moderation thread with *Approve* / *Reject*, and *Retry
-  reservation* while Approve is off (`approval:<id>:<action>`).
+- `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (act-as, the roster, notices, the stream, the
+  operations' feed, `meta`, files and plumbing), capabilities, heartbeat loop.
+- Domains: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a
+  confirmation, `erase.py` emptying what the bot holds: link reminders, archived messages, as `former:<n>` stored
+  as `-n`).
+- `app/operations/`: `feed.py` (`Feed`: `GET /api/operations/changes` oldest first into the channels, the cursor in
+  `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`),
+  `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next day, aware UTC
+  out; for the wizard).
+- `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
+  `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `discussion` (the thread
+  link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place, append /
+  delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
+  pass `view`, as leaving it out keeps old buttons), `order.py` (a category's channels: `Ids.top` first, then the
+  rest, then the operations by start; one bulk position request, only when the order differs), `service.py`
+  (`OperationChannels`: `apply(op)` / `gone(id)` from the feed; a redraw converges on the operation: the channel, the
+  overwrites (organisers and `meta`'s staff roles), the messages, the thread at publishing (Discord's card last,
+  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the archive by quarter;
+  batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart). `EventBot.build_operations` wires
+  channels, header and feed.
 - `app/links/` (the links and squad.xml are the supervisor's): `service.py` (`LinkService`: the member's own link
-  through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` / `steam_ids()` (confirmed, for
-  the attendance report) read from `GET /api/members`, and the reminder bookkeeping in `link_reminder` with the
-  rollout flag), `ui.py` (*Link now* `link:now`, the modal, `save()` shared by `/link` and the modal), `cog.py`
-  (`/link`, `/unlink`, staff `/links remind | reminders`), `watch.py` (`LinkWatch`: a member who gains a role and is
-  then unlinked is asked once at once, the hourly `link_reminders` action with DMs or a reminder-channel ping,
-  skipping `muted` members, the first-run announcement, retried hourly while the supervisor is away).
-- `app/attendance/`: `stats.py` (`StatsReader`: plays and mission time from `/api/stats/attendance`, or the plays
-  fallback), `service.py` (`AttendanceService`: the `attendance_watch` action every minute from the assembly,
-  `finished_at` and `compute` as pure rules, `attendance_read` with retries until the deadline, guest events'
-  *to confirm* with the 24 h ping and the N-day auto-confirm, `correct` and `confirm_probable`; `EventService.
-  attendance` calls it on publish, move, cancel, *End event* and a guest event's end), `ui.py` (*Edit attendance*
-  `attendance:<id>:edit` and its editor, *Rate* `attendance:<id>:rate` and its modal), `history.py` (`History`:
-  a member's record, totals for a period, a maker's missions, a group's events), `cog.py` (`/attendance`,
-  `/attendance-report`, `/profile`, `/mission-maker`, `/group`, with *Who sees what*). The report is the `report`
-  message, last in the channel. `app/feedback/service.py`: `FeedbackService` (who may rate, the window,
-  averages; a correction taking *attended* away calls `forget`); the window's end is the `rating_close` action.
-- `app/profiles/`: `service.py` (`ProfileService`: the mission uploaded or picked, with the same-name rule;
-  `trim` of the supervisor's report and `warnings`; `build` clones the base once, imports the preset as a job
-  (`profile_job` follows it), sets the server config; built again when the mission, preset or settings change,
-  and on publish if never built; `profile_id` goes into the reservation once built; without `reservation_profile`
-  the `profile_swap` / `profile_restore` actions; `profile_cleanup` after the keep days, daily retries; a handler
-  that reschedules its own key returns the new time, or the scheduler marks it done), `words.py`. The panel's
-  *Server profile* is `events/ui.py`'s `profile_panel`; `/event mission` is in `events/cog.py`.
-- `app/archive/`: `service.py` (`ArchiveService`: quarters as numbers, which archived events leave
-  (`keep_quarters`), `save_transcript`, who may read: participants, organisers, *manage any event*, *bot admin*),
-  `export.py` (`Exporter`: the daily `archive_export` action copies members' messages and downloads attachments,
-  checks the copy, deletes the channel, then empty archive categories), `html.py` (the file: `inline`, `zip` or
+  through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` read from `GET /api/members`,
+  and the reminder bookkeeping in `link_reminder` with the rollout flag), `ui.py` (*Link now* `link:now`, the
+  modal, `save()` shared by `/link` and the modal), `cog.py` (`/link`, `/unlink`, *bot admin*'s `/links remind |
+  reminders`), `watch.py` (`LinkWatch`: a member who gains a role and is then unlinked is asked once at once, the
+  hourly `link_reminders` action with DMs or a reminder-channel ping, skipping `muted` members, the first-run
+  announcement, retried hourly while the supervisor is away).
+- `app/archive/`: `service.py` (`ArchiveService`: quarters as numbers, which archived operations leave
+  (`keep_quarters`), `save_transcript`, who may read: organisers and *bot admin*), `export.py` (`Exporter`: the
+  daily `archive_export` action copies members' messages and downloads attachments, checks the copy, deletes the
+  channel, then empty archive categories), `html.py` (the file from the operation as last drawn: `inline`, `zip` or
   `listed` attachments), `cog.py` (`/archive event`, picking the form that fits the upload limit).
-- The front end (docs/PLAN-front-end.md, being built on `feature/front-end`): `app/roster/service.py` (`Roster`:
+- The rest of the front end: `app/roster/service.py` (`Roster`:
   the guild's members and roles pushed to the supervisor, `roster_push` daily, `member_push:<id>` / `roles_push`
   retries, `as_member()` pushing an unknown member and repeating an act-as call once), `app/notices/` (`service.py`:
   `Notices`, the supervisor's notices delivered at most once through `notice_delivery`; `deliver.py`: the Discord
@@ -167,12 +120,17 @@ exactly the settings.
   or modal error handler is answered in words (`discord_util.supervisor_words`).
 - `tests/contract/openapi-bot.json` is the supervisor's contract (`python scripts/sync_contract.py`);
   `tests/contract_check.py` holds the fake's requests to it.
-- `tests/fake_supervisor.py` mimics the real one's reservation rules (frozen under way, 409 on delete, managed
-  creates return the existing one); the `fake` fixture runs it and ties its clock to the tests'.
+- `tests/fake_supervisor.py` mimics the real one's contract routes (act-as, the roster guard, notices, operations
+  with both counters and `If-Match`, the feed with tombstones and `reset`); tests change operations as the app would
+  (`State.operation` / `change` / `set_file` / `delete_operation`). The `fake` fixture runs it and ties its clock to
+  the tests'; `tests/test_channel.py`'s `stack` adds the channels and the feed.
 
 ## Cross-cutting rules
 
-These rules span many features; read them before writing any handler.
+These rules span many features; read them before writing any handler. On `feature/front-end` the rules about data
+and decisions (atomic slot claims, frozen reservations, guest events, permissions, attendance) are the supervisor's:
+the bot passes the member's action on and words the refusal. The rules about Discord (nothing timed in memory,
+buttons that survive a restart, the channel as bot-owned messages, pings in the thread, times) stay the bot's.
 
 - **Nothing timed lives in memory.** Sign-up opening, reminders, reserve offers, stale drafts, reservation
   retries, attendance and archiving are rows in a `scheduled_action` table, run by one loop. After downtime,
@@ -201,6 +159,11 @@ These rules span many features; read them before writing any handler.
   *reservations* and uses "event" for log and notifier events. Keep the words apart.
 
 ## Integrating with arma-server-supervisor
+
+On `feature/front-end` the routes are the supervisor's `docs/api/openapi-bot.json` (copied to `tests/contract/`
+by `python scripts/sync_contract.py`) and the rules are in `docs/PLAN-front-end.md`: the bot's account needs only
+the `integration` role (`integration.act_as`); reservations, event profiles and server control are gone from the
+bot. What follows describes `master`.
 
 The routes, payloads and permissions the bot relies on are listed in the plan, under *What the supervisor offers*
 (checked 2026-10-14 and again 2026-10-31, after the reservation work was committed). In short:

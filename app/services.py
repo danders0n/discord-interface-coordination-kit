@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.db import Database
-from app.reservations.service import ReservationService
 from app.resolve import Ids
 from app.scheduler import Scheduler
 from app.settings import Settings, SettingsStore
@@ -24,23 +23,15 @@ class Services:
     staff: StaffLog
     supervisor: SupervisorClient
     threads: StaffThreads
-    reservations: ReservationService
     # The configuration's channels and roles as ids on the server; empty until the bot has seen the guild.
     ids: Ids = field(default_factory=Ids)
-    # The event stack, built by the bot (it needs the guild): app.bot.EventBot.build_events.
-    events: Any = None
-    signups: Any = None
-    channels: Any = None
-    attendance: Any = None  # phase 6: app.attendance.service.AttendanceService
-    feedback: Any = None  # phase 6: app.feedback.service.FeedbackService
-    profiles: Any = None  # phase 7: app.profiles.service.ProfileService
-    archive: Any = None  # phase 8: app.archive.service.ArchiveService
-    exporter: Any = None  # phase 8: app.archive.export.Exporter (moves the oldest quarter into the database)
-    # Steam links through the supervisor and their reminders, also built by the bot: app.bot.EventBot.build_links.
-    links: Any = None
-    link_watch: Any = None
-    # The supervisor as the owner of members and notices (docs/PLAN-front-end.md), built by the bot:
-    # app.bot.EventBot.build_front_end.
+    # Built by the bot (they need the guild): app.bot.EventBot.build_operations, build_front_end, build_links.
+    channels: Any = None  # app.channel.service.OperationChannels
+    feed: Any = None  # app.operations.feed.Feed
+    archive: Any = None  # app.archive.service.ArchiveService
+    exporter: Any = None  # app.archive.export.Exporter (moves the oldest quarter into the database)
+    links: Any = None  # app.links.service.LinkService
+    link_watch: Any = None  # app.links.watch.LinkWatch
     roster: Any = None  # app.roster.service.Roster
     notices: Any = None  # app.notices.service.Notices
     live: Any = None  # app.live.Live

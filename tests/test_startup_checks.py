@@ -1,5 +1,5 @@
 import discord
-from conftest import ANNOUNCEMENT, DRAFTS, EVENTS, MEMBER, MODERATOR, STAFF, make_settings
+from conftest import ADMIN, ANNOUNCEMENT, EVENTS, OTHER_CATEGORY, STAFF, make_settings
 from fakes import FakeChannel, FakeMember, FakeRole
 
 from app.resolve import resolve
@@ -13,18 +13,18 @@ def english(settings, **overrides):
 def test_a_healthy_server_has_no_problems(guild, settings):
     ids, problems = check(guild, settings)
     assert problems == []
-    assert ids.staff == STAFF and ids.member == {MEMBER} and ids.permissions["approve_events"] == {MODERATOR}
+    assert ids.staff == STAFF and ids.announcement == ANNOUNCEMENT and ids.permissions["bot_admin"] == {ADMIN}
 
 
 def test_names_work_like_ids_and_ignore_case(guild, tmp_path):
     settings = make_settings(tmp_path, channels={"events_category": "Eventy",
                                                  "header": "#eventy", "announcements": "ogloszenia",
                                                  "staff": "STAFF"},
-                             roles={"member": ["klanowicz"], "mission_maker": "@Mission Maker",
-                                    "signup": ["Klanowicz", "Kadet"]})
+                             roles={"announcement": "@ogloszenia"}, permissions={"bot_admin": ["admin"]})
     ids, problems = resolve(guild, settings)
     assert problems == []
-    assert ids.events_category == EVENTS and ids.staff == STAFF and ids.member == {MEMBER}
+    assert ids.events_category == EVENTS and ids.staff == STAFF and ids.announcement == ANNOUNCEMENT
+    assert ids.permissions["bot_admin"] == {ADMIN}
 
 
 def test_the_top_channels_put_the_header_first_unless_listed(guild, tmp_path):
@@ -42,19 +42,20 @@ def test_the_top_channels_put_the_header_first_unless_listed(guild, tmp_path):
 
 
 def test_missing_ambiguous_and_wrong_kind(guild, tmp_path):
-    guild.add(FakeRole(999, "Klanowicz"))
+    guild.add(FakeRole(999, "Admin"))
     guild.add(FakeChannel(998, "Eventy"))  # a text channel named like the category: not a clash for a category
     settings = make_settings(tmp_path, language="en",
-                             channels={"events_category": "eventy", "header": DRAFTS,
+                             channels={"events_category": "eventy", "header": OTHER_CATEGORY,
                                        "announcements": "nowhere", "staff": STAFF},
-                             roles={"member": ["Klanowicz"], "mission_maker": 12345})
+                             roles={"announcement": 12345}, permissions={"bot_admin": ["Admin"]})
     ids, problems = resolve(guild, settings)
     assert ids.events_category == EVENTS  # matched the category, not the text channel
     assert "BOT_CHANNELS__HEADER: Szkice is not a text channel" in problems
     assert "BOT_CHANNELS__ANNOUNCEMENTS: nowhere not found on this server" in problems
-    assert any(p.startswith("BOT_ROLES__MEMBER: more than one is called Klanowicz") and "999" in p for p in problems)
-    assert "BOT_ROLES__MISSION_MAKER: 12345 not found on this server" in problems
-    assert ids.member == frozenset() and ids.header is None
+    assert any(p.startswith("BOT_PERMISSIONS__BOT_ADMIN: more than one is called Admin") and "999" in p
+               for p in problems)
+    assert "BOT_ROLES__ANNOUNCEMENT: 12345 not found on this server" in problems
+    assert ids.permissions["bot_admin"] == frozenset() and ids.header is None
 
 
 def test_missing_permissions_are_named(guild, settings):
@@ -76,20 +77,6 @@ def test_an_unmentionable_announcement_role(guild, settings):
     assert any("can't mention" in p for p in problems)
     guild.me = FakeMember(1, guild_permissions=discord.Permissions(mention_everyone=True))
     assert check(guild, settings)[1] == []
-
-
-def test_an_unmentionable_climate_role(guild, settings):
-    guild.add(FakeRole(401, "Cold War"))
-    guild.get_role(401).mentionable = False
-    settings = english(settings, events=settings.events.model_copy(update={"climate_roles": [401]}))
-    (problem,) = check(guild, settings)[1]
-    assert "can't mention Cold War" in problem
-
-
-def test_no_sign_up_role_is_a_problem(guild, tmp_path):
-    settings = make_settings(tmp_path, language="en", roles={"member": [MEMBER], "mission_maker": MEMBER, "signup": []})
-    (problem,) = check(guild, settings)[1]
-    assert problem.startswith("BOT_ROLES__SIGNUP names no role")
 
 
 def test_problems_follow_the_public_language(guild, tmp_path):

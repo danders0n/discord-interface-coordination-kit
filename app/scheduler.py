@@ -28,7 +28,7 @@ class Action:
     id: int
     kind: str
     key: str | None
-    event_id: int | None
+    operation_id: int | None
     due_at: datetime
     attempts: int
     payload: dict[str, Any] = field(default_factory=dict)
@@ -56,19 +56,19 @@ class Scheduler:
     def register(self, kind: str, handler: Handler) -> None:
         self.handlers[kind] = handler
 
-    async def schedule(self, kind: str, due_at: datetime, *, key: str | None = None, event_id: int | None = None,
-                       payload: dict[str, Any] | None = None) -> int:
+    async def schedule(self, kind: str, due_at: datetime, *, key: str | None = None,
+                       operation_id: int | None = None, payload: dict[str, Any] | None = None) -> int:
         """Add an action, or with a ``key`` that exists, move that one (it runs again even if it was done)."""
         async with self.db.session() as session, session.begin():
             row = None
             if key is not None:
                 row = (await session.execute(select(ScheduledAction).where(ScheduledAction.key == key))).scalar_one_or_none()
             if row is None:
-                row = ScheduledAction(kind=kind, key=key, event_id=event_id, due_at=due_at, payload=payload or {},
+                row = ScheduledAction(kind=kind, key=key, operation_id=operation_id, due_at=due_at, payload=payload or {},
                                       attempts=0)
                 session.add(row)
             else:
-                row.kind, row.event_id, row.due_at = kind, event_id, due_at
+                row.kind, row.operation_id, row.due_at = kind, operation_id, due_at
                 row.payload = payload or {}
                 row.done_at, row.attempts, row.last_error = None, 0, None
             await session.flush()
@@ -90,12 +90,12 @@ class Scheduler:
             await session.delete(row)
             return True
 
-    async def cancel_all(self, kind: str, event_id: int, keep: Iterable[str] = ()) -> int:
-        """Drop the event's unfinished actions of ``kind``, except the keys in ``keep``; returns how many."""
+    async def cancel_all(self, kind: str, operation_id: int, keep: Iterable[str] = ()) -> int:
+        """Drop the operation's unfinished actions of ``kind``, except the keys in ``keep``; returns how many."""
         keep = set(keep)
         async with self.db.session() as session, session.begin():
             rows = (await session.execute(select(ScheduledAction).where(
-                ScheduledAction.kind == kind, ScheduledAction.event_id == event_id,
+                ScheduledAction.kind == kind, ScheduledAction.operation_id == operation_id,
                 ScheduledAction.done_at.is_(None)))).scalars().all()
             gone = [row for row in rows if row.key not in keep]
             for row in gone:
@@ -116,7 +116,7 @@ class Scheduler:
             rows = (await session.execute(
                 select(ScheduledAction).where(ScheduledAction.done_at.is_(None), ScheduledAction.due_at <= now)
                 .order_by(ScheduledAction.due_at, ScheduledAction.id))).scalars().all()
-            due = [Action(r.id, r.kind, r.key, r.event_id, r.due_at, r.attempts, dict(r.payload)) for r in rows]
+            due = [Action(r.id, r.kind, r.key, r.operation_id, r.due_at, r.attempts, dict(r.payload)) for r in rows]
         for action in due:
             await self._run_one(action, now)
         return len(due)

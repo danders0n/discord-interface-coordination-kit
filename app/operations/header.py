@@ -1,8 +1,11 @@
 """The header channel's message (docs/PLAN.md, *Creating an event*, *Entry point*, *Calendar*): how to start an
-event, the published events of the next ``calendar_days`` (date, kind, title, taken / total slots or Coming /
-limit, link), and the persistent *Create event* button. Posted when missing, edited in place (its id is kept in
-``bot_state``), redrawn in batches whenever an event changes. At start the channel is searched once, so a header
-the database doesn't know is adopted and extra ones deleted."""
+operation, and the published operations of the next ``calendar_days`` (date, kind, title, link), drawn from the
+operations as last drawn (``operation_channel``). Posted when missing, edited in place (its id is kept in
+``bot_state``), redrawn in batches whenever an operation changes. At start the channel is searched once, so a
+header the database doesn't know is adopted and extra ones deleted.
+
+The *Create operation* button returns with the wizard (docs/PLAN-front-end.md, phase 4); until then the header is
+the calendar alone, found again by its title."""
 
 from __future__ import annotations
 
@@ -12,16 +15,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import discord
-from sqlalchemy import func, select
+from sqlalchemy import select
 
+from app.channel.render import plain, ts, when
+from app.channel.service import Redrawer
 from app.db import Database, state
-from app.db.models import Event, Signup, Slot
-from app.eventchannel.render import kind_label, ts
-from app.eventchannel.service import Redrawer
+from app.db.models import OperationChannel
 from app.i18n import t
 from app.resolve import Ids
 from app.settings import SettingsStore
-from app.signup.service import COMING
 
 KEY = "header"
 SWEEP = 50  # recent messages searched for a header at start; the channel is read-only for members
@@ -42,47 +44,36 @@ class Header:
         now = self.clock()
         until = now + timedelta(days=self.store.current.times.calendar_days)
         async with self.db.session() as session:
-            events = (await session.execute(select(Event).where(
-                Event.status == "published", Event.start_at > now, Event.assembly_at <= until)
-                .order_by(Event.assembly_at))).scalars().all()
-            lines = []
-            for event in events:
-                if event.kind in COMING:
-                    taken = (await session.execute(select(func.count()).select_from(Signup).where(
-                        Signup.event_id == event.id, Signup.status == "coming"))).scalar()
-                    places = f"{taken}/{event.signup_limit}" if event.signup_limit else str(taken)
-                else:
-                    total, taken = (await session.execute(select(func.count(Slot.id), func.count(Slot.holder_id))
-                                                          .where(Slot.event_id == event.id))).one()
-                    places = f"{taken}/{total}"
-                link = f" · <#{event.channel_id}>" if event.channel_id else ""
-                lines.append(f"{ts(event.assembly_at, 'f')} · {kind_label(event.kind, self.store.current.language, self.store.current.events.kind_names)} · "
-                             f"**{event.title}** · {places}{link}")
+            rows = (await session.execute(select(OperationChannel).where(
+                OperationChannel.status == "published", OperationChannel.gone_at.is_(None),
+                OperationChannel.start_at > now).order_by(OperationChannel.start_at))).scalars().all()
+        lines = []
+        for row in rows:
+            op = row.operation
+            assembly = when(op, "assembly_at")
+            if assembly is None or assembly > until:
+                continue
+            link = f" · <#{row.channel_id}>" if row.channel_id else ""
+            lines.append(f"{ts(assembly, 'f')} · {plain(op.get('kind_name') or op['kind'])} · "
+                         f"**{plain(op['title'])}**{link}")
         return lines
 
-    async def message(self) -> tuple[discord.Embed, discord.ui.View]:
-        from app.events.ui import CreateEvent
-
+    async def message(self) -> discord.Embed:
         language = self.store.current.language
         lines = await self.calendar()
-        embed = discord.Embed(title=t("Events", language),
-                              description=t("Press Create event to start one: a short wizard makes a draft, which you "
-                                            "finish in its channel with Organiser panel.", language))
+        embed = discord.Embed(title=t("Operations", language),
+                              description=t("Operations are made in the app; each gets its channel here.", language))
         embed.add_field(name=t("The next {days} days", language, days=self.store.current.times.calendar_days),
                         value="\n".join(lines)[:1024] if lines else t("Nothing planned yet.", language), inline=False)
-        view = discord.ui.View(timeout=None)
-        view.add_item(CreateEvent(t("Create event", language)))
-        return embed, view
+        return embed
 
     async def found(self, channel: Any, me: int) -> list[int]:
-        """The ids of the bot's header messages among the channel's recent ones, newest first: they carry the
-        *Create event* button."""
+        """The ids of the bot's header messages among the channel's recent ones, newest first: the bot's messages
+        with an embed (the channel is read-only for members, and the bot posts nothing else there)."""
         ids = []
         try:
             async for message in channel.history(limit=SWEEP):
-                if getattr(message.author, "id", None) == me and any(
-                        getattr(child, "custom_id", None) == "event:create"
-                        for row in getattr(message, "components", ()) for child in getattr(row, "children", ())):
+                if getattr(message.author, "id", None) == me and getattr(message, "embeds", None):
                     ids.append(message.id)
         except discord.HTTPException:
             log.warning("Could not read the header channel's history to find the header message")
@@ -93,7 +84,7 @@ class Header:
         channel = guild.get_channel(self.ids().header) if guild is not None and self.ids().header else None
         if channel is None:
             return
-        embed, view = await self.message()
+        embed = await self.message()
         stored = await state.get(self.db, KEY)
         known = stored["id"] if stored and stored.get("channel", channel.id) == channel.id else None
         if not self._swept:
@@ -112,11 +103,11 @@ class Header:
                 known = keep
         if known:
             try:
-                await channel.get_partial_message(known).edit(embed=embed, view=view)
+                await channel.get_partial_message(known).edit(embed=embed, view=None)
                 if not stored or stored.get("id") != known or stored.get("channel") != channel.id:
                     await state.put(self.db, KEY, {"id": known, "channel": channel.id})
                 return
             except discord.NotFound:
                 pass
-        sent = await channel.send(embed=embed, view=view)
+        sent = await channel.send(embed=embed)
         await state.put(self.db, KEY, {"id": sent.id, "channel": channel.id})

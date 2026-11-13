@@ -67,12 +67,9 @@ async def test_every_translated_command_name_is_one_discord_accepts():
     invalid name makes Discord refuse the whole sync, so the payloads are built here as ``tree.sync`` does."""
     from app.admin.cog import AdminCog
     from app.archive.cog import ArchiveCog
-    from app.attendance.cog import AttendanceCog
-    from app.events.cog import EventCog
     from app.i18n import Translator
     from app.links.cog import LinkCog
     from app.privacy.cog import PrivacyCog
-    from app.servers.cog import ServerCog
 
     tree = discord.app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
     problems = []
@@ -84,7 +81,7 @@ async def test_every_translated_command_name_is_one_discord_accepts():
         for option in payload.get("options", []):
             names(option, f"{where} {payload['name']}")
 
-    for cog in (AdminCog, PrivacyCog, ServerCog, EventCog, LinkCog, AttendanceCog, ArchiveCog):
+    for cog in (AdminCog, PrivacyCog, LinkCog, ArchiveCog):
         for command in cog.__cog_app_commands__:
             names(await command.get_translated_payload(tree, Translator()), cog.__name__)
     assert problems == []

@@ -24,6 +24,12 @@ async def test_an_old_supervisor_and_a_bot_without_act_as_are_held_back(services
     assert "lacks the permission integration.act_as" in verdict.blocking[1]
 
 
+async def test_a_supervisor_without_the_operations_is_held_back(services, fake, clock):
+    fake.capabilities = [c for c in fake.capabilities if c != "operation_feed"]
+    verdict = await check(services.supervisor, WARSAW, "en", clock.now)
+    assert verdict.blocking == ("The supervisor lacks what this bot needs (operation_feed). Update the supervisor.",)
+
+
 async def test_a_refused_token_is_blocking_and_a_down_supervisor_only_waits(services, fake, clock):
     services.supervisor.token = "wrong"
     refused = await check(services.supervisor, WARSAW, "en", clock.now)
