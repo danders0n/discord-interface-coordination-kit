@@ -4,8 +4,7 @@ operations as last drawn (``operation_channel``). Posted when missing, edited in
 ``bot_state``), redrawn in batches whenever an operation changes. At start the channel is searched once, so a
 header the database doesn't know is adopted and extra ones deleted.
 
-The *Create operation* button returns with the wizard (docs/PLAN-front-end.md, phase 4); until then the header is
-the calendar alone, found again by its title."""
+Its *Create operation* button opens the wizard (app/operations/ui.py); it keeps working after a restart."""
 
 from __future__ import annotations
 
@@ -22,6 +21,7 @@ from app.channel.service import Redrawer
 from app.db import Database, state
 from app.db.models import OperationChannel
 from app.i18n import t
+from app.operations.ui import header_view
 from app.resolve import Ids
 from app.settings import SettingsStore
 
@@ -62,7 +62,8 @@ class Header:
         language = self.store.current.language
         lines = await self.calendar()
         embed = discord.Embed(title=t("Operations", language),
-                              description=t("Operations are made in the app; each gets its channel here.", language))
+                              description=t("Press Create operation to plan one (or make it in the app); each gets its "
+                                            "channel here.", language))
         embed.add_field(name=t("The next {days} days", language, days=self.store.current.times.calendar_days),
                         value="\n".join(lines)[:1024] if lines else t("Nothing planned yet.", language), inline=False)
         return embed
@@ -103,11 +104,11 @@ class Header:
                 known = keep
         if known:
             try:
-                await channel.get_partial_message(known).edit(embed=embed, view=None)
+                await channel.get_partial_message(known).edit(embed=embed, view=header_view(self.store.current.language))
                 if not stored or stored.get("id") != known or stored.get("channel") != channel.id:
                     await state.put(self.db, KEY, {"id": known, "channel": channel.id})
                 return
             except discord.NotFound:
                 pass
-        sent = await channel.send(embed=embed)
+        sent = await channel.send(embed=embed, view=header_view(self.store.current.language))
         await state.put(self.db, KEY, {"id": sent.id, "channel": channel.id})

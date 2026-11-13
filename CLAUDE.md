@@ -19,8 +19,9 @@ it is being rebuilt as **the supervisor's Discord front end** ([docs/PLAN-front-
 the supervisor owns operations (the bot's events), sign-ups, approval, attendance, Steam links and who may do what;
 the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–5 are done: the roster, notices, live events,
 Steam links, the supervisor check, the operation channels drawn from the change feed (the old event stack is
-deleted), and the ORBAT with its sign-up buttons, `/slot`, offers, reminders and the moderation thread. Next: the
-wizard, the organiser panel and the file commands (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
+deleted), the ORBAT with its sign-up buttons, `/slot`, offers, reminders and the moderation thread, and the wizard,
+the organiser panel, `/operation preset | image | mission` and `/operations` (steps 1–6). Next: phase 5, attendance,
+ratings, reports and erasure (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
 data rules moved to the supervisor. Read the relevant section before implementing a feature, and keep the plans and
 this file up to date as the code lands. [README.md](README.md) covers installing and running it.
 
@@ -87,7 +88,10 @@ exactly the settings.
   `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`),
   `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next day, aware UTC
   out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
-  `discord_util.supervisor_words`).
+  `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
+  `DetailsModal`, `expired()`; the panel: `PanelButton`, `PanelAction` per section from `my.actions`, `write()` with
+  `If-Match` and *Reopen* on `stale`), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
+  (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
   or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread

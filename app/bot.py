@@ -31,7 +31,9 @@ from app.live import Live
 from app.notices.deliver import Delivery
 from app.notices.service import Notices
 from app.operations.feed import Feed
+from app.operations.cog import OperationCog
 from app.operations.header import Header
+from app.operations.ui import CreateOperation, PanelAction, PanelButton, expired
 from app.privacy.cog import PrivacyCog
 from app.roster.service import Member as RosterMember
 from app.roster.service import Role as RosterRole
@@ -131,6 +133,10 @@ class EventBot(commands.Bot):
     def _ours(self, guild: discord.Guild) -> bool:
         return guild.id == self.services.settings.guild_id
 
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """A wizard's control from before a restart (its view is gone): say so instead of Discord's failure."""
+        await expired(interaction)
+
     async def on_member_join(self, member: discord.Member) -> None:
         if self._ours(member.guild) and not member.bot:
             await self.services.roster.member_changed(roster_member(member, member.guild.id))
@@ -176,11 +182,12 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction)  # outlive a restart
+        self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction, CreateOperation,
+                               PanelButton, PanelAction)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),
-                    ArchiveCog(self.services), SlotCog(self.services)):
+                    ArchiveCog(self.services), SlotCog(self.services), OperationCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before

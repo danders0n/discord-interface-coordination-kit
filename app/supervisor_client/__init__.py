@@ -274,6 +274,122 @@ class SupervisorClient:
         return await self.request("POST", f"/api/operations/{int(op_id)}/offers/{int(offer_id)}/delivered",
                                   json={"via": via})
 
+    # ---------------------------------------------------------------- organising (act-as)
+    # Writes that change what the panel showed send ``If-Match: <revision>``; a stale one is 409 ``stale`` (with the
+    # operation as it is). ``revision`` None sends no header (no check).
+
+    @staticmethod
+    def _if_match(revision: int | None) -> dict[str, str]:
+        return {"If-Match": f'"{int(revision)}"'} if revision is not None else {}
+
+    async def operations(self, act_as: int, *, upcoming: bool = True, status: str | None = None,
+                         limit: int = 200) -> list[dict[str, Any]]:
+        """The operations the member may see (short form: counts and the member's ``my``), soonest first."""
+        params = {"upcoming": "true" if upcoming else "false", "limit": str(int(limit))}
+        if status:
+            params["status"] = status
+        return await self.request("GET", "/api/operations", act_as=act_as, params=params)
+
+    async def create_operation(self, act_as: int, body: dict[str, Any]) -> dict[str, Any]:
+        """A draft (``title``, ``kind``, zone-aware ``assembly_at`` / ``start_at``, ``duration_minutes`` ...)."""
+        return await self.request("POST", "/api/operations", act_as=act_as, json=body)
+
+    async def update_operation(self, act_as: int, op_id: int, fields: dict[str, Any],
+                               revision: int | None) -> dict[str, Any]:
+        """Change details (an explicit None clears a field). ``proposal``: new times became a request."""
+        return await self.request("PATCH", f"/api/operations/{int(op_id)}", act_as=act_as, json=fields,
+                                  headers=self._if_match(revision))
+
+    async def set_opord(self, act_as: int, op_id: int, paragraphs: dict[str, str], revision: int | None) -> dict[str, Any]:
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/opord", act_as=act_as, json=paragraphs,
+                                  headers=self._if_match(revision))
+
+    async def set_organisers(self, act_as: int, op_id: int, person_ids: list[int],
+                             revision: int | None) -> dict[str, Any]:
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/organisers", act_as=act_as,
+                                  json={"person_ids": [int(p) for p in person_ids]}, headers=self._if_match(revision))
+
+    async def operation_step(self, act_as: int, op_id: int, step: str) -> dict[str, Any]:
+        """``publish``, ``submit`` (send for approval) or ``withdraw`` (the request)."""
+        assert step in ("publish", "submit", "withdraw")
+        return await self.request("POST", f"/api/operations/{int(op_id)}/{step}", act_as=act_as)
+
+    async def cancel_operation(self, act_as: int, op_id: int, reason: str) -> Any:
+        """Cancelled (a draft never published is deleted: the answer is then empty)."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/cancel", act_as=act_as,
+                                  json={"reason": reason[:500]})
+
+    async def delete_operation(self, act_as: int, op_id: int) -> Any:
+        return await self.request("DELETE", f"/api/operations/{int(op_id)}", act_as=act_as)
+
+    async def copy_operation(self, act_as: int, op_id: int, **body: Any) -> dict[str, Any]:
+        """A new draft from this one (a week later unless ``assembly_at`` / ``start_at`` are given)."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/copy", act_as=act_as, json=body)
+
+    async def groups(self, act_as: int) -> list[dict[str, Any]]:
+        return await self.request("GET", "/api/operations/groups", act_as=act_as)
+
+    async def add_group(self, act_as: int, acronym: str, name: str) -> dict[str, Any]:
+        return await self.request("POST", "/api/operations/groups", act_as=act_as,
+                                  json={"acronym": acronym, "name": name})
+
+    # ---------------------------------------------------------------- the ORBAT and its templates (act-as)
+
+    async def orbat(self, act_as: int, op_id: int) -> dict[str, Any]:
+        """``text`` (the ORBAT in its text form) and ``revision``."""
+        return await self.request("GET", f"/api/operations/{int(op_id)}/orbat", act_as=act_as)
+
+    async def set_orbat(self, act_as: int, op_id: int, text: str, revision: int | None) -> dict[str, Any]:
+        """Replace it; ``outcome``: ``squads`` (name, slots) and ``displaced`` (moved to the reserve list). 422
+        ``bad_orbat`` with ``problems``."""
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/orbat", act_as=act_as, json={"text": text},
+                                  headers=self._if_match(revision))
+
+    async def templates(self, act_as: int) -> list[dict[str, Any]]:
+        """Every ORBAT template (``id``, ``name``, ``text``, ``owner``, ``mine``)."""
+        return await self.request("GET", "/api/operations/templates", act_as=act_as)
+
+    async def save_template(self, act_as: int, name: str, text: str) -> dict[str, Any]:
+        """New, or the member's own of that name overwritten."""
+        return await self.request("POST", "/api/operations/templates", act_as=act_as, json={"name": name, "text": text})
+
+    async def rename_template(self, act_as: int, template_id: int, name: str) -> dict[str, Any]:
+        return await self.request("PATCH", f"/api/operations/templates/{int(template_id)}", act_as=act_as,
+                                  json={"name": name})
+
+    async def delete_template(self, act_as: int, template_id: int) -> Any:
+        return await self.request("DELETE", f"/api/operations/templates/{int(template_id)}", act_as=act_as)
+
+    async def slot_action(self, act_as: int, op_id: int, slot_id: int, action: str,
+                          person_id: int | None = None) -> dict[str, Any]:
+        """An organiser's: ``lock``, ``unlock``, ``remove`` (the holder) or ``assign`` (``person_id``, locked)."""
+        path = f"/api/operations/{int(op_id)}/slots/{int(slot_id)}"
+        if action in ("lock", "unlock"):
+            return await self.request("PUT", f"{path}/lock", act_as=act_as, json={"locked": action == "lock"})
+        if action == "remove":
+            return await self.request("DELETE", f"{path}/holder", act_as=act_as)
+        return await self.request("POST", f"{path}/assign", act_as=act_as, json={"person_id": int(person_id)})
+
+    # ---------------------------------------------------------------- files (act-as)
+
+    async def upload(self, act_as: int, op_id: int, slot: str, filename: str, content: bytes) -> dict[str, Any]:
+        """``preset``, ``mission`` or an image slot (``map``, ``banner``): the operation, with the file's report
+        (``files.preset``, ``mission.report``, ``warnings``)."""
+        path = {"preset": "preset", "mission": "mission"}.get(slot, f"images/{_segment(slot)}")
+        form = aiohttp.FormData()
+        form.add_field("file", content, filename=filename, content_type="application/octet-stream")
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/{path}", act_as=act_as, data=form,
+                                  timeout=UPLOAD_TIMEOUT)
+
+    async def pick_mission(self, act_as: int, op_id: int, name: str) -> dict[str, Any]:
+        """A mission already in the server's missions folder."""
+        return await self.request("POST", f"/api/operations/{int(op_id)}/mission/pick", act_as=act_as,
+                                  json={"name": name})
+
+    async def missions(self, act_as: int) -> list[dict[str, Any]]:
+        """The server's missions (``name``, ``terrain``, ``size`` ...)."""
+        return await self.request("GET", "/api/operations/missions", act_as=act_as)
+
     # ---------------------------------------------------------------- approval (act-as)
 
     async def approve_request(self, act_as: int, request_id: int) -> dict[str, Any]:

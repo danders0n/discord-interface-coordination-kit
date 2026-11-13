@@ -6,11 +6,32 @@ from __future__ import annotations
 from typing import Any
 
 from app.i18n import t
+from app.operations import times
+
+
+def time_problem(problem: times.Problem, locale: Any) -> str:
+    """What an organiser typed in the wizard or the panel, refused before anything is sent."""
+    return {
+        times.Problem.BAD_DATE: t("Type the date as dd.mm or dd.mm.yyyy.", locale),
+        times.Problem.PAST: t("That date has passed.", locale),
+        times.Problem.TOO_FAR: t("That date is too far ahead.", locale),
+        times.Problem.BAD_TIME: t("Type times as HH:MM.", locale),
+        times.Problem.BAD_DURATION: t("Type the duration as minutes or like 3h or 2h30 (15 min to 24 h).", locale),
+    }[problem]
+
+
+def missing(items: list[Any], locale: Any) -> str:
+    """``incomplete``'s list (``opord.situation``, ``how_to_join``) in words."""
+    names = {"opord.situation": t("the OPORD's Situation", locale), "opord.mission": t("the OPORD's Mission", locale),
+             "how_to_join": t("How to join", locale)}
+    return t("Still missing: {items}.", locale, items=", ".join(names.get(str(i), str(i)) for i in items))
 
 
 def refusal(code: str | None, body: Any, locale: Any) -> str | None:
     """Words for ``code`` (a refusal's ``body`` gives the details some codes carry), or None for a code not listed."""
     body = body if isinstance(body, dict) else {}
+    if code == "incomplete":
+        return missing(list(body.get("missing") or []), locale)
     if code == "overlap":
         other = body.get("other") if isinstance(body.get("other"), dict) else {}
         return t("You already have a place in {title} ({key}) at that time.", locale,
@@ -38,5 +59,28 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "not_pending": t("This request was decided meanwhile.", locale),
         "own_request": t("Nobody decides their own request.", locale),
         "not_found": t("That no longer exists.", locale),
+        # organising
+        "stale": t("The operation changed meanwhile; open it again to see the change.", locale),
+        "pending": t("The operation waits for approval; withdraw the request to change it.", locale),
+        "needs_approval": t("Publishing needs approval: press Send for approval.", locale),
+        "publish_instead": t("This one needs no approval: press Publish.", locale),
+        "kind_not_allowed": t("Only mission makers and above make guest operations.", locale),
+        "needs_host": t("A guest operation needs its host group.", locale),
+        "unknown_climate": t("That climate is not in the list.", locale),
+        "not_draft": t("That works only for a draft.", locale),
+        "started": t("The operation has started.", locale),
+        "past": t("That time is over: the assembly must be in the future.", locale),
+        "start_before_assembly": t("The start is before the assembly.", locale),
+        "signup_after_start": t("Sign-up must open before the operation starts.", locale),
+        "too_far": t("That date is too far ahead.", locale),
+        "frozen_times": t("The operation is about to begin: its times can't move now.", locale),
+        "group_exists": t("Another group has that acronym.", locale),
+        "exists": t("Another group has that acronym.", locale),
+        "name_taken": t("A template of that name exists already.", locale),
+        "not_pbo": t("Send the mission's .pbo file.", locale),
+        "not_an_image": t("Send a PNG, JPG or WEBP image.", locale),
+        "bad_preset": t("That file is not an Arma 3 Launcher preset.", locale),
+        "too_large": t("That file is too large.", locale),
+        "unknown_mission": t("There is no such mission on the server.", locale),
     }
     return words.get(code or "")

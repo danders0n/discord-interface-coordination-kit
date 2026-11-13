@@ -1,7 +1,8 @@
 # Plan: the bot as the supervisor's Discord front end
 
-Status: building on `feature/front-end`; steps 1–5 are done (*As built*): the old event stack is gone, the channels
-are drawn from the supervisor's change feed, and members sign up, take offers and approve on Discord. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
+Status: building on `feature/front-end`; steps 1–6 are done (*As built*): the old event stack is gone, the channels
+are drawn from the supervisor's change feed, members sign up, take offers and approve on Discord, and organisers
+create and run operations there (this plan's phases 1–4). Next: phase 5. Written 2026-11-12 from the supervisor's `docs/PLAN-operations.md`
 (`D:\Workspace\python\arma-server-supervisior`, interviews 2026-11-11 and 2026-11-12), which is the source of
 every rule about operations, people and permissions. This plan says what changes **in this repo**.
 
@@ -446,12 +447,58 @@ templates, approval; its `State` gained `set_orbat`, `sign`, `free`, `request` f
   - `delivered` is reported for an offer to the whole list too (`thread`): harmless, and the app shows it.
   - Polish texts the old bot had come back from git history; "event" became *operacja* in them.
 
+### Step 6: the wizard, the panel, files, `/operations` (2026-11-13)
+
+The rest of this plan's phase 4.
+
+- **Client:** `operations`, `create_operation`, `update_operation`, `set_opord`, `set_organisers` (these three with
+  `If-Match`), `operation_step` (publish, submit, withdraw), `cancel_operation`, `delete_operation`, `copy_operation`,
+  `groups`, `add_group`, `orbat`, `set_orbat` (`If-Match`), the templates, `slot_action` (lock, unlock, remove, assign),
+  `upload` (multipart `file`: preset, mission, map, banner), `pick_mission`, `missions`; all act-as.
+- **Wizard** (`app/operations/ui.py`): *Create operation* on the header (`operation:create`, persistent) checks the
+  member's permissions (`GET /api/auth/me` in their name: none of create / publish answers "for members"; the guest
+  kind is offered only with `operations.publish`) and the category's room, then kind, climate (from `meta`) and groups
+  (hosted: invited, guest: host; *New group* adds one), then the details modal. `POST /api/operations` makes the draft;
+  the feed is woken and brings the channel like one made in the app, so the answer names `OP-n`, not the channel. The
+  wizard is in memory (`wizard:<token>:…`); a control from before a restart says it expired (`EventBot.on_interaction`).
+- **Panel:** *Organiser panel* under every open operation's info (`operation:panel:<op>`) reads the operation in the
+  member's name and shows a button per section its `my.actions` allows (`operation:act:<op>:<section>`): Details,
+  Type and groups (`edit`), OPORD (`opord`: one modal of five fields), ORBAT (`orbat` / `slots`), Sign-up start, Sign-up
+  limit (Zeus, training), How to join (guest), Co-organisers, Hold the host (on / off; without Publish it becomes a
+  request), Don't end automatically (internal, hosted), Publish / Send for approval / Withdraw request, Copy operation
+  (a week later), Delete draft (with a confirmation) / Cancel operation (with the reason). Its text: the status, what
+  publishing still lacks, waiting times or host requests, the supervisor's mission `warnings`, a failed profile, ⚠
+  slots, and where the files are set. Every press reads the operation again: a section no longer allowed says so; a
+  write sends the revision it read, and a 409 `stale` answers with *Reopen* (that section's button). Nothing is merged.
+- **ORBAT tools** (`app/operations/orbat_ui.py`): *Write or paste* (the supervisor's text form, `PUT …/orbat` with its
+  revision; the answer lists the squads and how many lost a slot; `bad_orbat` lists its problems), *From a template*,
+  *Save as template*, *Rename or delete templates* (those the supervisor marks `mine`), *Lock, assign, remove* (squad,
+  slot, then the action; *assign* takes a Discord member).
+- **Files** (`app/operations/cog.py`): `/operation preset | image (banner, map) | mission (file or on_server)` in the
+  operation's channel or thread: the attachment is uploaded in the member's name; the answer gives the mods or the
+  mission's report and warnings, and says when a member's file waits for approval (`staged`). The server's missions
+  autocomplete (read at most every 30 s).
+- **`/operations`:** the published operations of the next `calendar_days` from `GET /api/operations?upcoming=true` in
+  the member's name, with their place (`my.place`) and the channel link.
+- **Decisions taken while building:**
+  - **Server, base and the event profile's settings stay in the app:** the bot's contract has no list of servers or
+    profiles to pick from, so the panel says they are set there.
+  - Details send the times only when they moved: unchanged times of an approved member's operation would otherwise be
+    a proposal. A proposal (`proposal` in the answer) is said ("sent to the moderators").
+  - A picked Discord member (co-organisers, *assign*) becomes a person through `GET /api/members?q=<id>` (the bot's own
+    read, as `/link` does); one the supervisor doesn't know is named, nothing is written.
+  - The panel button on a channel the member can't read in the supervisor (a draft: 404) answers like any
+    non-organiser.
+  - The fake supervisor now answers as the real one: `pending` / `closed` for edits refused while pending or over,
+    `missing` as `opord.situation` …, a `PATCH` of an approved member's times as a `times` request with `proposal`, and
+    a preset upload with its mods and `staged`.
+
 ### Next
 
-Step 6, the rest of this plan's phase 4: the wizard (*Create operation* on the header) and the organiser panel with
-`actions` and `If-Match` (details, OPORD, ORBAT text and templates, co-organisers, sign-up opening and limit, *Send for
-approval* / *Withdraw request*, *Copy*, *Cancel*), `/operation preset | image | mission`, `/operations`. Then phase 5
-on the supervisor's phase 5 (the 8 `PENDING` routes).
+Phase 5 on the supervisor's phase 5 (the 8 `PENDING` routes): the attendance report in the channel with *Edit
+attendance* and *Rate*, *End operation* in the panel, `/attendance`, `/profile`, `/mission-maker`, `/group`,
+`/attendance-report`, `/privacy-erase` through the supervisor, the `attendance_reported`, `attendance_unconfirmed`,
+`profile_failed` and `erased` notices, and `/archive event` for participants.
 
 ## Not in this plan
 

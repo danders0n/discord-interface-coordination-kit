@@ -86,6 +86,14 @@ def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, 
     return squads, problems
 
 
+def checklist(op: dict[str, Any]) -> list[str]:
+    """What publishing still needs (the real ``OperationService.checklist``)."""
+    missing = [f"opord.{p}" for p in ("situation", "mission") if not (op["opord"].get(p) or "").strip()]
+    if op["kind"] == "guest" and not op["how_to_join"].strip():
+        missing.append("how_to_join")
+    return missing
+
+
 def iso(value: datetime | str | None) -> str | None:
     if value is None or isinstance(value, str):
         return value
@@ -836,8 +844,10 @@ def make_app(state: State | None = None) -> web.Application:
         person = _person(request)
         if person is None or not state.organises(op, person):
             return _error(403, f"Only the organisers of OP-{op['id']} may change it", code="not_allowed")
+        if op["status"] == "pending":
+            return _error(409, f"OP-{op['id']} waits for approval: withdraw the request to change it", code="pending")
         if op["status"] not in ("draft", "published"):
-            return _error(409, f"OP-{op['id']} is {op['status']}", code="locked")
+            return _error(409, f"OP-{op['id']} is {op['status']}: it is kept as history", code="closed")
         wanted = request.headers.get("If-Match")
         if wanted and wanted.strip().strip('"') != str(op["revision"]):
             return _error(409, f"OP-{op['id']} changed meanwhile", code="stale", operation=state.out(op, person))
@@ -905,8 +915,18 @@ def make_app(state: State | None = None) -> web.Application:
         problem = _check_times(trial) if any(k in fields for k in ("assembly_at", "start_at")) else None
         if problem is not None:
             return problem
-        state.change(op["id"], by=_actor(request), **fields)
-        return _reply(op, request)
+        person, proposal = _person(request), None
+        moved = {k: fields.pop(k) for k in ("assembly_at", "start_at", "duration_minutes") if k in fields}
+        if moved and op["status"] == "published" and op["kind"] not in COMING and PUBLISH not in person["permissions"]:
+            times = {"assembly_at": iso(trial["assembly_at"]), "start_at": iso(trial["start_at"]),
+                     "duration_minutes": trial["duration_minutes"]}
+            proposal = state.request(op["id"], "times", by=_actor(request), **times)["id"]
+            state._touch(op, _actor(request), ["requests"], "proposed", revision=False)
+        else:
+            fields |= moved
+        if fields:
+            state.change(op["id"], by=_actor(request), **fields)
+        return web.json_response(state.out(op, person) | {"proposal": proposal}, headers={"ETag": f'"{op["revision"]}"'})
 
     async def delete_operation(request: web.Request) -> web.Response:
         op = _get(request)
@@ -949,9 +969,9 @@ def make_app(state: State | None = None) -> web.Application:
             return _error(403, "Publishing needs Publish operations: send it for approval", code="needs_approval")
         if op["status"] != "draft":
             return _error(409, f"OP-{op['id']} is {op['status']}", code="not_draft")
-        missing = [p for p in ("situation", "mission") if not op["opord"].get(p)]
+        missing = checklist(op)
         if missing:
-            return _error(422, "Write the OPORD's Situation and Mission first", code="incomplete", missing=missing)
+            return _error(422, f"Publishing needs: {', '.join(missing)}", code="incomplete", missing=missing)
         state.change(op["id"], by=_actor(request), status="published")
         return _reply(op, request)
 
@@ -1011,11 +1031,14 @@ def make_app(state: State | None = None) -> web.Application:
         form = await request.post()
         upload = form["file"]
         content = upload.file.read()
+        staged = PUBLISH not in _person(request)["permissions"] and op["published_at"] is None  # (until approval)
         if slot == "mission":
-            state.change(op["id"], by=_actor(request), mission={"name": upload.filename, "staged": False})
+            state.change(op["id"], by=_actor(request), mission={"name": upload.filename, "staged": staged})
+        elif slot == "preset":  # the launcher's file: one ModContainer row per mod
+            mods = [[str(n), f"mod {n}"] for n in range(content.decode("utf-8", "replace").count('data-type="ModContainer"'))]
+            state.set_file(op["id"], slot, content, "preset.html", original=upload.filename, mods=mods, staged=staged)
         else:
-            name = "preset.html" if slot == "preset" else f"{slot}.png"
-            state.set_file(op["id"], slot, content, name)
+            state.set_file(op["id"], slot, content, f"{slot}.png")
         return _reply(op, request)
 
     async def upload_preset(request: web.Request) -> web.Response:
@@ -1410,9 +1433,9 @@ def make_app(state: State | None = None) -> web.Application:
             return _refuse("publish_instead", "You may publish it yourself")
         if op["status"] != "draft":
             return _refuse("not_draft", f"OP-{op['id']} is {op['status']}")
-        missing = [p for p in ("situation", "mission") if not op["opord"].get(p)]
+        missing = checklist(op)
         if missing:
-            return _refuse("incomplete", "Write the OPORD's Situation and Mission first", 422, missing=missing)
+            return _refuse("incomplete", f"Publishing needs: {', '.join(missing)}", 422, missing=missing)
         op["status"] = "pending"
         state.request(op["id"], by=_actor(request))
         state._touch(op, _actor(request), ["status", "requests"], "submitted", revision=False)

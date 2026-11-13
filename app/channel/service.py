@@ -10,7 +10,8 @@ to repeat, so a redraw after a crash, a restart or the bot's own echo does no ha
   approve operations (from the supervisor's ``meta``), who may post. The channel's URL goes back to the supervisor
   (``PUT /api/operations/{id}/discord``), and the thread's once it exists.
 - The messages are redrawn from the operation (app/channel/render.py, kept in order by app/channel/sync.py), in
-  batches: at most one redraw per operation every ``interval`` seconds. The name is the supervisor's
+  batches: at most one redraw per operation every ``interval`` seconds; an open operation's info carries *Organiser
+  panel* (app/operations/ui.py). The name is the supervisor's
   ``channel_name``, renamed in the background (Discord allows two renames per ten minutes).
 - Published: the discussion thread is made after the messages, so Discord's thread card is last; the announcement
   goes out once, mentioning the announcement role and the climate's role, and is edited on every change. Sign-up
@@ -43,6 +44,7 @@ from app.i18n import t
 from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
+from app.operations.ui import panel_view
 from app.signup import ui as signup_ui
 from app.supervisor_client import SupervisorClient, SupervisorError
 
@@ -379,6 +381,8 @@ class OperationChannels:
     async def _messages(self, row: OperationChannel, channel: Any, files: dict[str, Path]) -> None:
         ctx = render.Context(self.language, self.clock(), files, row.thread_id)
         messages = render.messages(row.operation, ctx)
+        if row.operation["status"] in render.OPEN:  # the organisers' panel under the info
+            messages["info"].view = panel_view(row.operation_id, self.language)
         pages = [key for key in messages if key.startswith("orbat:")]
         if pages:  # the sign-up buttons under the last ORBAT message (None: removed, as on a cancelled operation)
             messages[pages[-1]].view = signup_ui.buttons(row.operation, self.language, ctx.now)
