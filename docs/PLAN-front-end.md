@@ -531,11 +531,27 @@ operation's attendance as the supervisor does.
   - *Edit attendance* is always on the report and answers non-organisers in words (as the sign-up buttons do), rather
     than a second report message for organisers.
 
+### Step 8: the release's documents (2026-11-14)
+
+The first half of this plan's phase 6.
+
+- **README:** rewritten for the front end: what the bot does, the Discord application, the supervisor's side (the
+  bot's account with the `integration` role, the Discord roles table, the operations settings, the start-up check),
+  the configuration with the settings removed, the commands, data and backups (`files/`, `archive/`), the update
+  order, the contract, and the test instance (the fake for the UI, a scratch supervisor for the real thing).
+- **`docs/PLAN.md`:** a note at the top: replaced for data and rules, still the reference for the look on Discord.
+- **`CLAUDE.md`:** *What this is*, the stack, the cross-cutting rules and the integration section rewritten for the
+  front end (`master`'s direct integration is a pointer now).
+- **Supervisor check:** it now also requires the phase-4 and phase-5 capabilities the bot uses (`orbat`, `signups`,
+  `offers`, `orbat_templates`, `approval`, `operation_attendance`, `ratings`, `reports`, `erasure`), so a supervisor
+  without them holds the bot's supervisor work back with the reason instead of refusing calls one by one.
+  `API_LEVEL` stays 2 (the supervisor's phases 4 and 5 only added routes).
+
 ### Next
 
-Phase 6, the release: the scratch-supervisor test instance (the first run against the real supervisor), the README
-(the bot's supervisor account with the `integration` role, the removed settings), `docs/PLAN.md` marked as replaced
-for data and rules, a last `CLAUDE.md` pass, and the merge with the supervisor's operations work.
+The rest of phase 6, which needs the owner: the test instance against a scratch supervisor (its own checkout and data
+folder, `tests/fake_server.py` as the Arma executable, the test Discord server and bot token), running the plan's
+*Done when* scenarios by hand; then the merge, together with the supervisor's `feature/operations`.
 
 ## Not in this plan
 

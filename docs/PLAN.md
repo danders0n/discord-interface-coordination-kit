@@ -1,5 +1,13 @@
 # Plan: community event bot
 
+> **Replaced for data and rules (2026-11-14).** The bot is now the Discord front end of arma-server-supervisor
+> ([PLAN-front-end.md](PLAN-front-end.md)). The supervisor owns everything this plan says about data and decisions:
+> events (now *operations*), kinds, approval, sign-up logic, offers, reservations (now the supervisor's *hold*),
+> event profiles, attendance, ratings, Steam links, squad.xml, groups, and who may do what. This plan stays the
+> reference for **how things look and behave on Discord**: the channel's messages and their order, the thread, the
+> wizard and panel layout, pings and their late rules, the archive. Where it names a bot table, service or setting
+> that the front-end plan lists as deleted, the front-end plan wins. Its *Event* is the supervisor's *Operation*.
+
 Status: phases 1 (skeleton), 2 (supervisor: reservations, `/server`), 3 (ORBAT and sign-up logic), 4a (the
 event service), 4b (the event channel), 4c (header, wizard, panel, preset and image) and 4d (sign-up
 buttons, offers, approval messages, `/slot`, `/events`) built by 2026-11-01, phase 5 (Steam link and

@@ -4,27 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Discord bot for one Arma 3 group's Discord server. Other groups have their own infrastructure and appear in the
-bot only by name. Events are *internal* (ours, on our server), *guest* (another group hosts; we get some of its
-slots), *hosted* (ours, on our server, with invited groups), *Zeus* (ours, on our server, no ORBAT, just
-*Coming* / *Not coming*) or *training* (Zeus's rules, another name). Members' events, except Zeus and training events, need a moderator's approval before they are
-published. It runs events (missions) with ORBAT slot sign-ups, reserves the game host
-for them on **arma-server-supervisor** and builds each event's server profile there (mods from the preset, the
-mission), reports attendance from the supervisor's player stats, and generates the
-group's squad.xml. The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`;
-read its `CLAUDE.md` and `README.md` before touching the integration.
+A Discord bot for one Arma 3 group's Discord server: the **Discord front end of arma-server-supervisor**
+([docs/PLAN-front-end.md](docs/PLAN-front-end.md)). The supervisor owns the operations (the group's missions, `OP-n`;
+kinds internal, guest, hosted, Zeus, training), sign-ups, offers, approval, attendance, ratings, persons, Steam links,
+squad.xml and who may do what. The bot keeps no operation data of its own:
+- it pushes the guild's members and roles to the supervisor (the roster);
+- it draws the operation channels, the header calendar and the announcements from the supervisor's change feed;
+- it delivers the supervisor's notices and the pings it schedules itself;
+- it passes every member's press, modal and command on in their name (`X-Act-As`);
+- it keeps the Discord plumbing and the archive of members' messages.
 
-Status: the bot of [docs/PLAN.md](docs/PLAN.md) (phases 1–8) was built and is on `master`. On `feature/front-end`
-it is being rebuilt as **the supervisor's Discord front end** ([docs/PLAN-front-end.md](docs/PLAN-front-end.md)):
-the supervisor owns operations (the bot's events), sign-ups, approval, attendance, Steam links and who may do what;
-the bot draws, delivers and acts for members (`X-Act-As`). Steps 1–5 are done: the roster, notices, live events,
-Steam links, the supervisor check, the operation channels drawn from the change feed (the old event stack is
-deleted), the ORBAT with its sign-up buttons, `/slot`, offers, reminders and the moderation thread, and the wizard,
-the organiser panel, `/operation preset | image | mission` and `/operations`, and attendance, ratings, the report
-commands and erasure (steps 1–7, the plan's phases 1–5). Next: phase 6, the release against the real supervisor
-(*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays the reference for how things look on Discord; its
-data rules moved to the supervisor. Read the relevant section before implementing a feature, and keep the plans and
-this file up to date as the code lands. [README.md](README.md) covers installing and running it.
+The supervisor is a separate project at `D:\Workspace\python\arma-server-supervisior`; read its `CLAUDE.md`, `README.md`
+and `docs/PLAN-operations.md` (*As built*) before touching the integration.
+
+Status: the old stand-alone bot of [docs/PLAN.md](docs/PLAN.md) is on `master`. On `feature/front-end` the front end
+is built: steps 1–7, the plan's phases 1–5, tested against the fake supervisor. Next is phase 6, the release: a test
+instance against a scratch supervisor, then the merge (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays
+the reference for how things look and behave on Discord; its rules about data and decisions are the supervisor's. Read
+the relevant section before implementing a feature, and keep the plans and this file up to date as the code lands.
+[README.md](README.md) covers installing and running it.
 
 ## Stack
 
@@ -32,10 +30,10 @@ this file up to date as the code lands. [README.md](README.md) covers installing
 |---|---|
 | Discord | discord.py: `app_commands` slash commands, buttons / selects / modals, persistent views and `DynamicItem` |
 | Storage | SQLite through SQLAlchemy 2.x async + aiosqlite (never block the event loop); Alembic migrations applied at startup; a daily online backup |
-| Supervisor client | HTTP over `aiohttp` (already a discord.py dependency). Never import the supervisor's code or open its database; code worth reusing, such as the preset parser in `app/steam/presets.py`, is ported |
-| Config | Everything in `.env` (channels and roles by id, the role → permission mapping, times, secrets), read with pydantic-settings like the supervisor: one prefix, `__` for nesting, lists as JSON or `;`-separated. `/reload` re-reads it |
+| Supervisor client | HTTP over `aiohttp` (already a discord.py dependency), `app/supervisor_client/`. Never import the supervisor's code or open its database. The routes are its `docs/api/openapi-bot.json` (the contract) |
+| Config | Only the bot's own settings in `.env` (secrets, channels and roles by id or name, the *bot admin* roles, a few times, the archive), read with pydantic-settings like the supervisor: one prefix, `__` for nesting, lists as JSON or `;`-separated. `/reload` re-reads it |
 | Install | `pip` + pinned `requirements.txt` (the supervisor's convention), `tzdata` included; Python 3.11+ |
-| Layout | `app/` by domain (events, orbat, signup, approval, attendance, …), each a `service.py` without discord.py plus a thin `cog.py` / `views.py`; run with `python -m app`. Details in the plan, *Code and tooling* |
+| Layout | `app/` by domain (operations, channel, signup, approval, attendance, links, roster, notices, archive, privacy), logic without discord.py where there is logic of its own, plus `ui.py` / `cog.py`; run with `python -m app` |
 | Logs and service | Rotated `data/logs/bot.log` (ERRORs also to the staff log); runs under NSSM like the supervisor |
 | Language | Polish and English. Private replies follow the member's Discord locale; public messages use the config language. Every string goes through `t()` with the English text as the key and `app/i18n/pl.json` (a test enforces coverage); slash commands use `app_commands.Translator` |
 | Deployment | One guild (commands synced to it only), on the same host as the supervisor |
@@ -143,70 +141,55 @@ exactly the settings.
 
 ## Cross-cutting rules
 
-These rules span many features; read them before writing any handler. On `feature/front-end` the rules about data
-and decisions (atomic slot claims, frozen reservations, guest events, permissions, attendance) are the supervisor's:
-the bot passes the member's action on and words the refusal. The rules about Discord (nothing timed in memory,
-buttons that survive a restart, the channel as bot-owned messages, pings in the thread, times) stay the bot's.
+These rules span many features; read them before writing any handler.
 
-- **Nothing timed lives in memory.** Sign-up opening, reminders, reserve offers, stale drafts, reservation
-  retries, attendance and archiving are rows in a `scheduled_action` table, run by one loop. After downtime,
-  actions that change state run late, and pings run only while still useful (*Scheduled actions and downtime* in
-  the plan). The loop starts in `on_ready`, once the guild and the ids are there; a handler that can't do its
-  work (no guild) raises, so it is retried, never returns as if done.
-- **Nothing typed goes into a supervisor URL unchecked.** Autocomplete only suggests: a slug is checked against
-  the supervisor's list, and the client quotes every outside path segment (`_segment`).
-- **Every button survives a restart:** the header's *Create event*, the event messages' buttons, offers and
-  reminders use persistent views / `DynamicItem` with ids in `custom_id`.
-- **The event channel is a set of bot-owned messages** (info embed, briefing and ORBAT as plain text with
-  continuation messages, preset, report, the thread link last), kept in order and edited in place by stored message ids. Edits are batched to stay within rate
-  limits. Members talk in the thread, and **every ping goes to the thread** too, so nothing lands between the
-  bot's messages; the channel is read-only for members.
-- **Reservations under way are frozen:** from the quiet period on, the supervisor ignores new times and refuses
-  `DELETE` (409). Lock the times in the panel then, and end by id before deleting.
-- **Slot claims are atomic** ("take it if still free" in one update), because sign-up opening causes a rush.
-- **Events store config items by value** (the climate), so `/reload` can remove an item without
-  breaking existing events. Other groups are database rows that are renamed, never deleted.
-- **Guest events never touch the supervisor:** no reservation, no profile, attendance by hand.
-- **Permissions:** the config's role mapping, plus each event's creator and co-organisers. Every Discord user acts
-  on the supervisor through the bot's one supervisor account, so the bot's checks are the only per-member limit.
-- **Times** are typed in the config time zone, stored as UTC, shown as Discord timestamps, and sent to the
-  supervisor zone-aware (it reads naive times as its own local time).
-- **Naming:** in this bot an *event* is a community mission. The supervisor calls its host bookings
-  *reservations* and uses "event" for log and notifier events. Keep the words apart.
+- **The supervisor decides.** Every member action is an act-as call (`act_as=<discord id>`, through
+  `Roster.as_member`, which pushes an unknown member and repeats once). The bot never checks who may do what, except
+  for its own commands (*bot admin*). A `SupervisorError` reaching a command, button or modal error handler is
+  answered in words (`discord_util.supervisor_words`, codes in `app/operations/words.py`), so handlers rarely catch
+  one. Buttons are shown for what `my.actions` allows, and pressing one reads the operation again.
+- **Organiser writes send `If-Match`** with the revision read (`app/operations/ui.write`); a 409 `stale` answers with
+  *Reopen*. Nothing is merged. Sign-up presses send none.
+- **Drawing is idempotent and converges** on the operation as the feed last gave it (`operation_channel.operation`):
+  a redraw after a crash, a restart or the bot's own echo does no harm. Never skip the echo.
+- **Nothing timed lives in memory.** Sign-up opening and closing, reminders, the rating window's close, retries and
+  archiving are rows in a `scheduled_action` table, run by one loop. After downtime, actions that change state run
+  late, and pings run only while still useful. The loop starts in `on_ready`, once the guild and the ids are there; a
+  handler that can't do its work (no guild) raises, so it is retried, never returns as if done. Anything that changes
+  with the clock but not in the feed (sign-up state, the rating window) is computed from the times and the clock, and
+  a scheduled redraw follows it.
+- **Notices are delivered at most once** (`notice_delivery` written before acting); a handler that can't start raises
+  `Later`.
+- **Nothing typed goes into a supervisor URL unchecked.** Autocomplete only suggests, and the client quotes every
+  outside path segment (`_segment`).
+- **Every button survives a restart:** persistent `DynamicItem`s with ids in `custom_id` (`operation:create`,
+  `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `offer:<op>:<offer>:`, `approval:`,
+  `attendance:`, `link:now`). Private pickers and the wizard live in memory for 15 minutes.
+- **The operation channel is a set of bot-owned messages** (info, the OPORD paragraphs, preset, ORBAT, report, the
+  thread link last), kept in order and edited in place by stored message ids; redraws are batched. Members talk in the
+  thread, and **every ping goes to the thread** too (a draft has none: DMs); the channel is read-only for members.
+- **Times** are typed in the config time zone, sent to the supervisor zone-aware (it reads naive times as its own
+  local time), and shown as Discord timestamps.
+- **Naming:** *operation* in code, commands and texts (Polish *operacja*, feminine), as in the supervisor. The
+  supervisor uses "event" for log and notifier events.
 
 ## Integrating with arma-server-supervisor
 
-On `feature/front-end` the routes are the supervisor's `docs/api/openapi-bot.json` (copied to `tests/contract/`
-by `python scripts/sync_contract.py`) and the rules are in `docs/PLAN-front-end.md`: the bot's account needs only
-the `integration` role (`integration.act_as`); reservations, event profiles and server control are gone from the
-bot. What follows describes `master`.
-
-The routes, payloads and permissions the bot relies on are listed in the plan, under *What the supervisor offers*
-(checked 2026-10-14 and again 2026-10-31, after the reservation work was committed). In short:
-
-- **Auth:** `Authorization: Bearer <personal API token>` for the bot's own supervisor user. That user needs
-  `server.control`, `server.protected`, `server.message`, `players.view`, `reservations.edit`,
-  `reservations.override`, and for event profiles also `profiles.edit`, `mods.manage`, `steam.manage`,
-  `missions.manage` and `jobs.view`.
-- **Event profiles:** the bot clones a base profile, imports the launcher preset (`download=missing`, a
-  supervisor job it follows), sets the mission cycle, then assigns the profile to the event server just before
-  the reservation and restores the previous one afterwards. Only change a server's assignment back if it still
-  holds the event profile.
-- **Errors:** services return JSON errors with HTTP status codes (409 for conflicts, including a refused start
-  during a reservation). Show the supervisor's message to the Discord user rather than a generic failure.
-- **Reservations:** `/api/reservations`, one per event, from assembly − lead time to start + duration + buffer.
-  `PUT` replaces the whole reservation, so send every field. End it early with `POST /api/reservations/{id}/end`; only without that capability, `POST /current/end`
-  after checking that `GET /current` is this event's `reservation_id`.
-- **Attendance:** read from mission plays (`GET /api/stats/missions?server=<numeric id>&all=true`, then
-  `GET /api/stats/missions/{id}` for players with seconds and Steam IDs). The stats routes don't take a slug,
-  and the plays list has no time filter, so the bot resolves the id via `GET /api/servers` and filters the
-  window itself. Only a `finished` play, with no new play
-  during the settle delay, ends an event; crashes and restarts don't.
-- The supervisor already posts server status and alerts to Discord through a **webhook**. Don't duplicate them.
-- **Supervisor changes planned for the bot** are in the supervisor's `docs/PLAN-integration.md`: reservation
-  `profile_id`, `managed_by` / `external_ref` / `link`, end by id, `/api/events/stream`,
-  `/api/stats/attendance`, `?uid=` lookup, the `integration` role, and `GET /api/system/info`. As of
-  2026-11-01 its phases 1–7 are committed (attendance window, `?uid=`, notifier, heartbeat, docs); its *As
-  built* notes give the exact payloads. Build against the new routes, with the fallbacks behind the capability checks. Gate every use on
-  the capabilities from `/api/system/info`, and keep the fallbacks listed in the plan, because the two projects
-  are deployed separately.
+- **The contract:** the routes, bodies and which allow act-as (`x-act-as`) are the supervisor's
+  `docs/api/openapi-bot.json`, copied to `tests/contract/` by `python scripts/sync_contract.py` whenever it changes.
+  The fake supervisor serves exactly the contract's routes and holds every request to it. Response shapes aren't in
+  the contract: take them from the supervisor's code (`app/operations/*.py`, `app/api/operations.py`) and its *As
+  built* notes, and mirror them in the fake.
+- **Auth:** `Authorization: Bearer <personal API token>` for the bot's account, which needs only the `integration`
+  role (`integration.act_as`). Acting for a member adds `X-Act-As: discord:<id>`; the supervisor cuts the member's
+  permissions down to the act-as routes.
+- **Errors:** JSON `{detail, code, ...}` with HTTP status codes (409 for conflicts, `stale` with the operation,
+  `bad_orbat` with `problems`, `overlap` with `other`). Word known codes; show the supervisor's message otherwise.
+- **The feed** (`GET /api/operations/changes?after=`) gives whole operations oldest first, tombstones, and `reset`;
+  the cursor moves only after a change is drawn or queued. The live stream (`/api/events/stream`) only wakes workers.
+- **The supervisor check** (`app/supervisor_check.py`) gates all supervisor work on `api_level` and the capabilities;
+  raise `API_LEVEL` and the list when the bot starts to need newer routes, because the two projects are deployed
+  separately.
+- The supervisor posts server status and alerts to Discord through its own **webhook**. Don't duplicate them.
+- `master` still has the stand-alone bot's direct integration (reservations, event profiles, stats); none of it is on
+  this branch.

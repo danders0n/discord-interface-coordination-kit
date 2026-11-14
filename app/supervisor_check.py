@@ -1,7 +1,8 @@
 """Is the supervisor ready for this bot? (docs/PLAN-front-end.md, *Start-up checks*.)
 
 - ``GET /api/system/info`` reports an ``api_level`` of at least :data:`API_LEVEL` and the capabilities in
-  :data:`CAPABILITIES` (the operations, their change feed and files);
+  :data:`CAPABILITIES` (the operations, their feed and files; the ORBAT, sign-ups, offers, templates and approval;
+  attendance, ratings, reports and erasure);
 - the bot's own account holds ``integration.act_as`` (``GET /api/auth/me``), which the roster push, the notices and
   every act-as call need;
 - the supervisor's zone has the same UTC offset now as ``BOT_TIMEZONE`` (a warning only: times typed here are sent
@@ -27,7 +28,9 @@ from app.supervisor_client import SupervisorClient, SupervisorError, SupervisorU
 
 log = logging.getLogger(__name__)
 API_LEVEL = 2  # the operations API (the supervisor's phase 3); raised when the bot needs newer routes
-CAPABILITIES = ("operations", "operation_feed", "operation_files")
+CAPABILITIES = ("operations", "operation_feed", "operation_files",  # the supervisor's phase 3
+                "orbat", "signups", "offers", "orbat_templates", "approval",  # phase 4
+                "operation_attendance", "ratings", "reports", "erasure")  # phase 5
 ACT_AS = "integration.act_as"
 RECHECK = 60.0
 
