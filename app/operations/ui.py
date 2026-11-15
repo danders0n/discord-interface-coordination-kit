@@ -101,7 +101,7 @@ class Choices(discord.ui.View):
             self.add_item(self._select("kind", t("Kind", self.locale), kinds, self.kind))
         climates = [(c["name"], c["name"]) for c in meta.get("climates") or []]
         if climates:
-            self.add_item(self._select("climate", t("Climate", self.locale), climates, self.climate))
+            self.add_item(self._select("climate", t("Played preset", self.locale), climates, self.climate))
         self._group_items()
 
     def _select(self, part: str, placeholder: str, options: list[tuple[str, str]], current: Any,
@@ -303,7 +303,7 @@ class CreateOperation(discord.ui.DynamicItem[discord.ui.Button], template=r"oper
                 return
         groups = await act(interaction, lambda who: s.supervisor.groups(who))
         view = Choices(interaction, s.channels.meta, groups, may_guest=PUBLISH in permissions)
-        await reply(interaction, t("New operation: pick the kind and the climate, then Continue.", locale), view=view)
+        await reply(interaction, t("New operation: pick the kind and the played preset, then Continue.", locale), view=view)
 
 
 def header_view(language: Any) -> discord.ui.View:

@@ -122,9 +122,9 @@ def info(op: dict[str, Any], ctx: Context) -> Message:
         embed.description = t("Cancelled: {reason}", language, reason=op["cancel_reason"])
     embed.add_field(name=t("Kind", language), value=op.get("kind_name") or op["kind"])
     if op.get("climate_role_id"):
-        embed.add_field(name=t("Climate", language), value=f"<@&{op['climate_role_id']}>")
+        embed.add_field(name=t("Played preset", language), value=f"<@&{op['climate_role_id']}>")
     elif op.get("climate"):
-        embed.add_field(name=t("Climate", language), value=plain(op["climate"]))
+        embed.add_field(name=t("Played preset", language), value=plain(op["climate"]))
     host = op.get("host_group")
     if host:
         embed.add_field(name=t("Host", language), value=f"{plain(host['acronym'])} · {plain(host['name'])}")

@@ -66,7 +66,7 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "publish_instead": t("This one needs no approval: press Publish.", locale),
         "kind_not_allowed": t("Only mission makers and above make guest operations.", locale),
         "needs_host": t("A guest operation needs its host group.", locale),
-        "unknown_climate": t("That climate is not in the list.", locale),
+        "unknown_climate": t("That played preset is not in the list.", locale),
         "not_draft": t("That works only for a draft.", locale),
         "started": t("The operation has started.", locale),
         "past": t("That time is over: the assembly must be in the future.", locale),
