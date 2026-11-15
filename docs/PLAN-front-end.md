@@ -164,7 +164,7 @@ all of `squad_xml` except `url` (shown at `/link`; or read from `meta`), and `li
 Kept: the Discord token, guild, language, time zone (for typed input; a start-up warning if it differs from the
 supervisor's), data folder, `group`, `channels`, `roles.announcement`, `permissions.bot_admin`,
 `events.discussion`, the kept `times`, `supervisor.url` and `supervisor.token`, `links.reminder_days` and
-`links.dms_per_hour`, `archive`, `backup`, `logs`. `.env.example` and `tests/test_settings.py` follow.
+`links.dms_per_hour`, `archive`, `backup`, `logs`. Added: `links.auto_remind` (off by default, 2026-11-15). `.env.example` and `tests/test_settings.py` follow.
 
 ### Database
 
@@ -304,6 +304,10 @@ phase 5.
   `app/notices/deliver.py`).
 - **Reminders** use `GET /api/members?unlinked=true` instead of the bot's rank roles. A member who gains a role is
   pushed, then asked at once if the supervisor lists them as unlinked and they were never reminded.
+  *(2026-11-15)* All of that, the hourly DMs and the first-run announcement only with `BOT_LINKS__AUTO_REMIND=true`;
+  off (the default) only `/links remind` reminds. The first test start DMed every ranked member once the
+  supervisor's rank roles were set, which the group wants staff to decide. The hourly action stays scheduled and
+  skips, so `/reload` turns it on or off; the announcement waits for the first run with it on.
 - **Attendance** (until it moves to the supervisor): the report matches only **confirmed** links, read from
   `GET /api/members` (the supervisor's rule). A probable match is still shown; the member links with `/link` and
   staff confirm it in the app.

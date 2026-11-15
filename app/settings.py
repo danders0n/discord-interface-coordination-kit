@@ -100,6 +100,8 @@ class Events(BaseModel):
 class Links(BaseModel):
     """Steam link reminders (docs/PLAN-front-end.md; the links and squad.xml are the supervisor's)."""
 
+    auto_remind: bool = Field(False, description="Remind members by themselves (first-run announcement, a DM on gaining "
+                                                 "a rank, every reminder_days); off: only /links remind")
     reminder_days: int = Field(14, ge=1, description="A member with a rank and no link is reminded every this many days")
     dms_per_hour: int = Field(20, ge=1, description="Reminder DMs sent per hour at most")
 

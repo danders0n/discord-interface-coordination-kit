@@ -112,12 +112,18 @@ The `/privacy` text ships in `app/privacy/`. To change it, put `privacy.pl.md` /
 ### Steam links and squad.xml
 
 The supervisor holds the links and writes squad.xml. On its Members → Steam links page, staff confirm links, set
-anyone's link and remarks, and check the file. The bot lets members link themselves (`/link`, *Link now*) and reminds
-those who haven't:
-- on its first start it posts one *Link now* announcement in `BOT_CHANNELS__LINK_REMINDER`;
-- members with a squad.xml rank and still no link get a DM `BOT_LINKS__REMINDER_DAYS` later (at most
-  `BOT_LINKS__DMS_PER_HOUR` an hour), and again every that many days;
-- bot admins send one now or turn them off for a member with `/links remind` and `/links reminders`.
+anyone's link and remarks, and check the file. The bot lets members link themselves (`/link`, *Link now*); a member's
+own link waits for staff to confirm it before it counts for squad.xml or attendance.
+
+Reminding members who haven't linked is manual by default: bot admins send one with `/links remind`. With
+`BOT_LINKS__AUTO_REMIND=true` the bot also reminds by itself:
+- the first time it is on, it posts one *Link now* announcement in `BOT_CHANNELS__LINK_REMINDER`;
+- a member who gains a squad.xml rank and has no link gets a DM at once;
+- members with a rank and still no link get a DM every `BOT_LINKS__REMINDER_DAYS` (at most
+  `BOT_LINKS__DMS_PER_HOUR` an hour);
+- `/links reminders` turns them off for one member.
+
+`/reload` applies the switch either way.
 
 ## Commands
 

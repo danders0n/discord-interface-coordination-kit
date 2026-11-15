@@ -26,15 +26,15 @@ REMINDERS = 207
 
 @pytest.fixture
 async def stack(services, guild, clock, fake):
-    """The services with a rank role (the supervisor's squad.xml rank), a reminder channel, and links through a roster
-    that pushes members the fake supervisor doesn't know yet."""
+    """The services with a rank role (the supervisor's squad.xml rank), a reminder channel, automatic reminders on, and
+    links through a roster that pushes members the fake supervisor doesn't know yet."""
     for role_id, name in ((RANK, "Szeregowy"), (LINKS_ROLE, "Linki")):
         guild.add(FakeRole(role_id, name))
     guild.add(FakeChannel(REMINDERS, "steam"))
     fake.rank_roles = {str(RANK)}
     base = services.settings
     settings = make_settings(base.data_dir, channels=base.channels.model_dump() | {"link_reminder": REMINDERS},
-                             permissions={"bot_admin": [LINKS_ROLE]})
+                             permissions={"bot_admin": [LINKS_ROLE]}, links={"auto_remind": True})
     services.store.current = settings
     services.ids, _ = resolve(guild, settings)
 
@@ -178,6 +178,31 @@ async def test_the_rollout_waits_while_the_supervisor_is_away(stack, guild, fake
     stack.supervisor.url = url
     clock.now += timedelta(hours=1)
     await stack.scheduler.run_due()  # the hourly run catches up
+    assert len(guild.get_channel(REMINDERS).messages) == 1 and await stack.links.rollout_done()
+
+
+async def test_without_automatic_reminders_only_remind_now_reminds(stack, guild, fake, clock):
+    """``links.auto_remind`` off (the default): no announcement, no DM on gaining a rank, no hourly DMs; a /reload
+    turning it on makes the announcement at the next hourly run, and the DMs follow."""
+    assert make_settings(stack.settings.data_dir).links.auto_remind is False
+    stack.store.current = stack.settings.model_copy(update={"links": stack.settings.links.model_copy(
+        update={"auto_remind": False})})
+    anna = person(guild, fake, 1, "anna_dc", RANK)
+    await stack.link_watch.start()
+    assert guild.get_channel(REMINDERS).messages == [] and not await stack.links.rollout_done()
+    assert await stack.scheduler.exists(KIND)  # kept, so /reload can turn reminders on
+    await stack.link_watch.roles_gained(anna)
+    clock.now += timedelta(days=30)
+    await stack.scheduler.run_due()
+    assert anna.dms == [] and await stack.links.reminders() == {}
+    sent = staff_asking(stack, guild, fake)
+    await invoke(LinkCog(stack).remind, LinkCog(stack), sent, member=anna)
+    assert sent.replies[-1].content == "Reminder sent to <@1> by DM." and len(anna.dms) == 1
+
+    stack.store.current = stack.settings.model_copy(update={"links": stack.settings.links.model_copy(
+        update={"auto_remind": True})})
+    clock.now += timedelta(hours=1)
+    await stack.scheduler.run_due()
     assert len(guild.get_channel(REMINDERS).messages) == 1 and await stack.links.rollout_done()
 
 

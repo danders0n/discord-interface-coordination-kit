@@ -8,6 +8,10 @@ ranks and who is linked (``GET /api/members?unlinked=true``); the bot delivers:
 - The first run posts one announcement with *Link now* in the reminder channel; it counts as everyone's first
   reminder, so the DMs start N days later.
 
+All three only with ``links.auto_remind`` (off by default): off, only ``/links remind`` reminds anyone. The hourly
+action stays scheduled and skips, so ``/reload`` can turn reminders on or off; turned on for the first time, its next
+run makes the announcement.
+
 Squad.xml and the links of members without a rank are the supervisor's. This is the thin layer that sends."""
 
 from __future__ import annotations
@@ -38,13 +42,17 @@ class LinkWatch:
     def language(self) -> str:
         return self.s.settings.language
 
+    @property
+    def auto(self) -> bool:
+        return self.s.settings.links.auto_remind
+
     # ---------------------------------------------------------------- start-up
 
     async def start(self) -> None:
-        """Once connected: the hourly action and the first rollout."""
+        """Once connected: the hourly action and, with automatic reminders, the first rollout."""
         if not await self.s.scheduler.exists(KIND):
             await self.s.scheduler.schedule(KIND, self.s.scheduler.clock() + EVERY, key=KIND)
-        if not await self.s.links.rollout_done():
+        if self.auto and not await self.s.links.rollout_done():
             try:
                 unlinked = await self.s.links.unlinked()
             except SupervisorError as exc:
@@ -71,7 +79,7 @@ class LinkWatch:
 
     async def roles_gained(self, member: Any) -> None:
         """After the member's push: ask a newly ranked member at once (only the first time)."""
-        if getattr(member, "bot", False) or not await self.s.links.never_reminded(member.id):
+        if not self.auto or getattr(member, "bot", False) or not await self.s.links.never_reminded(member.id):
             return
         try:
             if member.id not in await self.s.links.unlinked():
@@ -109,7 +117,7 @@ class LinkWatch:
 
     async def _hourly(self, action: Action, now: datetime) -> datetime:
         guild, settings = self.guild(), self.s.settings
-        if guild is None:
+        if guild is None or not self.auto:
             return now + EVERY
         try:
             unlinked = await self.s.links.unlinked()

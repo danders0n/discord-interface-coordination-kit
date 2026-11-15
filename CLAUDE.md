@@ -116,9 +116,10 @@ exactly the settings.
   through act-as, `LinkError` for what the member can fix, `person()` / `unlinked()` read from `GET /api/members`,
   and the reminder bookkeeping in `link_reminder` with the rollout flag), `ui.py` (*Link now* `link:now`, the
   modal, `save()` shared by `/link` and the modal), `cog.py` (`/link`, `/unlink`, *bot admin*'s `/links remind |
-  reminders`), `watch.py` (`LinkWatch`: a member who gains a role and is then unlinked is asked once at once, the
-  hourly `link_reminders` action with DMs or a reminder-channel ping, skipping `muted` members, the first-run
-  announcement, retried hourly while the supervisor is away).
+  reminders`), `watch.py` (`LinkWatch`, all only with `links.auto_remind`, off by default: a member who gains a role
+  and is then unlinked is asked once at once, the hourly `link_reminders` action with DMs or a reminder-channel ping,
+  skipping `muted` members, the first-run announcement, retried hourly while the supervisor is away; off, the action
+  stays scheduled and skips).
 - `app/archive/`: `service.py` (`ArchiveService`: quarters as numbers, which archived operations leave
   (`keep_quarters`), `save_transcript`, who may read: organisers and *bot admin*), `export.py` (`Exporter`: the
   daily `archive_export` action copies members' messages and downloads attachments, checks the copy, deletes the
