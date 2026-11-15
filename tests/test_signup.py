@@ -13,7 +13,6 @@ from test_channel import at, row, run, stack, texts  # noqa: F401  (stack: the f
 
 from app.approval.moderation import Moderation
 from app.approval.ui import ApprovalAction, RejectModal
-from app.discord_util import on_view_error
 from app.notices.deliver import Delivery
 from app.notices.service import Notices
 from app.roster.service import Roster
@@ -54,11 +53,9 @@ def acting(front, guild, discord_id: int, channel_id: int | None = None) -> Fake
 
 
 async def press(item, interaction) -> None:
-    """A button or list as Discord runs it: the callback, its error handler on a failure."""
-    try:
-        await item.callback(interaction)
-    except Exception as exc:  # noqa: BLE001
-        await on_view_error(None, interaction, exc, item)
+    """A persistent button or list as discord.py runs it: the callback only (what it raises is logged, never passed
+    to ``View.on_error``), so a refusal must be answered by the callback itself (``discord_util.answers``)."""
+    await item.callback(interaction)
 
 
 def said(interaction) -> str:

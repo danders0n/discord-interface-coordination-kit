@@ -66,7 +66,7 @@ exactly the settings.
 - `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
 - `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()` (plain text
   replies disappear after `times.reply_seconds`), `finish()` (a last word replacing a pressed message), the
-  command error handler.
+  command, view and modal error handlers, and `@answers` for every `DynamicItem.callback`.
 - `app/settings.py`: `.env` model and `SettingsStore` (`/reload`; restart-only values keep their old value).
   Channels and roles are `Ref`s: an id or a name. Only the bot's own settings are left (front-end plan,
   *Configuration*).
@@ -165,7 +165,9 @@ These rules span many features; read them before writing any handler.
   outside path segment (`_segment`).
 - **Every button survives a restart:** persistent `DynamicItem`s with ids in `custom_id` (`operation:create`,
   `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `offer:<op>:<offer>:`, `approval:`,
-  `attendance:`, `link:now`). Private pickers and the wizard live in memory for 15 minutes.
+  `attendance:`, `link:now`). Private pickers and the wizard live in memory for 15 minutes. Every `DynamicItem`'s
+  `callback` carries `@answers` (`discord_util`): discord.py only logs what it raises and never calls
+  `View.on_error`, so without it a refusal leaves the member unanswered (a test enforces it).
 - **The operation channel is a set of bot-owned messages** (info, the OPORD paragraphs, preset, ORBAT, report, the
   thread link last), kept in order and edited in place by stored message ids; redraws are batched. Members talk in the
   thread, and **every ping goes to the thread** too (a draft has none: DMs); the channel is read-only for members.

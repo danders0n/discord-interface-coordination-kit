@@ -23,7 +23,7 @@ from typing import Any
 import discord
 
 from app.channel import render
-from app.discord_util import finish, reply, services, thinking
+from app.discord_util import answers, finish, reply, services, thinking
 from app.i18n import t
 from app.operations import times
 from app.operations.words import missing, time_problem
@@ -289,6 +289,7 @@ class CreateOperation(discord.ui.DynamicItem[discord.ui.Button], template=r"oper
                              match: Any) -> CreateOperation:
         return cls()
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         s, locale = services(interaction), interaction.locale
         me = await act(interaction, lambda who: s.supervisor.me(act_as=who))
@@ -326,6 +327,7 @@ class PanelButton(discord.ui.DynamicItem[discord.ui.Button], template=r"operatio
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> PanelButton:
         return cls(int(match["op"]))
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         await thinking(interaction)
         try:
@@ -442,6 +444,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> PanelAction:
         return cls(int(match["op"]), match["action"])
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         """The section on the operation as it is now (handlers that open a modal answer with it, so no
         "thinking" first: a read on the same machine is quick)."""

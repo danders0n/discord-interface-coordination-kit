@@ -3,7 +3,9 @@ reply to a failed command."""
 
 from __future__ import annotations
 
+import functools
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import discord
@@ -116,7 +118,8 @@ async def _sorry(interaction: discord.Interaction, error: Exception, where: str)
 
 
 async def on_view_error(view: Any, interaction: discord.Interaction, error: Exception, item: Any) -> None:
-    """Buttons and lists (the persistent ones too): the member hears that it failed, as after a command."""
+    """Buttons and lists of views: the member hears that it failed, as after a command. (Persistent ones never get
+    here: see :func:`answers`.)"""
     await _sorry(interaction, error, f"{type(item).__name__} in {type(view).__name__}")
 
 
@@ -124,8 +127,26 @@ async def on_modal_error(modal: Any, interaction: discord.Interaction, error: Ex
     await _sorry(interaction, error, f"Modal {type(modal).__name__}")
 
 
+def answers(callback: Callable[[Any, discord.Interaction], Awaitable[None]]):
+    """For every persistent button's and list's ``callback`` (a ``DynamicItem``): discord.py only logs what such a
+    callback raises and never calls ``View.on_error``, so a refusal would leave the member without an answer and the
+    staff log with an ERROR. With this, the member hears it as after a command (``tests/test_commands.py`` checks
+    that every ``DynamicItem`` has it)."""
+
+    @functools.wraps(callback)
+    async def run(self: Any, interaction: discord.Interaction) -> None:
+        try:
+            await callback(self, interaction)
+        except Exception as error:  # noqa: BLE001 (answered and logged by _sorry)
+            await _sorry(interaction, error, type(self).__name__)
+
+    run.answers = True  # type: ignore[attr-defined]
+    return run
+
+
 def install_error_handlers() -> None:
-    """discord.py's views and modals only log a failure; every one of them answers instead (set once, at start)."""
+    """discord.py's views and modals only log a failure; every one of them answers instead (set once, at start).
+    Persistent buttons (``DynamicItem``) bypass ``View.on_error``: their callbacks carry :func:`answers`."""
     discord.ui.view.BaseView.on_error = on_view_error  # type: ignore[method-assign]
     discord.ui.Modal.on_error = on_modal_error  # type: ignore[method-assign]
 

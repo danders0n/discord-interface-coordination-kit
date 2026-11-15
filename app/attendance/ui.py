@@ -15,7 +15,7 @@ from typing import Any
 import discord
 
 from app.channel import render
-from app.discord_util import reply, services, thinking
+from app.discord_util import answers, reply, services, thinking
 from app.i18n import t
 from app.operations.ui import TIMEOUT, person_ids, read
 from app.signup.ui import act
@@ -55,6 +55,7 @@ class ReportAction(discord.ui.DynamicItem[discord.ui.Button], template=r"attenda
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> ReportAction:
         return cls(int(match["op"]), match["action"])
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         locale = interaction.locale
         op = await read(interaction, self.op_id)  # (a modal may follow: no "thinking" first)

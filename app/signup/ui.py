@@ -18,7 +18,7 @@ from typing import Any, TypeVar
 import discord
 
 from app.channel import render
-from app.discord_util import fleeting, reply, services, supervisor_words, thinking
+from app.discord_util import answers, fleeting, reply, services, supervisor_words, thinking
 from app.i18n import t
 from app.links.ui import link_view
 from app.supervisor_client import SupervisorError
@@ -134,6 +134,7 @@ class SquadList(discord.ui.DynamicItem[discord.ui.Select], template=r"squad:(?P<
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match: Any) -> SquadList:
         return cls(int(match["op"]), int(match["number"]))
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         values = (interaction.data or {}).get("values") or ["0"]
         await thinking(interaction)  # (a rush at sign-up opening: answer within Discord's 3 s)
@@ -150,6 +151,7 @@ class SignupAction(discord.ui.DynamicItem[discord.ui.Button], template=r"signup:
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> SignupAction:
         return cls(int(match["op"]), match["action"])
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         await thinking(interaction)
         await press(interaction, self.op_id, self.action)
@@ -281,6 +283,7 @@ class OfferAction(discord.ui.DynamicItem[discord.ui.Button],
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> OfferAction:
         return cls(int(match["op"]), int(match["offer"]), match["action"])
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         client, locale = services(interaction).supervisor, interaction.locale
         await thinking(interaction)

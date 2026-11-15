@@ -124,3 +124,39 @@ async def test_a_refusal_is_logged_with_who_asked(services, caplog):
     await d.ui.Modal(title="x").on_error(submitted, SupervisorError(400, "A custom Steam address can't be used"))
     assert submitted.replies[0].content == "A custom Steam address can't be used"
     assert "by anna_dc (7): the supervisor answered 400" in caplog.text
+
+
+def test_every_persistent_button_answers_its_own_failures():
+    """discord.py never passes what a ``DynamicItem``'s callback raises to ``View.on_error``; it only logs it. So each
+    one's callback carries ``discord_util.answers``, or a refusal leaves the member without an answer."""
+    import app.approval.ui
+    import app.attendance.ui
+    import app.links.ui
+    import app.operations.ui
+    import app.signup.ui  # noqa: F401 (the modules that define them)
+
+    def every(cls):
+        for sub in cls.__subclasses__():
+            yield sub
+            yield from every(sub)
+
+    found = [cls for cls in every(discord.ui.DynamicItem) if cls.__module__.startswith("app.")]
+    assert len(found) >= 9
+    assert [cls.__name__ for cls in found if not getattr(cls.callback, "answers", False)] == []
+
+
+async def test_a_refused_persistent_button_answers_in_words(services, caplog):
+    import logging
+
+    from app.signup.ui import SignupAction
+    from app.supervisor_client import SupervisorError
+
+    async def refused(*_args, **_kwargs):
+        raise SupervisorError(403, "You may not sign up", {"detail": "You may not sign up", "code": "forbidden"})
+
+    services.roster = type("R", (), {"as_member": staticmethod(refused)})()
+    caplog.set_level(logging.INFO, logger="app.discord_util")
+    pressed = FakeInteraction(services, FakeMember(7, "anna_dc"), ENGLISH)
+    await SignupAction(1, "maybe").callback(pressed)  # as discord.py runs it: no on_error after it
+    assert pressed.original_edits or pressed.replies  # the member heard back
+    assert "SignupAction by anna_dc (7): the supervisor answered 403" in caplog.text

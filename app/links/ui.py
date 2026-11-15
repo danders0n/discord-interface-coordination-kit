@@ -11,7 +11,7 @@ from typing import Any
 
 import discord
 
-from app.discord_util import reply, services, thinking
+from app.discord_util import answers, reply, services, thinking
 from app.i18n import t
 from app.links.service import LinkError, Problem
 
@@ -75,6 +75,7 @@ class LinkNow(discord.ui.DynamicItem[discord.ui.Button], template=r"link:now"):
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> LinkNow:
         return cls()
 
+    @answers
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(LinkModal(interaction))
 
