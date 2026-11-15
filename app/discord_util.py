@@ -95,13 +95,19 @@ def supervisor_words(error: SupervisorError, locale: Any) -> str:
     return known.get(error.code or "") or refusal(error.code, error.body, locale) or error.message[:1900]
 
 
+def who(interaction: discord.Interaction) -> str:
+    """The member behind an interaction, for the log: ``name (id)``."""
+    user = getattr(interaction, "user", None)
+    return f"{getattr(user, 'name', '?')} ({getattr(user, 'id', '?')})"
+
+
 async def _sorry(interaction: discord.Interaction, error: Exception, where: str) -> None:
     if isinstance(error, SupervisorError):  # a refusal or a supervisor that is down: words, not an ERROR
         log.log(logging.WARNING if isinstance(error, SupervisorUnreachable) else logging.INFO,
-                "%s: the supervisor answered %s: %s", where, error.status, error.message)
+                "%s by %s: the supervisor answered %s: %s", where, who(interaction), error.status, error.message)
         text = supervisor_words(error, interaction.locale)
     else:
-        log.error("%s failed: %s", where, error, exc_info=error)
+        log.error("%s by %s failed: %s", where, who(interaction), error, exc_info=error)
         text = t("Something went wrong. Staff can find the details in the log.", interaction.locale)
     try:
         await reply(interaction, text)

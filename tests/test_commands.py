@@ -107,4 +107,20 @@ async def test_a_failing_button_or_modal_answers_the_member(services, caplog):
     submitted = FakeInteraction(services, FakeMember(1), d.Locale.british_english)
     await modal.on_error(submitted, RuntimeError("boom"))
     assert submitted.replies[0].content.startswith("Something went wrong")
-    assert "boom" in caplog.text
+    assert "boom" in caplog.text and "by member (1) failed" in caplog.text  # who it was, for staff
+
+
+async def test_a_refusal_is_logged_with_who_asked(services, caplog):
+    import logging
+
+    import discord as d
+
+    from app.discord_util import install_error_handlers
+    from app.supervisor_client import SupervisorError
+
+    install_error_handlers()
+    caplog.set_level(logging.INFO, logger="app.discord_util")
+    submitted = FakeInteraction(services, FakeMember(7, "anna_dc"), d.Locale.british_english)
+    await d.ui.Modal(title="x").on_error(submitted, SupervisorError(400, "A custom Steam address can't be used"))
+    assert submitted.replies[0].content == "A custom Steam address can't be used"
+    assert "by anna_dc (7): the supervisor answered 400" in caplog.text
