@@ -359,6 +359,7 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
         shown.append("opord")
     if "orbat" in actions or ("slots" in actions and kind not in render.COMING):
         shown.append("orbat")
+    shown += [a for a in ("preset", "mission") if a in actions]  # (frozen in the quiet period: not offered)
     if "edit" in actions:
         shown += ["signup"] + (["limit"] if kind in render.COMING else []) + (["join"] if kind == "guest" else [])
         shown.append("organisers")
@@ -411,10 +412,12 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
                 lines.append(t("⚠ {slot} ({squad}): {member} lost the role it needs.", locale, slot=slot["name"],
                                squad=squad["name"], member=render.person(slot["holder"])))
     if "files" in actions:
-        lines.append("-# " + t("Files: /operation preset, /operation image and /operation mission in the operation's "
-                               "channel. The server and the base are set in the app.", locale))
+        lines.append("-# " + t("Images: /operation image in the operation's channel. A mission over Discord's upload "
+                               "limit goes onto the server another way, then Mission picks it by name. The server "
+                               "and the base are set in the app.", locale))
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
-              "orbat": t("ORBAT", locale), "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
+              "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
+              "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
               "join": t("How to join", locale), "organisers": t("Co-organisers", locale),
               "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
                   op.get("hold"), t("Hold the host: off", locale)),
@@ -477,6 +480,16 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         from app.operations.orbat_ui import OrbatTools  # (the ORBAT's own module; it uses this one)
 
         await reply(interaction, t("ORBAT", interaction.locale), view=OrbatTools(interaction, op))
+
+    async def _preset(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        from app.operations.files import PresetModal  # (the files' own module; it uses this one)
+
+        await interaction.response.send_modal(PresetModal(interaction, op))
+
+    async def _mission(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        from app.operations.files import MissionModal
+
+        await interaction.response.send_modal(MissionModal(interaction, op))
 
     async def _signup(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(SignupStartModal(interaction, op))

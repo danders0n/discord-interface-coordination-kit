@@ -2,7 +2,8 @@
 
 - ``/operation preset file``, ``/operation image file slot`` and ``/operation mission file | on_server``, used in the
   operation's channel or thread: the attachment is downloaded and uploaded to the supervisor in the member's name,
-  which checks who may and reports what it found (a member's files wait for approval before reaching the host);
+  which checks who may and reports what it found (a member's files wait for approval before reaching the host; the
+  preset and the mission also from the organiser panel, :mod:`app.operations.files`);
 - ``/operations``: the coming operations and the member's own place in each, privately."""
 
 from __future__ import annotations
@@ -17,12 +18,10 @@ from discord.ext import commands
 from app.channel import render
 from app.discord_util import reply, thinking
 from app.i18n import t
-from app.operations.ui import warning_words
+from app.operations import files
 from app.services import Services
 from app.signup.ui import act
 
-MAX_PRESET = 2 * 1024 * 1024  # the supervisor's limits: refused here before a download
-MAX_IMAGE = 8 * 1024 * 1024
 MISSIONS_SECONDS = 30  # autocomplete asks at every key: the supervisor's list is read at most this often
 
 
@@ -41,28 +40,12 @@ class OperationCog(commands.Cog):
             return None
         return row.operation_id
 
-    async def _upload(self, interaction: discord.Interaction, op_id: int, slot: str,
-                      file: discord.Attachment) -> dict[str, Any]:
-        await thinking(interaction)  # (downloaded from Discord, then sent on)
-        content, client = await file.read(), self.services.supervisor
-        return await act(interaction, lambda me: client.upload(me, op_id, slot, file.filename, content))
-
     @operation.command(name="preset", description="Set the operation's Arma 3 Launcher preset (.html)")
     @app_commands.describe(file="The preset exported from the Arma 3 Launcher")
     async def preset(self, interaction: discord.Interaction, file: discord.Attachment) -> None:
-        op_id, locale = await self._here(interaction), interaction.locale
-        if op_id is None:
-            return
-        if not file.filename.lower().endswith(".html") or file.size > MAX_PRESET:
-            await reply(interaction, t("Send the .html preset exported from the Arma 3 Launcher.", locale))
-            return
-        op = await self._upload(interaction, op_id, "preset", file)
-        preset = (op.get("files") or {}).get("preset") or {}
-        lines = [t(("Preset saved: {count} mod.", "Preset saved: {count} mods."), locale,
-                   count=len(preset.get("mods") or ()))]
-        if preset.get("staged"):
-            lines.append(t("It reaches the server once the operation is approved.", locale))
-        await reply(interaction, "\n".join(lines))
+        op_id = await self._here(interaction)
+        if op_id is not None:
+            await files.set_preset(interaction, op_id, file)
 
     @operation.command(name="image", description="Set the OPORD's banner or map image")
     @app_commands.describe(file="A PNG, JPG or WEBP image", slot="Banner (above the OPORD) or map")
@@ -72,10 +55,10 @@ class OperationCog(commands.Cog):
         op_id = await self._here(interaction)
         if op_id is None:
             return
-        if file.size > MAX_IMAGE:
+        if file.size > files.MAX_IMAGE:
             await reply(interaction, t("That file is too large.", interaction.locale))
             return
-        await self._upload(interaction, op_id, slot if slot in ("banner", "map") else "banner", file)
+        await files.upload(interaction, op_id, slot if slot in ("banner", "map") else "banner", file)
         await reply(interaction, t("Saved.", interaction.locale))
 
     @operation.command(name="mission", description="Set the operation's mission: upload a .pbo, or pick one on the "
@@ -84,26 +67,9 @@ class OperationCog(commands.Cog):
                            on_server="A mission already on the server (start typing)")
     async def mission(self, interaction: discord.Interaction, file: discord.Attachment | None = None,
                       on_server: str | None = None) -> None:
-        op_id, locale = await self._here(interaction), interaction.locale
-        if op_id is None:
-            return
-        if file is None and not on_server:
-            await reply(interaction, t("Attach the mission's .pbo, or pick a mission already on the server.", locale))
-            return
-        if file is not None:
-            op = await self._upload(interaction, op_id, "mission", file)
-        else:
-            await thinking(interaction)
-            client, name = self.services.supervisor, on_server
-            op = await act(interaction, lambda me: client.pick_mission(me, op_id, name))
-        mission = op.get("mission") or {}
-        report = mission.get("report") or {}
-        lines = [t("Mission set: {name} ({terrain}, {players} playable).", locale, name=mission.get("name") or "?",
-                   terrain=report.get("terrain") or "?", players=report.get("playable") or "?")]
-        if mission.get("staged"):
-            lines.append(t("It reaches the server once the operation is approved.", locale))
-        lines += ["⚠ " + warning_words(w, locale) for w in op.get("warnings") or []]
-        await reply(interaction, "\n".join(lines)[:1900])
+        op_id = await self._here(interaction)
+        if op_id is not None:
+            await files.set_mission(interaction, op_id, file, on_server)
 
     @mission.autocomplete("on_server")
     async def mission_choices(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

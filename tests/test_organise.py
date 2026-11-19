@@ -115,8 +115,8 @@ async def test_the_panel_shows_what_the_supervisor_allows(organise, guild, fake)
     text, view = said(opened), opened.replies[-1].kwargs["view"]
     assert text.startswith("**Ibis** · OP-1 · Draft\nStill missing: the OPORD's Situation, the OPORD's Mission.")
     sections = [custom_id.split(":")[-1] for custom_id in controls(view)]
-    assert sections == ["details", "choices", "opord", "orbat", "signup", "organisers", "hold", "autoend", "submit",
-                        "copy", "delete"]
+    assert sections == ["details", "choices", "opord", "orbat", "preset", "mission", "signup", "organisers", "hold",
+                        "autoend", "submit", "copy", "delete"]
     stranger = acting(organise, guild, 3)
     await press(PanelButton(op["id"]), stranger)
     assert said(stranger) == "The panel is for this operation's organisers."
@@ -297,6 +297,46 @@ async def test_files_are_uploaded_in_the_operations_channel(organise, guild, fak
     elsewhere = acting(organise, guild, 1, 12345)
     await invoke(cog.preset, cog, elsewhere, file=FakeAttachment("ibis.html", preset.encode()))
     assert said(elsewhere) == "Use this in an operation's channel or its thread."
+
+
+async def test_the_panel_takes_the_preset_and_the_mission_as_files(organise, guild, fake):
+    op = fake.operation("Ibis", author_person_id=1)
+    fake.server_missions = ["big.Altis.pbo"]
+    pressed = await panel_press(organise, guild, 1, op["id"], "preset")
+    modal = modal_of(pressed)
+    modal.file._values = [FakeAttachment("ibis.html", b'<tr data-type="ModContainer"></tr>' * 3)]
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Preset saved: 3 mods.\nIt reaches the server once the operation is approved."
+    assert fake.operations[op["id"]]["files"]["preset"]["staged"]
+    wrong = acting(organise, guild, 1)
+    modal.file._values = [FakeAttachment("ibis.txt", b"mods")]
+    await modal.on_submit(wrong)
+    assert said(wrong) == "Send the .html preset exported from the Arma 3 Launcher."
+
+    pressed = await panel_press(organise, guild, 1, op["id"], "mission")
+    modal = modal_of(pressed)
+    empty = acting(organise, guild, 1)
+    await modal.on_submit(empty)
+    assert said(empty) == "Attach the mission's .pbo, or pick a mission already on the server."
+    modal.file._values = [FakeAttachment("ibis.Altis.pbo", b"pbo")]
+    uploaded = acting(organise, guild, 1)
+    await modal.on_submit(uploaded)
+    assert said(uploaded).startswith("Mission set: ibis.Altis.pbo")
+    modal.file._values, modal.on_server._value = [], " big.Altis.pbo "
+    picked = acting(organise, guild, 1)
+    await modal.on_submit(picked)
+    assert said(picked).startswith("Mission set: big.Altis.pbo")
+    assert fake.operations[op["id"]]["mission"]["name"] == "big.Altis.pbo"
+
+
+async def test_the_preset_and_mission_buttons_follow_the_supervisors_actions(organise, guild, fake):
+    op = fake.operation("Ibis", author_person_id=1)
+    out = fake.out(fake.operations[op["id"]], fake.persons["1"])
+    out["my"]["actions"] = [a for a in out["my"]["actions"] if a not in ("preset", "mission")]  # (frozen)
+    assert {"preset", "mission"}.isdisjoint(ui.panel_sections(out))
+    text, _view = ui.panel(out, "en-US")
+    assert "/operation image" in text
 
 
 async def test_operations_lists_the_coming_ones_with_the_members_place(organise, guild, fake, clock):

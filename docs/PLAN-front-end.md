@@ -139,7 +139,7 @@ notice it starts in `notice_delivery` before acting, so a crash never sends a DM
 |---|---|
 | *Create operation* (header), the wizard | Ends with `POST /api/operations` (act-as); the supervisor refuses a guest kind without `operations.publish`. |
 | Organiser panel | Each section reads the operation through act-as and writes with `If-Match`: details, OPORD (one modal with five fields, one per paragraph; Discord allows five inputs of 4000 characters), ORBAT (text, templates), co-organisers, sign-up opening and limit, *How to join*, hold the host (or *Request the host*), server and base, the mission report and warnings, *Publish* / *Send for approval* / *Withdraw request*, *Copy operation*, *Cancel* / *End operation*, *Don't end automatically*, keep the profile. The freeze from the quiet period is the supervisor's: frozen fields come back in `actions` as unavailable, with the reason. |
-| `/operation preset`, `image`, `mission` | Download the attachment and upload it (act-as) to the operation's file routes; show the supervisor's report (and, for a member's operation, that nothing is downloaded until approval). Missions over Discord's limit are picked from the server's list (autocomplete from the supervisor). |
+| `/operation preset`, `image`, `mission` | Download the attachment and upload it (act-as) to the operation's file routes; show the supervisor's report (and, for a member's operation, that nothing is downloaded until approval). Missions over Discord's limit are picked from the server's list (autocomplete from the supervisor). The panel's *Preset* and *Mission* buttons do the same through a modal with a file field (*Mission*: or a server mission's name). |
 | Sign-up buttons, the squad picker, `/slot take | leave` | Act-as calls; the reply adds the supervisor's warnings (DLC). |
 | `/operations` | The member's sign-ups and the calendar, from act-as reads. |
 | `/link`, `/unlink`, *Link now* | Act-as on the member's own Steam link; the reply says the link waits for staff confirmation and gives the squad.xml URL. |
@@ -485,7 +485,11 @@ The rest of this plan's phase 4.
 - **Files** (`app/operations/cog.py`): `/operation preset | image (banner, map) | mission (file or on_server)` in the
   operation's channel or thread: the attachment is uploaded in the member's name; the answer gives the mods or the
   mission's report and warnings, and says when a member's file waits for approval (`staged`). The server's missions
-  autocomplete (read at most every 30 s).
+  autocomplete (read at most every 30 s). The panel's *Preset* and *Mission* (decided 2026-11-19; shown for the
+  `preset` / `mission` actions, so not in the quiet period's freeze) open a modal with a File Upload field
+  (`app/operations/files.py`, shared with the commands); *Mission* also takes the file name of a mission already on
+  the server, which is how one over Discord's upload limit is set. Images stay with `/operation image`. No upload
+  sends `If-Match` (as the commands); no URL download.
 - **`/operations`:** the published operations of the next `calendar_days` from `GET /api/operations?upcoming=true` in
   the member's name, with their place (`my.place`) and the channel link.
 - **Decisions taken while building:**

@@ -89,7 +89,8 @@ exactly the settings.
   out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
   `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
   `DetailsModal`, `expired()`; the panel: `PanelButton`, `PanelAction` per section from `my.actions`, `write()` with
-  `If-Match` and *Reopen* on `stale`), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
+  `If-Match` and *Reopen* on `stale`), `files.py` (the preset and mission uploads shared by the commands and the
+  panel's *Preset* / *Mission* modals with a `FileUpload` field), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
   (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
