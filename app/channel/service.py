@@ -135,8 +135,9 @@ def attending(op: dict[str, Any]) -> list[int]:
 class OperationChannels:
     def __init__(self, db: Database, store: SettingsStore, ids: Callable[[], Ids], scheduler: Scheduler,
                  guild: Callable[[], Any], client: SupervisorClient, interval: float = 2.0,
-                 clock: Callable[[], datetime] | None = None) -> None:
-        """``guild()``: the Discord server (None while not connected)."""
+                 clock: Callable[[], datetime] | None = None, edit_spacing: float = sync.SPACING) -> None:
+        """``guild()``: the Discord server (None while not connected). ``edit_spacing``: seconds between edits of a
+        channel's messages older than an hour (:class:`app.channel.sync.Pacer`; shared with the header)."""
         self.db, self.store, self.ids, self.scheduler, self.guild = db, store, ids, scheduler, guild
         self.client = client
         self.clock = clock or scheduler.clock
@@ -144,6 +145,7 @@ class OperationChannels:
         self.header: Any = None  # app.operations.header.Header: the calendar follows every change
         self.staff: Any = None  # StaffLog
         self.redrawer = Redrawer(self.draw_now, interval)
+        self.pacer = sync.Pacer(edit_spacing)
         self.sorter = Redrawer(self._sort, interval)  # by category id: the channels in date order
         self._renames: dict[int, asyncio.Task] = {}
         self._drawing: dict[int, asyncio.Lock] = {}  # one redraw per operation at a time
@@ -404,7 +406,7 @@ class OperationChannels:
             self._check_due.discard(row.operation_id)
             await self._check(channel, stored, drawn)
         try:
-            stored, drawn = await sync.apply(channel, stored, messages, drawn)
+            stored, drawn = await sync.apply(channel, stored, messages, drawn, self.pacer)
         except sync.Partial as exc:  # what was sent is kept, so the next redraw edits it rather than sending again
             await self._save(row.operation_id, messages=exc.stored, drawn=exc.drawn)
             cause = exc.__cause__
@@ -517,6 +519,7 @@ class OperationChannels:
         if row.announcement_id:
             if drawn.get(ANNOUNCEMENT) == shown:  # unchanged: Discord limits edits of old messages
                 return
+            await self.pacer.wait(channel.id, row.announcement_id)
             try:
                 await channel.get_partial_message(row.announcement_id).edit(embeds=message.embeds)
             except discord.NotFound:

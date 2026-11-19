@@ -367,6 +367,10 @@ drawing went in together: the kept channel code depended on the deleted `EventSe
   an hour (30046), and editing all of them on every redraw used it up (2026-11-17). A deleted message's fingerprint
   is dropped (`on_raw_message_delete`; after a restart, the channel's history is read), so the next redraw posts it
   again. A redraw Discord rate-limits keeps what it got through and is tried again 15 minutes on (`draw_retry`).
+  Edits of messages older than an hour (the channel's, the announcement, the header) are spaced 6 s apart per channel
+  (`sync.Pacer`; Discord's 429s asked for 5.1 to 5.6 s), so the bot waits rather than being refused; a redraw waiting
+  holds its operation's lock, so a sign-up rush folds into one next redraw. The header is edited only when its
+  fingerprint (kept with its id in `bot_state`) changed, and posted again when deleted (2026-11-19).
 - **Render** (`app/channel/render.py`): the info embed from the JSON (`kind_name`, climate role or name, host and
   invited groups, author, times, sign-up state, the preset's mods and Creator DLC names, the mission), the OPORD as
   one message per written paragraph (`situation` ... `command`, each split past 2000 characters; nothing written: one

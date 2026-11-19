@@ -84,7 +84,7 @@ exactly the settings.
   confirmation, erasing in the supervisor in the staff member's name; `erase.py` emptying what the bot holds when
   the `erased` notice comes: link reminders, archived messages, as the supervisor's `former:<n>` stored as `-n`).
 - `app/operations/`: `feed.py` (`Feed`: `GET /api/operations/changes` oldest first into the channels, the cursor in
-  `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`),
+  `bot_state`, `reset`, `meta`), `header.py` (the header message and its calendar, from `operation_channel`; edited only when it changed),
   `times.py` (what organisers type: `dd.mm` = next such date, a start before the assembly = next day, aware UTC
   out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
   `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
@@ -96,7 +96,8 @@ exactly the settings.
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
   or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread
   link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
-  (Discord caps edits of old messages); a deleted message's fingerprint is dropped so it is posted again; append /
+  (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
+  never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /
   delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
   pass `view`, as leaving it out keeps old buttons), `order.py` (a category's channels: `Ids.top` first, then the
   rest, then the operations by start; one bulk position request, only when the order differs), `service.py`

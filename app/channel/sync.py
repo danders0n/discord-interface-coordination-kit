@@ -15,15 +15,23 @@ A message is edited only when it changed: ``drawn`` holds each one's :func:`fing
 only so many edits to messages older than an hour (error 30046), and a redraw that edited every message every time
 (a restart, the feed's echo, a scheduled redraw) used it up. As a skipped edit no longer finds a message deleted by
 hand, the service drops a deleted message's fingerprint (``on_raw_message_delete``, and a look at the channel after a
-restart), so the next edit finds it gone and posts it again."""
+restart), so the next edit finds it gone and posts it again.
+
+Even a changed message waits its turn: Discord takes about one edit every five seconds of a channel's messages older
+than an hour (more is refused with 429, and in the end 30046), so :class:`Pacer` spaces such edits per channel and
+the bot waits instead of being refused. A redraw waiting there holds its operation's lock, so the changes that come
+meanwhile (a sign-up rush) fold into one next redraw."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import discord
@@ -52,6 +60,31 @@ def _view(message: Message) -> dict[str, Any]:
     """For sending: a view only when there is one. Editing passes ``view`` always, as leaving it out keeps the
     buttons the message had (a cancelled event's sign-up buttons), while None removes them."""
     return {"view": message.view} if message.view is not None else {}
+
+
+OLD = timedelta(hours=1)  # Discord's "old message": edits past it are limited per channel
+SPACING = 6.0  # seconds between edits of a channel's old messages (Discord's 429s asked for 5.1 to 5.6)
+
+
+class Pacer:
+    """Edits of messages older than an hour spaced per channel (:data:`SPACING`), so Discord never refuses one."""
+
+    def __init__(self, spacing: float = SPACING, *, sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+                 monotonic: Callable[[], float] = time.monotonic,
+                 now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+        self.spacing, self.sleep, self.monotonic, self.now = spacing, sleep, monotonic, now
+        self._last: dict[int, float] = {}  # channel id -> when its last old message was edited
+
+    async def wait(self, channel_id: int, message_id: int) -> None:
+        """Before editing ``message_id`` in ``channel_id``: wait for its turn if the message is old."""
+        if self.spacing <= 0 or discord.utils.snowflake_time(message_id) > self.now() - OLD:
+            return
+        last = self._last.get(channel_id)
+        if last is not None:
+            delay = last + self.spacing - self.monotonic()
+            if delay > 0:
+                await self.sleep(delay)
+        self._last[channel_id] = self.monotonic()
 
 
 def fingerprint(message: Message) -> str:
@@ -93,13 +126,15 @@ class Partial(Exception):
 
 
 async def apply(channel: Any, stored: Mapping[str, int], messages: Mapping[str, Message],
-                drawn: Mapping[str, str] | None = None) -> tuple[dict[str, int], dict[str, str]]:
+                drawn: Mapping[str, str] | None = None,
+                pacer: Pacer | None = None) -> tuple[dict[str, int], dict[str, str]]:
     """Bring the channel to ``messages``; returns the new key -> id map and key -> :func:`fingerprint` map
     (``drawn``: what the stored messages show, an edit skipped where it matches). On a failure part way, raises
-    :class:`Partial` with both as far as it got (its cause is the original error)."""
+    :class:`Partial` with both as far as it got (its cause is the original error). Edits of old messages wait their
+    turn at ``pacer``."""
     stored, drawn = dict(stored), dict(drawn or {})
     try:
-        await _apply(channel, stored, drawn, messages)
+        await _apply(channel, stored, drawn, messages, pacer)
     except Exception as exc:
         raise Partial(stored, drawn) from exc
     return stored, drawn
@@ -110,7 +145,8 @@ def _forget(stored: dict[str, int], drawn: dict[str, str], key: str) -> None:
     drawn.pop(key, None)
 
 
-async def _apply(channel: Any, stored: dict[str, int], drawn: dict[str, str], messages: Mapping[str, Message]) -> None:
+async def _apply(channel: Any, stored: dict[str, int], drawn: dict[str, str], messages: Mapping[str, Message],
+                 pacer: Pacer | None = None) -> None:
     """:func:`apply`'s work, keeping ``stored`` and ``drawn`` (changed in place) true to the channel after every
     step."""
     for _attempt in range(2):
@@ -131,6 +167,8 @@ async def _apply(channel: Any, stored: dict[str, int], drawn: dict[str, str], me
                 shown = fingerprint(message)
                 if drawn.get(op.key) == shown:
                     continue
+                if pacer is not None:
+                    await pacer.wait(channel.id, stored[op.key])
                 try:
                     files = {"attachments": [discord.File(p, p.name) for p in message.files]} if message.replace_files else {}
                     await channel.get_partial_message(stored[op.key]).edit(content=message.content,

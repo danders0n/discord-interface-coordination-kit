@@ -1,8 +1,10 @@
 """The header channel's message (docs/PLAN.md, *Creating an event*, *Entry point*, *Calendar*): how to start an
 operation, and the published operations of the next ``calendar_days`` (date, kind, title, link), drawn from the
 operations as last drawn (``operation_channel``). Posted when missing, edited in place (its id is kept in
-``bot_state``), redrawn in batches whenever an operation changes. At start the channel is searched once, so a
-header the database doesn't know is adopted and extra ones deleted.
+``bot_state``), redrawn in batches whenever an operation changes, but edited only when what it shows changed (its
+:func:`app.channel.sync.fingerprint` is kept beside the id; Discord limits edits of old messages) and then at the
+channels' pace. At start the channel is searched once, so a header the database doesn't know is adopted, extra ones
+deleted, and a deleted one posted again.
 
 Its *Create operation* button opens the wizard (app/operations/ui.py); it keeps working after a restart."""
 
@@ -16,7 +18,8 @@ from typing import Any
 import discord
 from sqlalchemy import select
 
-from app.channel.render import plain, ts, when
+from app.channel import sync
+from app.channel.render import Message, plain, ts, when
 from app.channel.service import Redrawer
 from app.db import Database, state
 from app.db.models import OperationChannel
@@ -36,6 +39,7 @@ class Header:
         self.db, self.store, self.ids, self.guild, self.clock = db, store, ids, guild, clock
         self.redrawer = Redrawer(lambda _key: self.draw(), interval)
         self._swept = False  # the channel was searched for headers the database doesn't know
+        self.pacer: sync.Pacer | None = None  # the operation channels' (app/bot.py): edits of old messages spaced
 
     def request(self) -> None:
         self.redrawer.request(0)
@@ -85,15 +89,18 @@ class Header:
         channel = guild.get_channel(self.ids().header) if guild is not None and self.ids().header else None
         if channel is None:
             return
-        embed = await self.message()
+        embed, view = await self.message(), header_view(self.store.current.language)
+        shown = sync.fingerprint(Message(embeds=[embed], view=view))
         stored = await state.get(self.db, KEY)
-        known = stored["id"] if stored and stored.get("channel", channel.id) == channel.id else None
+        known = stored.get("id") if stored and stored.get("channel", channel.id) == channel.id else None
         if not self._swept:
             # Once per start: a header the database doesn't know (another copy of the data, a restored backup) is
             # adopted rather than joined by a second one, and any extra headers are deleted.
             self._swept = True
             headers = await self.found(channel, guild.me.id)
-            if headers:
+            if not headers:
+                known = None  # (deleted while the bot was away: posted again)
+            else:
                 keep = known if known in headers else headers[0]
                 for other in headers:
                     if other != keep:
@@ -103,12 +110,22 @@ class Header:
                             log.warning("Could not delete the extra header message %s", other)
                 known = keep
         if known:
+            if stored and stored.get("id") == known and stored.get("shown") == shown:
+                return  # unchanged: no edit
+            if self.pacer is not None:
+                await self.pacer.wait(channel.id, known)
             try:
-                await channel.get_partial_message(known).edit(embed=embed, view=header_view(self.store.current.language))
-                if not stored or stored.get("id") != known or stored.get("channel") != channel.id:
-                    await state.put(self.db, KEY, {"id": known, "channel": channel.id})
+                await channel.get_partial_message(known).edit(embed=embed, view=view)
+                await state.put(self.db, KEY, {"id": known, "channel": channel.id, "shown": shown})
                 return
             except discord.NotFound:
                 pass
-        sent = await channel.send(embed=embed, view=header_view(self.store.current.language))
-        await state.put(self.db, KEY, {"id": sent.id, "channel": channel.id})
+        sent = await channel.send(embed=embed, view=view)
+        await state.put(self.db, KEY, {"id": sent.id, "channel": channel.id, "shown": shown})
+
+    async def deleted(self, channel_id: int, message_ids: set[int]) -> None:
+        """Messages deleted on Discord: the header among them is posted again."""
+        stored = await state.get(self.db, KEY)
+        if stored and stored.get("channel") == channel_id and stored.get("id") in message_ids:
+            await state.put(self.db, KEY, {"channel": channel_id})
+            self.request()

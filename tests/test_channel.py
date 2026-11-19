@@ -25,7 +25,7 @@ CLIMATE = 401
 async def stack(services, guild, clock, fake):
     """The channels and the feed against the fake supervisor; Anna (person 1) is on the roster."""
     services.channels = OperationChannels(services.db, services.store, lambda: services.ids, services.scheduler,
-                                          lambda: guild, services.supervisor, interval=0)
+                                          lambda: guild, services.supervisor, interval=0, edit_spacing=0)
     services.channels.header = Header(services.db, services.store, lambda: services.ids, lambda: guild,
                                       services.scheduler.clock, interval=0)
     services.channels.staff = services.staff
@@ -227,6 +227,51 @@ async def test_the_header_lists_the_published_operations(stack, guild, fake, clo
     calendar = embed.fields[0].value
     assert "**Ibis**" in calendar and "Draft" not in calendar and "Far" not in calendar
     assert embed.title == "Operacje"
+
+
+async def test_the_header_is_edited_only_when_it_changed_and_posted_again_when_deleted(stack, guild, fake):
+    fake.operation("Ibis", status="published")
+    await run(stack)
+    await stack.channels.header.redrawer.settle()
+    await stack.channels.header.draw()  # (the channel's link came after the first draw)
+    header_channel = guild.get_channel(HEADER)
+    (header,) = header_channel.messages
+    edited = len(header.edits)
+    await stack.channels.header.draw()  # (every operation change asks for one)
+    assert len(header.edits) == edited
+    fake.operation("Heron", status="published")
+    await run(stack)
+    await stack.channels.header.redrawer.settle()
+    assert len(header.edits) == edited + 1 and "**Heron**" in header.edits[-1]["embed"].fields[0].value
+    await header_channel.get_partial_message(header.id).delete()
+    await stack.channels.header.deleted(HEADER, {header.id})  # (on_raw_message_delete)
+    await stack.channels.header.redrawer.settle()
+    (again,) = header_channel.messages
+    assert again.id != header.id
+
+
+async def test_edits_of_old_messages_are_spaced_per_channel():
+    """Discord takes about one edit every five seconds of a channel's messages older than an hour."""
+    from datetime import UTC, datetime
+
+    now, ticks, slept = datetime(2026, 11, 19, 12, tzinfo=UTC), [100.0], []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(round(seconds, 3))
+        ticks[0] += seconds
+
+    pacer = sync.Pacer(6.0, sleep=sleep, monotonic=lambda: ticks[0], now=lambda: now)
+    old = discord.utils.time_snowflake(now - timedelta(hours=2))
+    new = discord.utils.time_snowflake(now - timedelta(minutes=5))
+    await pacer.wait(1, old)
+    await pacer.wait(1, new)  # (a new message isn't limited)
+    await pacer.wait(2, old)  # (another channel has its own turn)
+    ticks[0] += 1.5
+    await pacer.wait(1, old)
+    assert slept == [4.5]
+    ticks[0] += 10
+    await pacer.wait(1, old)
+    assert slept == [4.5]
 
 
 async def test_a_restart_redraws_and_keeps_the_overwrites_for_the_meta(stack, guild, fake):

@@ -101,6 +101,7 @@ class EventBot(commands.Bot):
         s = self.services
         s.channels = OperationChannels(s.db, s.store, lambda: s.ids, s.scheduler, self.guild, s.supervisor)
         s.channels.header = Header(s.db, s.store, lambda: s.ids, self.guild, s.scheduler.clock)
+        s.channels.header.pacer = s.channels.pacer
         s.channels.staff = s.staff
         s.feed = Feed(s.db, s.supervisor, s.channels, s.scheduler.clock)
 
@@ -182,10 +183,12 @@ class EventBot(commands.Bot):
         """One of the bot's messages deleted by hand: an operation channel posts it again (app/channel/sync.py)."""
         if payload.guild_id == self.services.settings.guild_id and self.services.channels is not None:
             await self.services.channels.message_deleted(payload.channel_id, {payload.message_id})
+            await self.services.channels.header.deleted(payload.channel_id, {payload.message_id})
 
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
         if payload.guild_id == self.services.settings.guild_id and self.services.channels is not None:
             await self.services.channels.message_deleted(payload.channel_id, set(payload.message_ids))
+            await self.services.channels.header.deleted(payload.channel_id, set(payload.message_ids))
 
     async def on_member_remove(self, member: discord.Member) -> None:
         if self._ours(member.guild) and not member.bot:
