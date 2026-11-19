@@ -9,10 +9,18 @@ posted again, so the order holds.
 
 The thread is made after the other messages, so Discord's own "started a thread" card is last; stored as ``card``,
 it stands in for the discussion link (decided 2026-11-02). Discord can't post that card again, so once a message
-must go after it (a late preset, an ORBAT continuation, the report), the card is deleted and the link is posted."""
+must go after it (a late preset, an ORBAT continuation, the report), the card is deleted and the link is posted.
+
+A message is edited only when it changed: ``drawn`` holds each one's :func:`fingerprint` as last sent. Discord allows
+only so many edits to messages older than an hour (error 30046), and a redraw that edited every message every time
+(a restart, the feed's echo, a scheduled redraw) used it up. As a skipped edit no longer finds a message deleted by
+hand, the service drops a deleted message's fingerprint (``on_raw_message_delete``, and a look at the channel after a
+restart), so the next edit finds it gone and posts it again."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -46,6 +54,14 @@ def _view(message: Message) -> dict[str, Any]:
     return {"view": message.view} if message.view is not None else {}
 
 
+def fingerprint(message: Message) -> str:
+    """What the message shows: its text, embeds, buttons and files. Equal fingerprints need no edit."""
+    body = {"content": message.content, "embeds": [embed.to_dict() for embed in message.embeds],
+            "view": message.view.to_components() if message.view is not None else None,
+            "files": message.tag if message.files else ""}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:32]
+
+
 @dataclass(frozen=True)
 class Op:
     action: str  # edit | send | delete
@@ -67,26 +83,36 @@ def plan(stored: Mapping[str, int], wanted: Sequence[str]) -> list[Op]:
 
 
 class Partial(Exception):
-    """:func:`apply` failed part way (Discord refused, a rate limit): ``stored`` is what the channel holds now, to
-    be saved, or the messages already sent would be sent again by the next redraw and the old ones forgotten."""
+    """:func:`apply` failed part way (Discord refused, a rate limit): ``stored`` is what the channel holds now and
+    ``drawn`` what those messages show, to be saved, or the messages already sent would be sent again by the next
+    redraw and the old ones forgotten."""
 
-    def __init__(self, stored: dict[str, int]) -> None:
+    def __init__(self, stored: dict[str, int], drawn: dict[str, str]) -> None:
         super().__init__("the channel was brought only part way")
-        self.stored = stored
+        self.stored, self.drawn = stored, drawn
 
 
-async def apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Message]) -> dict[str, int]:
-    """Bring the channel to ``messages``; returns the new key -> id map. On a failure part way, raises
-    :class:`Partial` with the map as far as it got (its cause is the original error)."""
-    stored = dict(stored)
+async def apply(channel: Any, stored: Mapping[str, int], messages: Mapping[str, Message],
+                drawn: Mapping[str, str] | None = None) -> tuple[dict[str, int], dict[str, str]]:
+    """Bring the channel to ``messages``; returns the new key -> id map and key -> :func:`fingerprint` map
+    (``drawn``: what the stored messages show, an edit skipped where it matches). On a failure part way, raises
+    :class:`Partial` with both as far as it got (its cause is the original error)."""
+    stored, drawn = dict(stored), dict(drawn or {})
     try:
-        return await _apply(channel, stored, messages)
+        await _apply(channel, stored, drawn, messages)
     except Exception as exc:
-        raise Partial(stored) from exc
+        raise Partial(stored, drawn) from exc
+    return stored, drawn
 
 
-async def _apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Message]) -> dict[str, int]:
-    """:func:`apply`'s work, keeping ``stored`` (changed in place) true to the channel after every step."""
+def _forget(stored: dict[str, int], drawn: dict[str, str], key: str) -> None:
+    del stored[key]
+    drawn.pop(key, None)
+
+
+async def _apply(channel: Any, stored: dict[str, int], drawn: dict[str, str], messages: Mapping[str, Message]) -> None:
+    """:func:`apply`'s work, keeping ``stored`` and ``drawn`` (changed in place) true to the channel after every
+    step."""
     for _attempt in range(2):
         wanted = dict(messages)
         if CARD in stored:
@@ -94,14 +120,17 @@ async def _apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Me
                 del wanted[DISCUSSION]  # the card is still last: it is the link
             else:
                 await _delete(channel, stored[CARD])
-                del stored[CARD]
+                _forget(stored, drawn, CARD)
         missing = None
         for op in plan({key: id_ for key, id_ in stored.items() if key != CARD}, list(wanted)):
             if op.action == "delete":
                 await _delete(channel, stored[op.key])
-                del stored[op.key]
+                _forget(stored, drawn, op.key)
             elif op.action == "edit":
                 message = messages[op.key]
+                shown = fingerprint(message)
+                if drawn.get(op.key) == shown:
+                    continue
                 try:
                     files = {"attachments": [discord.File(p, p.name) for p in message.files]} if message.replace_files else {}
                     await channel.get_partial_message(stored[op.key]).edit(content=message.content,
@@ -110,20 +139,20 @@ async def _apply(channel: Any, stored: dict[str, int], messages: Mapping[str, Me
                 except discord.NotFound:  # deleted by hand: post it and what follows again
                     missing = op.key
                     break
+                drawn[op.key] = shown
             else:
                 message = messages[op.key]
                 files = {"files": [discord.File(p, p.name) for p in message.files]} if message.files else {}
                 sent = await channel.send(content=message.content, embeds=message.embeds,
                                           allowed_mentions=discord.AllowedMentions.none(), **_view(message), **files)
-                stored[op.key] = sent.id
+                stored[op.key], drawn[op.key] = sent.id, fingerprint(message)
         if missing is None:
-            return stored
+            return
         log.info("Message %s of #%s was deleted; posting it and the ones after it again", missing, channel.name)
         for key in [k for k in stored if order(k) >= order(missing)]:
             if key != missing:
                 await _delete(channel, stored[key])
-            del stored[key]
-    return stored
+            _forget(stored, drawn, key)
 
 
 async def _delete(channel: Any, message_id: int) -> None:

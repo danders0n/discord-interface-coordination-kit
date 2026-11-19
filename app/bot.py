@@ -178,6 +178,15 @@ class EventBot(commands.Bot):
             if member is not None:
                 await self.services.roster.member_changed(member)
 
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        """One of the bot's messages deleted by hand: an operation channel posts it again (app/channel/sync.py)."""
+        if payload.guild_id == self.services.settings.guild_id and self.services.channels is not None:
+            await self.services.channels.message_deleted(payload.channel_id, {payload.message_id})
+
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
+        if payload.guild_id == self.services.settings.guild_id and self.services.channels is not None:
+            await self.services.channels.message_deleted(payload.channel_id, set(payload.message_ids))
+
     async def on_member_remove(self, member: discord.Member) -> None:
         if self._ours(member.guild) and not member.bot:
             await self.services.roster.member_left(roster_member(member, member.guild.id))

@@ -94,7 +94,8 @@ exactly the settings.
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
   or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread
-  link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place, append /
+  link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
+  (Discord caps edits of old messages); a deleted message's fingerprint is dropped so it is posted again; append /
   delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
   pass `view`, as leaving it out keeps old buttons), `order.py` (a category's channels: `Ids.top` first, then the
   rest, then the operations by start; one bulk position request, only when the order differs), `service.py`

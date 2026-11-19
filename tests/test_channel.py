@@ -241,6 +241,83 @@ async def test_a_restart_redraws_and_keeps_the_overwrites_for_the_meta(stack, gu
     assert any(getattr(target, "id", None) == ADMIN for target in channel.overwrites)
 
 
+def edits(channel) -> list[int]:
+    return [len(m.edits) for m in channel.messages]
+
+
+async def test_a_redraw_edits_only_the_messages_that_changed(stack, guild, fake):
+    """Discord allows only so many edits to messages older than an hour (30046): an unchanged message isn't edited."""
+    op = fake.operation("Ibis", status="published", opord={"situation": "S", "mission": "M"})
+    await run(stack)
+    drawn = await row(stack, op["id"])
+    channel = guild.get_channel(drawn.channel_id)
+    (announcement,) = guild.get_channel(ANNOUNCE).messages
+    before, announced = edits(channel), len(announcement.edits)
+    await stack.channels.refresh_all()  # a restart redraws everything: nothing changed
+    await settle(stack.channels)
+    await run(stack)
+    assert edits(channel) == before and len(announcement.edits) == announced
+    fake.change(op["id"], opord={"situation": "S", "mission": "M2"})
+    await run(stack)
+    changed = [after - was for after, was in zip(edits(channel), before)]
+    keys = list((await row(stack, op["id"])).messages)
+    assert [key for key, n in zip(keys, changed) if n] == ["mission"]
+    assert len(announcement.edits) == announced  # (the announcement doesn't show the OPORD)
+    fake.change(op["id"], title="Ibis II")
+    await run(stack)
+    assert announcement.embeds[0].title.endswith("Ibis II")
+
+
+async def test_a_message_deleted_by_hand_is_posted_again_in_its_place(stack, guild, fake):
+    op = fake.operation("Ibis", opord={"situation": "S", "mission": "M"})
+    await run(stack)
+    drawn = await row(stack, op["id"])
+    channel = guild.get_channel(drawn.channel_id)
+    wanted = texts(channel)
+    await channel.get_partial_message(drawn.messages["situation"]).delete()
+    await stack.channels.message_deleted(channel.id, {drawn.messages["situation"]})  # (on_raw_message_delete)
+    await settle(stack.channels)
+    assert texts(channel) == wanted
+
+
+async def test_a_message_deleted_while_the_bot_was_away_is_posted_again_after_a_restart(stack, guild, fake):
+    op = fake.operation("Ibis", opord={"situation": "S", "mission": "M"})
+    await run(stack)
+    drawn = await row(stack, op["id"])
+    channel = guild.get_channel(drawn.channel_id)
+    wanted = texts(channel)
+    await channel.get_partial_message(drawn.messages["mission"]).delete()
+    await stack.channels.refresh_all()
+    await settle(stack.channels)
+    assert texts(channel) == wanted
+
+
+async def test_a_redraw_discord_holds_back_is_tried_again_later(stack, guild, fake, clock, monkeypatch):
+    from fakes import MessageRef
+    from types import SimpleNamespace
+
+    op = fake.operation("Ibis", opord={"situation": "S"})
+    await run(stack)
+    drawn = await row(stack, op["id"])
+    channel = guild.get_channel(drawn.channel_id)
+    edit = MessageRef.edit
+
+    async def limited(self, **changes):
+        raise discord.HTTPException(SimpleNamespace(status=429, reason="Too Many Requests"),
+                                    {"code": 30046, "message": "Maximum number of edits to messages older than 1 hour reached."})
+
+    monkeypatch.setattr(MessageRef, "edit", limited)
+    fake.change(op["id"], title="Ibis II", opord={"situation": "S2"})
+    await run(stack)
+    async with stack.db.session() as session:
+        retry = (await session.execute(select(ScheduledAction).where(ScheduledAction.kind == "draw_retry"))).scalar_one()
+    assert retry.due_at == clock.now + timedelta(minutes=15) and retry.done_at is None
+    monkeypatch.setattr(MessageRef, "edit", edit)
+    at(clock, fake, clock.now + timedelta(minutes=16))
+    await run(stack)
+    assert channel.messages[0].embeds[0].title.endswith("Ibis II") and texts(channel)[1].endswith("S2")
+
+
 async def test_an_operation_live_event_wakes_the_feed(stack, fake):
     from app.live import Live
     from app.supervisor_client import StreamEvent

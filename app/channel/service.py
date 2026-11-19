@@ -52,13 +52,15 @@ from app.supervisor_client import SupervisorClient, SupervisorError
 ARCHIVE_KIND = "archive"
 CLOSE_KIND = "signup_close"  # at the start: drawn again, the sign-up closed
 SIGNUP_KIND = "signup_open"  # the sign-up opens: the roles pinged in the thread
-DRAW_KIND = "draw_retry"  # a redraw that couldn't get the operation's files: tried again
+DRAW_KIND = "draw_retry"  # a redraw that couldn't get the operation's files, or Discord held back: tried again
 RATING_KIND = "rating_close"  # the rating window closes: drawn again, without Rate (the supervisor writes no change)
 REMINDER_KIND = "reminder"  # times.reminder_minutes before the assembly: the slot holders (or Coming) pinged
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 PING_LATE = timedelta(hours=1)  # a sign-up ping later than this is skipped
 RETRY = timedelta(minutes=1)
+RATE_RETRY = timedelta(minutes=15)  # a redraw Discord rate-limited (edits of messages older than an hour)
+ANNOUNCEMENT = "announcement"  # its fingerprint's key in ``drawn``, beside the channel's messages
 log = logging.getLogger(__name__)
 
 BOT = discord.PermissionOverwrite(view_channel=True, send_messages=True, send_messages_in_threads=True,
@@ -146,6 +148,7 @@ class OperationChannels:
         self._renames: dict[int, asyncio.Task] = {}
         self._drawing: dict[int, asyncio.Lock] = {}  # one redraw per operation at a time
         self._overwrites_due: set[int] = set()  # organisers changed (or a restart): the overwrites follow
+        self._check_due: set[int] = set()  # a restart: the channel read for messages deleted meanwhile
         # What else follows an operation's changes (the offers' DMs, the moderation thread): objects with
         # ``async changed(op)`` and ``async gone(op_id)``, told after the operation is kept.
         self.watchers: list[Any] = []
@@ -323,7 +326,8 @@ class OperationChannels:
             await self.scheduler.schedule(DRAW_KIND, self.clock() + RETRY, key=f"{DRAW_KIND}:{op_id}",
                                           operation_id=op_id)
             return
-        await self._messages(row, channel, files)
+        if not await self._messages(row, channel, files):
+            return
         row = await self.row(op_id)
         if op["status"] == "published" and not row.thread_id:
             await self._open_thread(row, channel)
@@ -343,7 +347,7 @@ class OperationChannels:
                                                   overwrites=self._overwrites(guild, op),
                                                   topic=render.topic(op, self.store.current.tz))
         await self._save(row.operation_id, channel_id=channel.id, category_id=channel.category_id, thread_id=None,
-                         messages={}, attached={})
+                         messages={}, attached={}, drawn={})
         if self.meta:  # (else the staff roles join once the feed has read them)
             self._overwrites_due.discard(row.operation_id)
         self._warn_room()
@@ -381,7 +385,8 @@ class OperationChannels:
                     await asyncio.to_thread(_remove_tree, old)
         return found
 
-    async def _messages(self, row: OperationChannel, channel: Any, files: dict[str, Path]) -> None:
+    async def _messages(self, row: OperationChannel, channel: Any, files: dict[str, Path]) -> bool:
+        """The channel's messages redrawn; False when Discord held it back (a rate limit), tried again later."""
         ctx = render.Context(self.language, self.clock(), files, row.thread_id)
         messages = render.messages(row.operation, ctx)
         if row.operation["status"] in render.OPEN:  # the organisers' panel under the info
@@ -394,13 +399,65 @@ class OperationChannels:
         attached = dict(row.attached or {})
         for key, message in messages.items():  # upload a file again only when it changed
             message.replace_files = bool(message.files) and attached.get(key) != message.tag
+        stored, drawn = {k: int(v) for k, v in (row.messages or {}).items()}, dict(row.drawn or {})
+        if row.operation_id in self._check_due:  # after a restart: what was deleted meanwhile is posted again
+            self._check_due.discard(row.operation_id)
+            await self._check(channel, stored, drawn)
         try:
-            stored = await sync.apply(channel, {k: int(v) for k, v in (row.messages or {}).items()}, messages)
+            stored, drawn = await sync.apply(channel, stored, messages, drawn)
         except sync.Partial as exc:  # what was sent is kept, so the next redraw edits it rather than sending again
-            await self._save(row.operation_id, messages=exc.stored)
-            raise exc.__cause__ from None
+            await self._save(row.operation_id, messages=exc.stored, drawn=exc.drawn)
+            cause = exc.__cause__
+            if isinstance(cause, discord.HTTPException) and cause.status == 429:  # (30046: edits of old messages)
+                log.warning("Discord holds back the redraw of OP-%s (%s): drawn again in %d minutes", row.operation_id,
+                            cause.text or cause, RATE_RETRY.seconds // 60)
+                await self.scheduler.schedule(DRAW_KIND, self.clock() + RATE_RETRY, key=f"{DRAW_KIND}:{row.operation_id}",
+                                              operation_id=row.operation_id)
+                return False
+            raise cause from None
         tags = {key: message.tag for key, message in messages.items() if message.files}
-        await self._save(row.operation_id, messages=stored, attached=tags)
+        await self._save(row.operation_id, messages=stored, attached=tags, drawn=drawn)
+        return True
+
+    async def _check(self, channel: Any, stored: dict[str, int], drawn: dict[str, str]) -> None:
+        """Forget what the channel's stored messages show where Discord no longer has them (deleted while the bot
+        was away): their edit then finds them gone and posts them again. The card is forgotten outright (the link
+        follows)."""
+        try:
+            there = {message.id async for message in channel.history(limit=100)}
+        except discord.HTTPException as exc:
+            log.warning("Reading #%s to find deleted messages failed: %s", channel.name, exc)
+            return
+        for key in [key for key, message_id in stored.items() if message_id not in there]:
+            drawn.pop(key, None)
+            if key == sync.CARD:
+                del stored[key]
+
+    async def message_deleted(self, channel_id: int, message_ids: set[int]) -> None:
+        """Messages deleted on Discord (``on_raw_message_delete``). One of the bot's in an operation channel, deleted
+        by hand, is posted again (with what follows it); a deleted announcement is sent again. The bot's own
+        deletions are already forgotten by the time the lock is free."""
+        async with self.db.session() as session:
+            found = (await session.execute(select(OperationChannel.operation_id).where(
+                (OperationChannel.channel_id == channel_id)
+                | OperationChannel.announcement_id.in_(message_ids)))).scalars().all()
+        for op_id in found:
+            async with self._lock(op_id):
+                row = await self.row(op_id)
+                if row is None:
+                    continue
+                messages, drawn = dict(row.messages or {}), dict(row.drawn or {})
+                gone = [key for key, value in messages.items() if row.channel_id == channel_id and int(value) in message_ids]
+                if row.announcement_id in message_ids:
+                    gone.append(ANNOUNCEMENT)
+                if not gone:
+                    continue
+                for key in gone:
+                    drawn.pop(key, None)
+                    if key == sync.CARD:  # Discord can't post it again: the link instead
+                        del messages[key]
+                await self._save(op_id, messages=messages, drawn=drawn)
+            self.redrawer.request(op_id)
 
     async def _open_thread(self, row: OperationChannel, channel: Any) -> None:
         """The discussion thread, made after the messages: Discord's "started a thread" card is last and stands in
@@ -455,11 +512,18 @@ class OperationChannels:
         if channel is None:
             return
         message = render.announcement(op, self.language, row.channel_id)
+        shown = sync.fingerprint(render.Message(embeds=message.embeds))
+        drawn = dict(row.drawn or {})
         if row.announcement_id:
+            if drawn.get(ANNOUNCEMENT) == shown:  # unchanged: Discord limits edits of old messages
+                return
             try:
                 await channel.get_partial_message(row.announcement_id).edit(embeds=message.embeds)
             except discord.NotFound:
-                await self._save(row.operation_id, announcement_id=None)
+                drawn.pop(ANNOUNCEMENT, None)
+                await self._save(row.operation_id, announcement_id=None, drawn=drawn)
+                return
+            await self._save(row.operation_id, drawn={**drawn, ANNOUNCEMENT: shown})
             return
         if op["status"] != "published":
             return
@@ -467,7 +531,7 @@ class OperationChannels:
         content = " ".join(f"<@&{r}>" for r in roles) or None
         sent = await channel.send(content=content, embeds=message.embeds, allowed_mentions=discord.AllowedMentions(
             roles=[discord.Object(r) for r in roles], users=False, everyone=False))
-        await self._save(row.operation_id, announcement_id=sent.id)
+        await self._save(row.operation_id, announcement_id=sent.id, drawn={**drawn, ANNOUNCEMENT: shown})
 
     def _roles(self, op: dict[str, Any]) -> list[int]:
         return [r for r in dict.fromkeys((self.ids().announcement, _id(op.get("climate_role_id")))) if r]
@@ -668,6 +732,7 @@ class OperationChannels:
                 OperationChannel.archived_at.is_(None), OperationChannel.exported_at.is_(None)))).scalars().all()
         for op_id in ids:
             self._overwrites_due.add(op_id)
+            self._check_due.add(op_id)
             self.redrawer.request(op_id)
 
 

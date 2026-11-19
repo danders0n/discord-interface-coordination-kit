@@ -71,6 +71,8 @@ class OperationChannel(Base):
     category_id: Mapped[int | None] = mapped_column(BigInteger)
     messages: Mapped[dict[str, Any]] = mapped_column(default=dict)
     attached: Mapped[dict[str, Any]] = mapped_column(default=dict)  # message key -> the files' tag last sent
+    # message key (and ``announcement``) -> what it shows, as sent (app/channel/sync.fingerprint): edited only on a change
+    drawn: Mapped[dict[str, Any]] = mapped_column(default=dict)
     announcement_id: Mapped[int | None] = mapped_column(BigInteger)
     operation: Mapped[dict[str, Any]] = mapped_column(default=dict)
     change_seq: Mapped[int] = mapped_column(Integer, default=0)

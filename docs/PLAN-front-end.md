@@ -362,7 +362,11 @@ drawing went in together: the kept channel code depended on the deleted `EventSe
   (`PUT .../discord` only when the URLs differ, so the echo stops there), the announcement, the rename to the
   supervisor's `channel_name`, then the actions (sign-up closing at the start, the sign-up ping, the archive at the
   end + `archive_hours`, or at once when cancelled). A tombstone deletes a draft's channel; an operation gone after
-  being published (a reset) is archived.
+  being published (a reset) is archived. A message (and the announcement) is edited only when its fingerprint
+  (content, embeds, buttons, files) differs from `operation_channel.drawn`: Discord caps edits of messages older than
+  an hour (30046), and editing all of them on every redraw used it up (2026-11-17). A deleted message's fingerprint
+  is dropped (`on_raw_message_delete`; after a restart, the channel's history is read), so the next redraw posts it
+  again. A redraw Discord rate-limits keeps what it got through and is tried again 15 minutes on (`draw_retry`).
 - **Render** (`app/channel/render.py`): the info embed from the JSON (`kind_name`, climate role or name, host and
   invited groups, author, times, sign-up state, the preset's mods and Creator DLC names, the mission), the OPORD as
   one message per written paragraph (`situation` ... `command`, each split past 2000 characters; nothing written: one
