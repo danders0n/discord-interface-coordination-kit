@@ -131,7 +131,7 @@ notice it starts in `notice_delivery` before acting, so a crash never sends a DM
 | `profile_failed`, `link_duplicate`, `link_request`, `roster_guard` | A staff-log note (a link request links to the app's confirmation screen). |
 | `login_link` | `POST /api/notices/{id}/claim` for the URL, then a DM; `failed` with `dm_closed` if Discord refuses, and the app shows staff the link. The URL is never logged. |
 | `erased` | Archived messages of that Discord id: author "deleted", content emptied, attachments deleted from disk; ids replaced by `former:<n>`. |
-| `activity` | One staff-log line, as `app/activity.py` wrote them (who, what, old → new), mentions silenced. |
+| `activity` | Staff-log lines: the supervisor sends what happened as data (`event`, `by`, fields, an English `text`), the bot words it in the config language as `app/activity.py` did (who, what, old → new), mentions silenced (`app/notices/activity.py`; *As built*, 2026-11-19). |
 
 ### Commands and buttons
 
@@ -443,7 +443,8 @@ templates, approval; its `State` gained `set_orbat`, `sign`, `free`, `request` f
 - **Pings** (`OperationChannels.ping`): the thread, mentions split at 2000 characters, a view on the first message; a
   draft (no thread): by DM; an archived thread (a cancelled operation, archived at once) is opened for the message and
   locked again.
-- **Notices:** `activity` (a staff-log line), `cancelled` and `slot_lost` (pings), `offer` (above);
+- **Notices:** `activity` (staff-log lines; worded by the bot since 2026-11-19, below), `cancelled` and `slot_lost`
+  (pings), `offer` (above);
   `approval_requested` / `proposal_requested`, `approval_decided` / `proposal_decided` and `stale_draft` in
   `app/approval/moderation.py` (`Moderation`, table `moderation_message`): the request embed in the moderation thread
   (kind, who asked, the channel, the date or the old and new times, *Blocked* with the supervisor's reason and Approve
@@ -562,6 +563,27 @@ The first half of this plan's phase 6.
   `offers`, `orbat_templates`, `approval`, `operation_attendance`, `ratings`, `reports`, `erasure`), so a supervisor
   without them holds the bot's supervisor work back with the reason instead of refusing calls one by one.
   `API_LEVEL` stays 2 (the supervisor's phases 4 and 5 only added routes).
+
+### The staff log: every operation change (2026-11-19)
+
+A Zeus operation created on the test server left nothing in the staff log: the supervisor sent `activity` notices
+only for sign-ups, attendance and links, none for creating, editing, publishing or cancelling. Decided with the owner:
+everything a person does to an operation is logged (on Discord or in the app), plus the supervisor's own steps (sign-up
+opened / closed, the server profile built, an end when the time ran out); and **the bot words the lines** again, in
+the config language, as `master`'s `app/activity.py` did.
+
+- **The notice:** `data` has `event`, `by` (a person `{name, discord_id}`, null for the supervisor), `key`, `title`
+  and the event's fields; `text` is the same line in English. The supervisor writes it in its
+  `app/operations/activity.py` (36 events: `operation.*`, `orbat.*`, `slot.*`, `signup.*`, `offer.*`,
+  `attendance.*`, `link.removed`, `account.renamed`; capability `activity_events`, not required).
+- **The bot:** `app/notices/activity.py` (`describe`, no discord.py): one line per change, starting with the notice's
+  time, persons as mentions or `@name`, the operation as `**title** (<#channel>)`, times as Discord timestamps, kinds
+  by `meta`'s names. An unknown event or a missing field posts the supervisor's `text`, so neither side waits for the
+  other (no `API_LEVEL` change).
+- Left out: approvals and rejections (the moderation thread's decision note says them), window begun / ended (the
+  supervisor's webhook), templates, climates and groups.
+- The panel's *End* no longer posts its own line: the supervisor's `operation.ended` says it, also for an end in the
+  app.
 
 ### Next
 

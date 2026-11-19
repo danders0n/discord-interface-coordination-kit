@@ -15,6 +15,7 @@ import discord
 
 from app.channel import render
 from app.i18n import t
+from app.notices.activity import describe
 from app.notices.service import Later, Notices, Outcome, delivered, failed
 from app.privacy.erase import erase
 from app.supervisor_client import SupervisorError, SupervisorUnreachable
@@ -115,8 +116,17 @@ class Delivery:
         return delivered()
 
     async def activity(self, notice: dict[str, Any]) -> Outcome:
-        """One staff-log line of what changed (who, what, old -> new), as the supervisor wrote it; no mentions."""
-        text = str((notice.get("data") or {}).get("text") or "").strip()
+        """Staff-log lines of what changed (app/notices/activity.py), in the config language with the operation's
+        channel; the staff log silences the mentions."""
+        channel_id = None
+        if notice.get("operation_id") is not None and self.s.channels is not None:
+            row = await self.s.channels.row(int(notice["operation_id"]))
+            channel_id = row.channel_id if row is not None else None
+        kinds = {k["id"]: k.get("name") or k["id"] for k in (self.s.channels.meta.get("kinds") or [])} \
+            if self.s.channels is not None else {}
+        created = notice.get("created_at")
+        text = describe(notice.get("data") or {}, self.language, channel_id=channel_id, kinds=kinds,
+                        at=datetime.fromisoformat(created) if created else None)
         if text:
             self.s.staff.post(text[:1900])
         return delivered()

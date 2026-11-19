@@ -588,9 +588,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         """After the start: the operation ends now and the attendance is read shortly after."""
         await thinking(interaction)
         s = services(interaction)
-        await act(interaction, lambda me: s.supervisor.end_operation(me, op["id"]))
-        s.staff.post(t("{member} ended {title}.", s.settings.language, member=interaction.user.mention,
-                       title=render.plain(op["title"])))
+        await act(interaction, lambda me: s.supervisor.end_operation(me, op["id"]))  # (the staff log: its notice)
         await reply(interaction, t("The operation has ended; the attendance report follows shortly.",
                                    interaction.locale))
 

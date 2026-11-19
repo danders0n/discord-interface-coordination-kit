@@ -99,8 +99,7 @@ async def test_end_operation_in_the_panel_after_the_start(organise, guild, fake,
     assert said(done) == "The operation has ended; the attendance report follows shortly."
     assert fake.operations[op["id"]]["status"] == "ended"
     await asyncio.sleep(0)  # (the staff log queues on the next tick)
-    notes = organise.staff.drain()
-    assert any("zakończył(a) operację Ibis" in note for note in notes)
+    assert organise.staff.drain() == []  # (the supervisor's operation.ended notice says it, also for an end in the app)
 
 
 async def test_attendance_unconfirmed_and_profile_failed_notices(organise, guild, fake, clock):

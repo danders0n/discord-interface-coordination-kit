@@ -255,15 +255,22 @@ async def test_cancelled_slot_lost_and_activity_notices(front, guild, fake):
     fake.sign(op["id"], 1, slot_id=ids["Bravo/Medic"])
     await run(front)
     fake.set_orbat(op["id"], "# Alpha\nLead")  # the Medic is gone: Anna first on the reserve list
-    fake.notice("activity", operation_id=op["id"], data={"text": "OP-1 Ibis: @anna took Alpha / Lead"})
+    fake.notice("activity", operation_id=op["id"], data={"text": "OP-1 Ibis: @anna took Alpha / Lead"})  # (an older supervisor)
+    fake.notice("activity", operation_id=op["id"], data={
+        "event": "slot.took", "key": "OP-1", "title": "Ibis", "by": {"name": "anna", "discord_id": "1"},
+        "person": {"name": "anna", "discord_id": "1"}, "slot": "Alpha / Lead", "from_slot": None, "from_offer": False,
+        "text": "OP-1 Ibis: @anna took Alpha / Lead"})
     fake.notice("cancelled", operation_id=op["id"], persons=[1], data={"title": "Ibis", "reason": "Rain"})
     await run(front)
     await front.notices.run_once()
-    thread = guild.get_thread((await row(front, op["id"])).thread_id)
+    channel_row = await row(front, op["id"])
+    thread = guild.get_thread(channel_row.thread_id)
     pings = [m.text for m in thread.sent]
     assert "Twój slot w Ibis zniknął z ORBAT-u; jesteś pierwszy na liście rezerwowej. <@1>" in pings
     assert "Ibis została odwołana. Powód: Rain <@1>" in pings
-    assert "OP-1 Ibis: @anna took Alpha / Lead" in front.staff.drain()
+    staff = front.staff.drain()  # (each line starts with the time it happened)
+    assert [s.partition(" ")[2] for s in staff] == [
+        "OP-1 Ibis: @anna took Alpha / Lead", f"<@1> zajmuje Alpha / Lead w **Ibis** (<#{channel_row.channel_id}>)."]
 
 
 async def test_a_cancelled_operations_ping_reaches_its_archived_thread(front, guild, fake):
