@@ -43,7 +43,7 @@ except ImportError:  # run as python -m tests.fake_supervisor
 TOKEN = "test-token"
 ALL = ["events_stream", "heartbeat", "members", "act_as", "notices", "steam_links", "operations", "operation_feed",
        "operation_files", "orbat", "signups", "offers", "orbat_templates", "approval", "operation_attendance",
-       "ratings", "reports", "erasure", "heartbeat_state"]
+       "ratings", "reports", "erasure", "heartbeat_state", "system_events"]
 TZ = ZoneInfo("Europe/Warsaw")
 KINDS = ("internal", "guest", "hosted", "zeus", "training")
 COMING = ("zeus", "training")
@@ -134,6 +134,8 @@ class State:
     acted: list[tuple[str, str, str]] = field(default_factory=list)
     streams: list[asyncio.Queue] = field(default_factory=list)
     stream_gap: bool = False  # what the next hello says
+    boot: str = "fake"  # the hello's boot: a new one after a restart
+    commit: str = "5edb7e8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"  # the build in /api/system/info
     down: bool = False  # True: every route answers 503 (a supervisor that is restarting)
     # Operations: stored as the fields the real one keeps (times as aware datetimes), drawn by ``out()``; the feed's
     # counter, the tombstones (seq, id, title, deleted_at) and the highest pruned seq; files by (operation, name).
@@ -675,7 +677,7 @@ def make_app(state: State | None = None) -> web.Application:
     async def system_info(_request: web.Request) -> web.Response:
         if not state.has_system_info:
             return _error(404, "Not Found")
-        return web.json_response({"version": {"version": "fake"}, "api_level": state.api_level,
+        return web.json_response({"version": {"version": "fake", "commit": state.commit}, "api_level": state.api_level,
                                   "timezone": state.timezone, "utc_offset": state.utc_offset,
                                   "capabilities": state.capabilities})
 
@@ -821,7 +823,7 @@ def make_app(state: State | None = None) -> web.Application:
         state.streams.append(queue)
         kinds = set(request.query.get("kinds", "").split(",")) - {""}
         try:
-            hello = {"boot": "fake", "gap": state.stream_gap, "replayed": 0, "kinds": sorted(kinds)}
+            hello = {"boot": state.boot, "gap": state.stream_gap, "replayed": 0, "kinds": sorted(kinds)}
             state.stream_gap = False
             await response.write(f"event: hello\ndata: {json.dumps(hello)}\n\n".encode())
             while (item := await queue.get()) is not None:

@@ -29,6 +29,7 @@ from app.links.cog import LinkCog
 from app.links.service import LinkService
 from app.links.ui import LinkNow
 from app.links.watch import LinkWatch
+from app.health import SupervisorHealth
 from app.live import Live
 from app.notices.deliver import Delivery
 from app.notices.service import Notices
@@ -45,6 +46,7 @@ from app.signup.cog import SlotCog
 from app.signup.offers import Offers
 from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.staff_threads import KINDS
+from app.supervisor_client import SupervisorUnreachable
 from app.update.cog import UpdateButton, UpdateCog
 from app.update.service import Updater
 
@@ -103,7 +105,8 @@ class EventBot(commands.Bot):
         scheduler = self.services.scheduler
         return {"discord": self.is_ready() and not self.is_closed(), "guild": self.guild() is not None,
                 "scheduler": "held" if scheduler.held else "busy" if scheduler.running is not None else "idle",
-                "scheduler_started": any(task.get_name() == "scheduler" for task in self._tasks)}
+                "scheduler_started": any(task.get_name() == "scheduler" for task in self._tasks),
+                "supervisor": self.services.health.state if self.services.health is not None else None}
 
     @property
     def guild_object(self) -> discord.Object:
@@ -137,8 +140,20 @@ class EventBot(commands.Bot):
         s.moderation = Moderation(s, self.guild)
         Delivery(s, self.guild).install(s.notices, s.offers, s.moderation)
         s.channels.watchers += [s.offers, s.moderation]  # (offers closed, requests drawn as the feed changes them)
+        s.health = SupervisorHealth(s.supervisor, s.staff.post, lambda: s.settings.language, s.scheduler.clock,
+                                    check=self.supervisor_problems)
         s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake(),
-                                     "operation": lambda _event: s.feed.wake()})
+                                     "operation": lambda _event: s.feed.wake(),
+                                     "system": lambda event: s.health.system(event.data.get("data") or {})},
+                      on_hello=s.health.hello)
+
+    async def supervisor_problems(self) -> tuple[str, ...]:
+        """The supervisor check again, after the supervisor restarted (app/health.py): what blocks the bot's work."""
+        s = self.services
+        verdict = await supervisor_check.check(s.supervisor, s.settings.tz, s.settings.language, s.scheduler.clock())
+        if verdict.unreachable:
+            raise SupervisorUnreachable("The supervisor went away during its check")
+        return verdict.blocking
 
     def roster_members(self) -> list[RosterMember] | None:
         """The guild's people for the roster push; None until Discord has sent the member list."""
@@ -236,6 +251,7 @@ class EventBot(commands.Bot):
             asyncio.create_task(self.services.staff.run(self._send_staff), name="staff-log"),
             asyncio.create_task(heartbeat.run(self.services.supervisor, lambda: self.version, self.health),
                                 name="heartbeat"),
+            asyncio.create_task(self.services.health.run(), name="supervisor-health"),
         ]
 
     def start_scheduler(self) -> None:

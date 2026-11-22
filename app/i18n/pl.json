@@ -689,5 +689,12 @@
   "Also restore the database from before that update (what happened since is lost)": "Przywróć też bazę danych sprzed tamtej aktualizacji (to, co zdarzyło się potem, przepadnie)",
   "The bot restarts now; the scheduled action runs again after the restart.": "Bot uruchamia się teraz ponownie; zaplanowana akcja wykona się ponownie po restarcie.",
   "Updating…": "Aktualizacja…",
-  "Restarting…": "Ponowne uruchamianie…"
+  "Restarting…": "Ponowne uruchamianie…",
+  "The supervisor is restarting for an update to {commit}; the bot waits for it.": "Supervisor uruchamia się ponownie po aktualizacji do {commit}; bot na niego czeka.",
+  "The supervisor is restarting; the bot waits for it.": "Supervisor uruchamia się ponownie; bot na niego czeka.",
+  "The supervisor is back on {commit}.": "Supervisor wrócił w wersji {commit}.",
+  "The supervisor is back.": "Supervisor wrócił.",
+  "The supervisor has not come back from its update for {minutes} min.": "Supervisor nie wrócił po aktualizacji od {minutes} min.",
+  "The app is updating and should be back in about {minutes} min. Try again then.": "Aplikacja się aktualizuje i powinna wrócić za około {minutes} min. Spróbuj wtedy ponownie.",
+  "The app is updating and should be back any moment. Try again in a minute.": "Aplikacja się aktualizuje i powinna wrócić lada chwila. Spróbuj ponownie za minutę."
 }

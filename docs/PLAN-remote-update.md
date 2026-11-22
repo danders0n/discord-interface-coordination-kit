@@ -1,8 +1,8 @@
 # Plan: updating the bot from Discord, and the two apps watching each other
 
-Status: steps 1-3 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
+Status: steps 1-4 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
 `tests/test_update.py`; the heartbeat's state and health, `tests/test_supervisor_client.py`, against the supervisor's
-part, built on its `feature/discord-roles` branch); steps 4-7 next. Written 2026-11-22 from a
+part, built on its `feature/discord-roles` branch; the supervisor's health, `tests/test_health.py`); steps 5-7 next. Written 2026-11-22 from a
 short design interview with the owner. The supervisor's part is its `docs/PLAN-bot-health.md`; the two are built and
 deployed separately (*Order of release*). See *As built* at the end for where the code departs from this plan.
 
@@ -354,6 +354,24 @@ Step 3 (2026-11-22):
   before the presence); `stopping` from `EventBot.close()` unless a restart was asked for.
 - **Health:** `discord` (ready and not closed), `guild`, `scheduler` (`idle` / `busy` / `held`),
   `scheduler_started`. The queue and the supervisor as the bot sees it join in steps 4 and 5.
+
+Step 4 (2026-11-22):
+
+- **The poll is `GET /api/system/info`, not `/api/version`**: it is in the contract already (no supervisor change),
+  and an answer also refreshes the capabilities. The restart itself shows in the stream's `hello` (a new `boot`).
+- **Every call is a signal** (`SupervisorClient.on_call`, set by the health): an answer is `up` again, no answer or a
+  502 / 503 / 504 is `down` (an announced update stays `updating`). `SupervisorUnreachable.sent` is False for a refused
+  connection only (`aiohttp.ClientConnectorError`): never reached the supervisor, safe to queue in step 5.
+- **The check before `up`** runs when the supervisor announced a restart or came back with a new `boot`
+  (`EventBot.supervisor_problems`, the start-up check's `check()` again). Problems: `blocked`, the staff log hears
+  them, and it is checked every 10 s until it passes (*The supervisor is ready*). The workers started at start-up are
+  not stopped while blocked; the queue (step 5) waits for `up`.
+- **Overstayed:** 10 minutes past the announced time, one staff-log line and `down`; its return is told too.
+- **`system` is asked for only with the `system_events` capability** (`live.OPTIONAL`): an older supervisor refuses an
+  unknown kind with 422. A `gap` does not wake the `system` listener.
+- **Members' words:** `supervisor_words` takes the health: while `updating`, *The app is updating and should be back
+  in about N min* (or *any moment* once the time passed).
+- The heartbeat's `health` gains `supervisor` (the state).
 
 ## Out of scope
 

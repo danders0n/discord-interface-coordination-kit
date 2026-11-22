@@ -99,12 +99,13 @@ async def test_setup_registers_the_guild_commands_and_starts_the_tasks(services,
                                                      app_commands.TranslationContext(
                                                          app_commands.TranslationContextLocation.command_name, None))
     assert translated == "prywatność"
-    assert {t.get_name() for t in bot._tasks} == {"staff-log", "heartbeat"}  # the scheduler waits for on_ready
+    # the scheduler waits for on_ready
+    assert {t.get_name() for t in bot._tasks} == {"staff-log", "heartbeat", "supervisor-health"}
     links = next(c for c in bot.tree.get_commands(guild=bot.guild_object) if c.name == "links")
     assert {c.name for c in links.commands} == {"remind", "reminders"}  # the rest is the app's
     bot.start_scheduler()
     bot.start_scheduler()  # (a second call starts no second loop)
-    assert sorted(t.get_name() for t in bot._tasks) == ["heartbeat", "scheduler", "staff-log"]
+    assert sorted(t.get_name() for t in bot._tasks) == ["heartbeat", "scheduler", "staff-log", "supervisor-health"]
     for task in bot._tasks:
         task.cancel()
     await bot.http.close()

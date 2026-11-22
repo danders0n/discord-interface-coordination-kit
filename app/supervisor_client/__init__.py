@@ -41,8 +41,16 @@ class SupervisorError(Exception):
 
 
 class SupervisorUnreachable(SupervisorError):
-    def __init__(self, message: str) -> None:
+    """No answer. ``sent``: False when the request never reached the supervisor (a refused connection: safe to send
+    again later), None when it may have (a timeout, a connection cut while waiting)."""
+
+    def __init__(self, message: str, sent: bool | None = None) -> None:
         super().__init__(0, message)
+        self.sent = sent
+
+
+# Answers of a supervisor that is not there (a proxy, a restart): nothing was done.
+DOWN_STATUSES = (502, 503, 504)
 
 
 @dataclass
@@ -64,6 +72,24 @@ class SupervisorClient:
         self._session = session
         self.info = SystemInfo()
         self._info_read = False
+        # Told of every call's outcome (app/health.py): (HTTP status, None) for an answer, (None, sent) for none.
+        self.on_call: Any = None
+
+    def _seen(self, status: int | None, sent: bool | None = None) -> None:
+        if self.on_call is not None:
+            try:
+                self.on_call(status, sent)
+            except Exception:  # noqa: BLE001 - an observer must not break a call
+                pass
+
+    def _unreachable(self, exc: BaseException, what: str = "could not be reached") -> SupervisorUnreachable:
+        """The error for a call that got no answer, told to the observer."""
+        if isinstance(exc, TimeoutError):
+            self._seen(None, None)
+            return SupervisorUnreachable(f"The supervisor at {self.url} did not answer in time", None)
+        sent = False if isinstance(exc, aiohttp.ClientConnectorError) else None
+        self._seen(None, sent)
+        return SupervisorUnreachable(f"The supervisor at {self.url} {what}: {exc}", sent)
 
     async def _http(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -89,6 +115,7 @@ class SupervisorClient:
         try:
             async with session.request(method, f"{self.url}{path}", **kwargs) as response:
                 text = await response.text()
+                self._seen(response.status)
                 try:
                     body = json.loads(text) if text else None
                 except ValueError:
@@ -96,10 +123,8 @@ class SupervisorClient:
                 if response.status >= 400:
                     raise SupervisorError(response.status, _message(body, response.reason), body)
                 return body
-        except aiohttp.ClientError as exc:
-            raise SupervisorUnreachable(f"The supervisor at {self.url} could not be reached: {exc}") from exc
-        except TimeoutError as exc:
-            raise SupervisorUnreachable(f"The supervisor at {self.url} did not answer in time") from exc
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise self._unreachable(exc) from exc
 
     async def refresh_info(self) -> SystemInfo:
         """Read what this supervisor offers; an older one without the route offers nothing new."""
@@ -192,6 +217,7 @@ class SupervisorClient:
         try:
             async with session.get(f"{self.url}/api/events/stream", params=params, headers=self._headers(None),
                                    timeout=STREAM_TIMEOUT) as response:
+                self._seen(response.status)
                 if response.status >= 400:
                     text = await response.text()
                     try:
@@ -205,8 +231,11 @@ class SupervisorClient:
                     if event is not None:
                         yield event
         except aiohttp.ClientError as exc:
-            raise SupervisorUnreachable(f"The supervisor's live events at {self.url} broke off: {exc}") from exc
+            sent = False if isinstance(exc, aiohttp.ClientConnectorError) else None
+            self._seen(None, sent)
+            raise SupervisorUnreachable(f"The supervisor's live events at {self.url} broke off: {exc}", sent) from exc
         except TimeoutError as exc:
+            self._seen(None, None)
             raise SupervisorUnreachable(f"The supervisor's live events at {self.url} fell silent") from exc
 
     # ---------------------------------------------------------------- operations (docs/PLAN-front-end.md)
@@ -232,6 +261,7 @@ class SupervisorClient:
         url = f"{self.url}/api/operations/{int(op_id)}/files/{_segment(name)}"
         try:
             async with session.get(url, headers=self._headers(None), timeout=UPLOAD_TIMEOUT) as response:
+                self._seen(response.status)
                 if response.status >= 400:
                     text = await response.text()
                     try:
@@ -240,10 +270,8 @@ class SupervisorClient:
                         body = text
                     raise SupervisorError(response.status, _message(body, response.reason), body)
                 return await response.read()
-        except aiohttp.ClientError as exc:
-            raise SupervisorUnreachable(f"The supervisor at {self.url} could not be reached: {exc}") from exc
-        except TimeoutError as exc:
-            raise SupervisorUnreachable(f"The supervisor at {self.url} did not answer in time") from exc
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise self._unreachable(exc) from exc
 
     async def set_operation_discord(self, op_id: int, **plumbing: str | None) -> dict[str, Any]:
         """The bot's plumbing (``channel_url``, ``thread_url``): fields left out stay, None clears one."""

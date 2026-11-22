@@ -84,10 +84,17 @@ async def finish(interaction: discord.Interaction, content: str) -> None:
         await message.delete(delay=seconds)
 
 
-def supervisor_words(error: SupervisorError, locale: Any) -> str:
+def supervisor_words(error: SupervisorError, locale: Any, health: Any = None) -> str:
     """A refusal of the supervisor for the member (docs/PLAN-front-end.md, *Acting for members*): the codes the bot
-    knows in the member's language, the supervisor's own message otherwise."""
+    knows in the member's language, the supervisor's own message otherwise. ``health`` (app/health.py): while the
+    supervisor updates, say so."""
     if isinstance(error, SupervisorUnreachable) or error.status >= 500:
+        left = health.minutes_left() if health is not None else None
+        if left:
+            return t("The app is updating and should be back in about {minutes} min. Try again then.", locale,
+                     minutes=left)
+        if left == 0:
+            return t("The app is updating and should be back any moment. Try again in a minute.", locale)
         return t("The app can't be reached right now. Try again in a few minutes.", locale)
     known = {
         "unknown_person": t("You are not on the app's member list yet. Try again in a minute.", locale),
@@ -107,7 +114,7 @@ async def _sorry(interaction: discord.Interaction, error: Exception, where: str)
     if isinstance(error, SupervisorError):  # a refusal or a supervisor that is down: words, not an ERROR
         log.log(logging.WARNING if isinstance(error, SupervisorUnreachable) else logging.INFO,
                 "%s by %s: the supervisor answered %s: %s", where, who(interaction), error.status, error.message)
-        text = supervisor_words(error, interaction.locale)
+        text = supervisor_words(error, interaction.locale, getattr(services(interaction), "health", None))
     else:
         log.error("%s by %s failed: %s", where, who(interaction), error, exc_info=error)
         text = t("Something went wrong. Staff can find the details in the log.", interaction.locale)
