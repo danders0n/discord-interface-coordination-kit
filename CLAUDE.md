@@ -78,6 +78,8 @@ exactly the settings.
 - `app/scheduler.py`: `scheduled_action` rows; handlers return the next due time or None.
 - `app/db/`: engine (WAL pragmas), models (`UtcDateTime`: aware UTC only), migrations, backup.
 - `app/logs.py`, `app/staff_log.py`: rotated file log, ERROR ids, the staff log queue (notes waiting together go out joined).
+  Records are written by a thread of their own (the loop only queues them: a stuck console must not freeze the
+  bot); asyncio's harmless `ConnectionResetError` on Windows becomes a WARNING line.
 - `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (act-as, the roster, notices, the stream, the
   operations' feed, `meta`, files and plumbing), capabilities, heartbeat loop.
 - Domains: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a

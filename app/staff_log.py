@@ -41,7 +41,10 @@ class StaffLog:
         """Queue a note; safe from any thread. When the queue is full, the oldest note is dropped."""
         if self._loop is None:
             return
-        self._loop.call_soon_threadsafe(self._put, text)
+        try:
+            self._loop.call_soon_threadsafe(self._put, text)
+        except RuntimeError:  # the loop has closed (the log's last records at exit)
+            pass
 
     def _put(self, text: str) -> None:
         if self._queue.full():

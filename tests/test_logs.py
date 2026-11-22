@@ -1,6 +1,10 @@
 import asyncio
+import io
 import logging
 import re
+import sys
+import threading
+import time
 
 import pytest
 
@@ -13,6 +17,7 @@ def restore_logging():
     root = logging.getLogger()
     handlers, level, factory = list(root.handlers), root.level, logging.getLogRecordFactory()
     yield
+    logs.stop()
     for handler in list(root.handlers):
         handler.close()
         root.removeHandler(handler)
@@ -29,16 +34,51 @@ async def test_an_error_has_one_id_in_the_file_and_the_staff_log(tmp_path, resto
     logging.getLogger("app.events").error("Reservation failed: 409 overlap\nmore detail")
     logging.getLogger("app.events").warning("only a warning")
     logging.getLogger("app.staff_log").error("could not post")  # never sent back to the staff log
+    logs.stop()  # (the writer thread has written everything)
     await asyncio.sleep(0)
     posted = staff.drain()
     assert len(posted) == 1
     error_id = re.search(r"`([0-9a-f]{8})`", posted[0]).group(1)
     assert "app.events" in posted[0] and "more detail" not in posted[0]
-    for handler in logging.getLogger().handlers:
-        handler.flush()
     content = (tmp_path / "logs" / "bot.log").read_text(encoding="utf-8")
-    assert f"[{error_id}] Reservation failed" in content
+    assert f"[{error_id}] Reservation failed" in content and "more detail" in content
     assert "[-] only a warning" in content
+
+
+async def test_a_stuck_console_never_holds_the_loop(tmp_path, restore_logging, monkeypatch):
+    """A console window with text selected in it holds every write: the loop only queues records."""
+    release = threading.Event()
+
+    class Stuck(io.StringIO):
+        def write(self, text):
+            release.wait(5)
+            return super().write(text)
+
+    monkeypatch.setattr(sys, "stdout", Stuck())
+    logs.setup(tmp_path, 14)
+    began = time.monotonic()
+    for n in range(50):
+        logging.getLogger("app.events").info("line %d", n)
+    assert time.monotonic() - began < 1
+    release.set()
+    logs.stop()
+    assert "line 49" in (tmp_path / "logs" / "bot.log").read_text(encoding="utf-8")
+
+
+async def test_a_connection_reset_in_asyncio_is_a_warning(tmp_path, restore_logging):
+    staff = StaffLog()
+    staff.bind(asyncio.get_running_loop())
+    logs.setup(tmp_path, 14, staff, lambda: "en")
+    try:
+        raise ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+    except ConnectionResetError:
+        logging.getLogger("asyncio").exception("Exception in callback _call_connection_lost(None)")
+    logs.stop()
+    await asyncio.sleep(0)
+    assert staff.drain() == []
+    content = (tmp_path / "logs" / "bot.log").read_text(encoding="utf-8")
+    assert "WARNING asyncio [-] A connection was reset by the other side" in content
+    assert "Traceback" not in content
 
 
 async def test_the_staff_log_drops_the_oldest_when_full():
