@@ -1,6 +1,7 @@
 # Plan: updating the bot from Discord, and the two apps watching each other
 
-Status: step 1 built (the boot step, the restart, `tests/test_boot.py`); steps 2-7 next. Written 2026-11-22 from a
+Status: steps 1-2 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
+`tests/test_update.py`); steps 3-7 next. Written 2026-11-22 from a
 short design interview with the owner. The supervisor's part is its `docs/PLAN-bot-health.md`; the two are built and
 deployed separately (*Order of release*). See *As built* at the end for where the code departs from this plan.
 
@@ -319,6 +320,26 @@ Step 1 (2026-11-22):
   step gives up, which then starts the bot as it is.
 - **Closing for a restart:** `cli.run` installs `restarter.set_exit_handler`, which schedules `EventBot.close()` on
   the loop (thread-safe); `bot.start` returns, `asyncio.run` ends, and `cli.main` exits with 75.
+
+Step 2 (2026-11-22):
+
+- **The branch:** `BOT_UPDATE__BRANCH` empty (the default) follows the branch checked out, so an install on
+  `feature/front-end` is never reset to `master` by surprise; a detached checkout must name one.
+- **A rollback of an update with new migrations puts the database from before it back** (`app/boot.py`, the same
+  step as a restored go back's): the new code may have migrated before failing, and the older one can't open that.
+  The marker's `backup` is always the database from before the marker's change.
+- **Only the scheduler is held** (`Scheduler.hold()` / `release()`, `running`). The feed and the notices worker are
+  not: drawing converges after a restart, and a notice cut off between its `notice_delivery` row and its message is
+  the at-most-once rule's known loss (a window of milliseconds). `now` / *Restart now* leaves the running action to
+  the exit's task cancellation; never marked done, it runs again after the restart.
+- **Refusals are codes** (`UpdateError.code`), worded by `app/update/cog.py`; git's message is `detail`, token removed.
+  `bad_env`: the `.env` on disk must load as it is, or the bot would not come back.
+- **No confirm buttons:** `/update restart` goes at once; `/update back` restores the database only with the
+  explicit `restore_db` option, and refuses without it when the migrations differ (`needs_restore`).
+- **Announcing:** `Updater.announce` (set by `EventBot`) sets the presence *Updating…* / *Restarting…*; the heartbeat
+  joins it in step 3. Then `StaffLog.flush()` (which returns at once when no staff-log task runs) and the exit.
+- **The start-up report** runs in `on_ready` right after `boot.ready()`, so a rolled-back or given-up update is told
+  by the version that came up.
 
 ## Out of scope
 

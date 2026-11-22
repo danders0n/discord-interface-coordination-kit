@@ -318,6 +318,35 @@ def test_the_history_line_says_the_database_was_put_back(go_back, tmp_path):
     assert (line["outcome"], line["db_restored"], line["db_rolled_back"]) == ("rolled_back", True, True)
 
 
+def test_a_rolled_back_update_with_new_migrations_puts_the_database_back(repo, tmp_path):
+    """The new code may have migrated the database before it failed: the older code can't open that one."""
+    root, first, second = repo
+    data = tmp_path / "data"
+    live = database(data / "bot.db", "migrated by the new code")
+    before = database(data / "updates" / "20261122-201500-aaaaaaa.db", "before the update")
+    data_dir = write_marker(root, tmp_path, first, second, state="applied", attempts=2, requirements=False,
+                            migrations=True, db_file=str(live), backup=str(before))
+    git(root, "reset", "-q", "--hard", second)
+    rec = Recorder()
+    assert rec.boot(root).prepare() == RESTART_CODE
+    assert git(root, "rev-parse", "HEAD") == first and value(live) == "before the update"
+    started = rec.boot(root, ready_timeout=30)
+    started.prepare()
+    started.ready()
+    [line] = history(data_dir)
+    assert (line["outcome"], line["db_rolled_back"]) == ("rolled_back", True)
+
+
+def test_a_rolled_back_update_without_migrations_keeps_the_database(repo, tmp_path):
+    root, first, second = repo
+    live = database(tmp_path / "data" / "bot.db", "live")
+    before = database(tmp_path / "data" / "updates" / "x.db", "before")
+    write_marker(root, tmp_path, first, second, state="applied", attempts=2, requirements=False, migrations=False,
+                 db_file=str(live), backup=str(before))
+    Recorder().boot(root).prepare()
+    assert value(live) == "live"
+
+
 def test_a_backup_that_is_not_a_database_is_not_restored(go_back):
     root, first, _, live = go_back
     marker = json.loads((root / ".app-update" / "pending.json").read_text())

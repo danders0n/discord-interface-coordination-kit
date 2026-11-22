@@ -103,6 +103,8 @@ def test_unknown_variables_are_found(tmp_path, monkeypatch):
     env = write(tmp_path, "BOT_CHANNELS__STAFF_LOG=7\nBOT_ROLES__MEMBER=1\n")  # (a removed setting is unknown too)
     monkeypatch.setenv("BOT_LANGAUGE", "pl")
     assert unknown_variables(env) == ["BOT_CHANNELS__STAFF_LOG", "BOT_LANGAUGE", "BOT_ROLES__MEMBER"]
+    monkeypatch.setenv("BOT_RESTARTER", "nssm")  # (the boot step's, set in the service's environment)
+    assert "BOT_RESTARTER" not in unknown_variables(env)
 
 
 def test_reload_with_errors_changes_nothing(tmp_path):

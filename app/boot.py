@@ -11,7 +11,7 @@ place, this module reads no settings) and exiting with ``RESTART_CODE``. Whateve
   and exit again: the new code needs a fresh interpreter (this module is the old one);
 - ``applied``: count the start and watch it; :func:`ready` (the end of the first ``on_ready``) closes the marker. A
   start that fails ``MAX_ATTEMPTS`` times goes back to ``from`` the same way (``rolling_back``, then
-  ``rolled_back_applied``), putting back the database a restore replaced;
+  ``rolled_back_applied``), putting back the database a restore replaced or new migrations may have changed;
 - ``gave_up``: the old commit fails too; the bot is started as it is and nothing more is tried.
 
 What happened goes to ``.app-update/boot.log`` and, one line per update, to ``<data_dir>/updates/history.jsonl``,
@@ -183,8 +183,11 @@ class Boot:
         if error is None:
             if forward and marker.get("restore_db"):
                 marker["db_error"] = self._restore_db(marker)
-            elif not forward and marker.get("db_restored") and not marker.get("db_rolled_back"):
-                self._undo_restore(marker)  # the newer code goes back onto the database it ran on
+            elif not forward and (marker.get("db_restored") or marker.get("migrations")) \
+                    and not marker.get("db_rolled_back"):
+                # The code goes back onto the database it ran on: the one a restore replaced, or the one from before
+                # migrations the failed start may have applied (Alembic refuses a revision it does not know).
+                self._undo_restore(marker)
             marker.update(state="applied" if forward else "rolled_back_applied", attempts=0)
             self.save(marker)
             return RESTART_CODE
@@ -243,7 +246,8 @@ class Boot:
         return None
 
     def _undo_restore(self, marker: dict[str, Any]) -> None:
-        """A go back that restored the database is rolled back: the database it replaced (``backup``) goes back too."""
+        """A rollback puts back the database from before the marker's change (``backup``): the one a go back's restore
+        replaced, or the one an update's new migrations may have changed."""
         backup, target = Path(marker.get("backup") or ""), Path(marker.get("db_file") or "")
         tmp = target.with_name(f"{target.name}.restore.tmp")
         try:

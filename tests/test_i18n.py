@@ -70,6 +70,7 @@ async def test_every_translated_command_name_is_one_discord_accepts():
     from app.i18n import Translator
     from app.links.cog import LinkCog
     from app.privacy.cog import PrivacyCog
+    from app.update.cog import UpdateCog
 
     tree = discord.app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
     problems = []
@@ -81,7 +82,7 @@ async def test_every_translated_command_name_is_one_discord_accepts():
         for option in payload.get("options", []):
             names(option, f"{where} {payload['name']}")
 
-    for cog in (AdminCog, PrivacyCog, LinkCog, ArchiveCog):
+    for cog in (AdminCog, PrivacyCog, LinkCog, ArchiveCog, UpdateCog):
         for command in cog.__cog_app_commands__:
             names(await command.get_translated_payload(tree, Translator()), cog.__name__)
     assert problems == []

@@ -122,6 +122,17 @@ class Logs(BaseModel):
     keep_days: int = Field(14, ge=1)
 
 
+class Update(BaseModel):
+    """Updating the bot from Discord (docs/PLAN-remote-update.md): ``/update``."""
+
+    branch: str = Field("", max_length=100, description="The branch updates follow; empty: the one checked out")
+    github_token: SecretStr | None = Field(None, description="Read-only GitHub token for an HTTPS remote; an SSH "
+                                                             "remote uses the service account's key")
+    keep_backups: int = Field(3, ge=1, description="Database backups taken before updates that are kept")
+    wait_minutes: int = Field(10, ge=0, le=120, description="How long an update waits for the running scheduled "
+                                                            "action before it goes anyway")
+
+
 class Settings(BaseSettings):
     # An empty variable means the default, as in .env.example's blank lines.
     model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_nested_delimiter="__", env_file=ENV_FILE,
@@ -144,6 +155,7 @@ class Settings(BaseSettings):
     archive: Archive = Field(default_factory=Archive)
     backup: Backup = Field(default_factory=Backup)
     logs: Logs = Field(default_factory=Logs)
+    update: Update = Field(default_factory=Update)
 
     @field_validator("timezone")
     @classmethod
@@ -222,7 +234,12 @@ def unknown_variables(env_file: str | Path = ENV_FILE) -> list[str]:
 
     found = set(dotenv_values(env_file)) if Path(env_file).is_file() else set()
     found |= set(os.environ)
-    return sorted(name for name in found if name.upper().startswith(ENV_PREFIX) and name.upper() not in variables())
+    known = variables() | NOT_SETTINGS
+    return sorted(name for name in found if name.upper().startswith(ENV_PREFIX) and name.upper() not in known)
+
+
+# Read from the environment by app/boot.py, not settings (who starts the bot again: docs/PLAN-remote-update.md).
+NOT_SETTINGS = {"BOT_RESTARTER"}
 
 
 def _required_leaves(model: type[BaseModel], prefix: str) -> list[str]:

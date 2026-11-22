@@ -59,12 +59,37 @@ class StaffLog:
         return notes
 
     async def run(self, send: Callable[[str], Awaitable[None]]) -> None:
-        while True:
-            notes = [await self._queue.get()]
-            while not self._queue.empty():
-                notes.append(self._queue.get_nowait())
-            for part in chunks("\n".join(notes)):
+        self._running = True
+        try:
+            while True:
+                notes = [await self._queue.get()]
+                self._sending = True
                 try:
-                    await send(part)
-                except Exception as exc:  # noqa: BLE001 - the staff log must never take the bot down
-                    log.warning("Could not post to the staff log: %s", exc)
+                    while not self._queue.empty():
+                        notes.append(self._queue.get_nowait())
+                    for part in chunks("\n".join(notes)):
+                        try:
+                            await send(part)
+                        except Exception as exc:  # noqa: BLE001 - the staff log must never take the bot down
+                            log.warning("Could not post to the staff log: %s", exc)
+                finally:
+                    self._sending = False
+        finally:
+            self._running = False
+
+    _sending = False
+    _running = False
+
+    async def flush(self, timeout: float = 10.0, step: float = 0.05) -> bool:
+        """Wait until what was posted so far is sent (before a restart: app/update/service.py). False on timeout;
+        notes posted from another thread just before are queued by then only if their callback ran."""
+        await asyncio.sleep(0)  # (the call_soon_threadsafe callbacks of notes posted just now)
+        if not self._running:
+            return self._queue.empty()  # nothing would send them
+        loop = asyncio.get_running_loop()
+        end = loop.time() + timeout
+        while not self._queue.empty() or self._sending:
+            if loop.time() >= end:
+                return False
+            await asyncio.sleep(step)
+        return True

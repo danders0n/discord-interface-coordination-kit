@@ -133,7 +133,8 @@ def test_every_persistent_button_answers_its_own_failures():
     import app.attendance.ui
     import app.links.ui
     import app.operations.ui
-    import app.signup.ui  # noqa: F401 (the modules that define them)
+    import app.signup.ui
+    import app.update.cog  # noqa: F401 (the modules that define them)
 
     def every(cls):
         for sub in cls.__subclasses__():
@@ -141,7 +142,7 @@ def test_every_persistent_button_answers_its_own_failures():
             yield from every(sub)
 
     found = [cls for cls in every(discord.ui.DynamicItem) if cls.__module__.startswith("app.")]
-    assert len(found) >= 9
+    assert len(found) >= 10
     assert [cls.__name__ for cls in found if not getattr(cls.callback, "answers", False)] == []
 
 

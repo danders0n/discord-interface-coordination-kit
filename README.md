@@ -141,6 +141,7 @@ Reminding members who haven't linked is manual by default: bot admins send one w
 | `/privacy-erase` | staff (Manage users in the app) | erase a member, in the app and in the bot |
 | `/links remind`, `/links reminders` | bot admins | Steam link reminders |
 | `/reload` | bot admins | apply a changed `.env` |
+| `/update status`, `check`, `now`, `restart`, `back` | bot admins | update or restart the bot (see *Update*) |
 
 ## Run as a service (NSSM)
 
@@ -155,6 +156,7 @@ nssm set EventBot Start SERVICE_AUTO_START
 nssm set EventBot DependOnService ArmaSupervisor
 nssm set EventBot AppStdout "$dir\data\service.log"
 nssm set EventBot AppStderr "$dir\data\service.log"
+nssm set EventBot AppEnvironmentExtra BOT_RESTARTER=nssm   # /update may restart it (NSSM's default exit action)
 nssm start EventBot
 ```
 
@@ -176,6 +178,14 @@ The nightly backup covers the database only. **The host's own backups must inclu
 `.env`.**
 
 ## Update
+
+From Discord (bot admins): `/update check` shows the new commits on the branch, `/update now` updates, `/update
+restart` only restarts, `/update back` returns to the commit before the last update. The bot waits for a running
+scheduled task, backs its database up into `data/updates/`, restarts, and says in the staff log how it went. A new
+version that does not come up within 3 minutes, twice, is rolled back on its own. What the start-up step did is in
+`.app-update/boot.log`. This needs `BOT_RESTARTER=nssm` in the service (above), or `python -m app` run in a console,
+and the folder must be a git checkout the service account can fetch (SSH key, or `BOT_UPDATE__GITHUB_TOKEN` for
+HTTPS). The first version with `/update` is installed by hand:
 
 ```powershell
 .\update.ps1     # checks .env, backs up, git pull, pip install, restarts the service

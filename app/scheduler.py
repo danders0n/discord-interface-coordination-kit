@@ -52,6 +52,16 @@ class Scheduler:
         self.poll = poll
         self.handlers: dict[str, Handler] = {}
         self._wake = asyncio.Event()
+        self.held = False  # an update of the bot waits: no action starts (app/update/service.py)
+        self.running: Action | None = None
+
+    def hold(self) -> None:
+        """Start no action from now on; the one running finishes (see :attr:`running`)."""
+        self.held = True
+
+    def release(self) -> None:
+        self.held = False
+        self._wake.set()
 
     def register(self, kind: str, handler: Handler) -> None:
         self.handlers[kind] = handler
@@ -110,16 +120,27 @@ class Scheduler:
         return done.rowcount
 
     async def run_due(self) -> int:
-        """Run every action that is due, oldest first. Returns how many ran (failed ones included)."""
+        """Run every action that is due, oldest first. Returns how many ran (failed ones included). While held,
+        none (more) start; the rest stay due."""
+        if self.held:
+            return 0
         now = self.clock()
         async with self.db.session() as session:
             rows = (await session.execute(
                 select(ScheduledAction).where(ScheduledAction.done_at.is_(None), ScheduledAction.due_at <= now)
                 .order_by(ScheduledAction.due_at, ScheduledAction.id))).scalars().all()
             due = [Action(r.id, r.kind, r.key, r.operation_id, r.due_at, r.attempts, dict(r.payload)) for r in rows]
+        ran = 0
         for action in due:
-            await self._run_one(action, now)
-        return len(due)
+            if self.held:
+                break
+            self.running = action
+            try:
+                await self._run_one(action, now)
+            finally:
+                self.running = None
+            ran += 1
+        return ran
 
     async def _run_one(self, action: Action, now: datetime) -> None:
         handler = self.handlers.get(action.kind)

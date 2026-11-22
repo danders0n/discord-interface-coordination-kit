@@ -45,6 +45,8 @@ from app.signup.cog import SlotCog
 from app.signup.offers import Offers
 from app.signup.ui import OfferAction, SignupAction, SquadList
 from app.staff_threads import KINDS
+from app.update.cog import UpdateButton, UpdateCog
+from app.update.service import Updater
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +83,15 @@ class EventBot(commands.Bot):
         self.build_links()
         services.archive = ArchiveService(services.db, services.store, services.scheduler.clock)
         services.exporter = Exporter(services, self.guild)
+        if services.updater is None:
+            services.updater = Updater(services.store, services.scheduler, services.staff)
+        services.updater.announce = self.announce_restart
+
+    async def announce_restart(self, plan: dict) -> None:
+        """Just before a restart for /update: members see the bot is updating, not gone."""
+        name = t("Updating…", self.services.settings.language) if plan.get("to") else \
+            t("Restarting…", self.services.settings.language)
+        await self.change_presence(status=discord.Status.idle, activity=discord.CustomActivity(name=name))
 
     @property
     def guild_object(self) -> discord.Object:
@@ -197,12 +208,12 @@ class EventBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction, CreateOperation,
-                               PanelButton, PanelAction, ReportAction)  # outlive a restart
+                               PanelButton, PanelAction, ReportAction, UpdateButton)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),
                     ArchiveCog(self.services), SlotCog(self.services), OperationCog(self.services),
-                    AttendanceCog(self.services)):
+                    AttendanceCog(self.services), UpdateCog(self.services)):
             await self.add_cog(cog, guild=self.guild_object)
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before
@@ -275,6 +286,11 @@ class EventBot(commands.Bot):
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
         await asyncio.to_thread(boot.ready)  # an update that got here is done (app/boot.py); the supervisor may wait
+        try:
+            for note in await asyncio.to_thread(self.services.updater.report):  # how the last /update went
+                self.services.staff.post(note)
+        except Exception:  # noqa: BLE001 - logged as an ERROR; the bot works on
+            log.exception("Reporting the last update failed")
         try:
             self.services.channels.header.request()
             try:

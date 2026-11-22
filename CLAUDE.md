@@ -67,7 +67,10 @@ exactly the settings.
   services, bot). `app/boot.py` (standard library only, importable by every version: the marker
   `.app-update/pending.json`, `git reset`, pip, the database restore, the watchdog, `ready()` from the first
   `on_ready`) and `app/restarter.py` (`request_exit()` closes the bot, which exits with 75; `detect()` reads
-  `BOT_RESTARTER`) are the remote update's ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md)).
+  `BOT_RESTARTER`) are the remote update's ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md)), with
+  `app/update/` (`service.py`: `Updater`, no discord.py: `check()` fetches the branch, `start()` holds the scheduler,
+  waits for its running action, backs up, writes the marker, flushes the staff log and asks to exit; `report()` tells
+  the history at start-up; `cog.py`: `/update status | check | now | restart | back`, bot admins, `UpdateButton`).
 - `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
 - `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()` (plain text
   replies disappear after `times.reply_seconds`), `finish()` (a last word replacing a pressed message), the
