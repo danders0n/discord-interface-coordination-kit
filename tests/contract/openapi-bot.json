@@ -264,6 +264,18 @@
       },
       "GroupPatch": {
         "properties": {
+          "acre": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "uses ACRE2 (null: not known)",
+            "title": "Acre"
+          },
           "acronym": {
             "anyOf": [
               {
@@ -277,6 +289,44 @@
             ],
             "title": "Acronym"
           },
+          "contact": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the contact point",
+            "title": "Contact"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "member_count": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Count"
+          },
           "name": {
             "anyOf": [
               {
@@ -289,6 +339,46 @@
               }
             ],
             "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "representative_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "persons on the Discord server who represent the group (listed only)",
+            "title": "Representative Ids"
+          },
+          "tfar": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "uses Task Force Arrowhead Radio (null: not known)",
+            "title": "Tfar"
           }
         },
         "title": "GroupPatch",
@@ -2550,6 +2640,7 @@
     },
     "/api/operations/groups": {
       "get": {
+        "description": "The other groups with their details: logo, notes, member count, TFAR / ACRE, language, contact point and\nrepresentatives (their Discord ids for the bot and Manage members).",
         "operationId": "list_groups_api_operations_groups_get",
         "responses": {
           "200": {
@@ -2642,7 +2733,8 @@
     },
     "/api/operations/groups/{group_id}": {
       "patch": {
-        "operationId": "rename_group_api_operations_groups__group_id__patch",
+        "description": "Rename a group or change its details (fields left out stay; ``representative_ids`` replaces the list).",
+        "operationId": "update_group_api_operations_groups__group_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -2670,7 +2762,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Rename Group Api Operations Groups  Group Id  Patch",
+                  "title": "Response Update Group Api Operations Groups  Group Id  Patch",
                   "type": "object"
                 }
               }
@@ -2699,7 +2791,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "Rename Group",
+        "summary": "Update Group",
         "tags": [
           "operations"
         ],

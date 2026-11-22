@@ -611,6 +611,9 @@ Asked by the owner after the test server: with the supervisor's matching change 
   `unknown_role`, `bad_roles`. The supervisor keeps the role on the sign-up, counts the limit in the same locked step
   as the operation's, and drops a role that an edit removed.
 - **The supervisor says *played preset*** for what its code and API still call `climate` (the bot already did).
+- **Other groups have details** in the supervisor (logo, notes, member count, TFAR / ACRE, language, contact point,
+  representatives from the Discord server, listed only). The contract is synced; the bot shows none of it yet (its
+  *New group* still sends the acronym and name).
 
 ### Next
 
