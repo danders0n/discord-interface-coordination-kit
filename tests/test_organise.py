@@ -296,6 +296,9 @@ async def test_an_organiser_assigns_a_member_to_a_slot(organise, guild, fake):
     assert said(done) == "Saved."
     slot = fake.slot(fake.operations[op["id"]], lead)
     assert (slot["holder"], slot["locked"]) == (fake.persons["3"]["id"], True)
+    fake.set_orbat(op["id"], "# HQ {hq}\n" + ORBAT.replace("# Alpha", "# Alpha < HQ"))
+    tools = SlotTools(acting(organise, guild, 1), fake.out(fake.operations[op["id"]], fake.persons["1"]))
+    assert "HQ" not in [option.label for option in tools.children[0].options]  # (a squad without slots: nothing to pick)
 
 
 # ---------------------------------------------------------------- files and the list

@@ -614,6 +614,11 @@ Asked by the owner after the test server: with the supervisor's matching change 
 - **Other groups have details** in the supervisor (logo, notes, member count, TFAR / ACRE, language, contact point,
   representatives from the Discord server, listed only). The contract is synced; the bot shows none of it yet (its
   *New group* still sends the acronym and name).
+- **The supervisor draws the ORBAT as a diagram** (its *As built*, *ORBAT diagram*): a squad line may name the squad
+  it is under and its NATO symbol, `# 1st Plt < A Coy {inf plt}`, and each squad of `orbat` carries `parent`,
+  `unit_type` and `size`. Only the app draws it. The text pasted on Discord passes through unchanged; the bot leaves a
+  squad without slots (a headquarters only holding the tree) out of its ORBAT messages and the organisers' squad
+  picker. The fake supervisor reads the marks without checking them.
 
 ### Next
 

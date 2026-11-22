@@ -102,6 +102,18 @@ async def test_a_draft_shows_its_orbat_without_buttons(front, guild, fake):
     assert orbat.view is None
 
 
+async def test_a_headquarters_without_slots_is_left_out_of_the_list(front, guild, fake):
+    """The supervisor's diagram may have a squad that only holds others (``< Parent``); Discord lists slots only."""
+    op = fake.operation("Ibis")
+    fake.set_orbat(op["id"], "# TF Aegis {hq bn}\n# Alpha < TF Aegis {inf sqd}\nLead\n")
+    assert [(s["name"], s["parent"] is not None, s["unit_type"]) for s in fake.operations[op["id"]]["squads"]] == [
+        ("TF Aegis", False, "hq"), ("Alpha", True, "inf")]
+    await run(front)
+    channel = await channel_of(front, guild, op)
+    orbat = channel.get_partial_message((await row(front, op["id"])).messages["orbat:0"])._find()
+    assert "**Alpha**" in orbat.text and "TF Aegis" not in orbat.text
+
+
 async def test_a_press_and_a_sign_up_in_the_app_both_show_and_a_taken_slot_is_refused(front, guild, fake):
     op = published(fake)
     ids = slots(fake, op)

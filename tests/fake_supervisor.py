@@ -58,9 +58,14 @@ SLOT_LINE = re.compile(r"^(?P<lock>!)?\s*(?P<name>.*?)(?:\s+x(?P<count>\d+))?(?:
                        r"(?:\s+x(?P<count2>\d+))?\s*$", re.IGNORECASE)
 
 
+SQUAD_HEAD = re.compile(r"^(?P<name>[^<{}]*?)\s*(?:<\s*(?P<parent>[^<{}]*?)\s*)?(?:\{(?P<marks>[^{}]*)\})?\s*$")
+UNIT_SIZES = ("team", "sqd", "sec", "plt", "coy", "bn", "rgt", "bde")
+
+
 def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, bool]]]], list[str]]:
-    """The ORBAT text format (the supervisor's ``app/operations/orbat.py``, simplified: roles by id only): squads
-    with their slots (name, role id, locked), and the problems by line."""
+    """The ORBAT text format (the supervisor's ``app/operations/orbat.py``, simplified: roles by id only, the
+    squad's ``< Parent {type size}`` read without checks): squads with their slots (name, role id, locked), and the
+    problems by line. :func:`squad_marks` gives a squad line's parent and symbol."""
     squads: list[tuple[str, list[tuple[str, str | None, bool]]]] = []
     problems = []
     for number, raw in enumerate(text.splitlines(), 1):
@@ -85,6 +90,17 @@ def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, 
         count = int(match.group("count") or match.group("count2") or 1)
         squads[-1][1].extend([(name, role, bool(match.group("lock")))] * count)
     return squads, problems
+
+
+def squad_marks(head: str) -> dict[str, Any]:
+    """A squad line (after ``#``): its name, the name it is under, its unit type and size."""
+    match = SQUAD_HEAD.match(head)
+    if match is None:
+        return {"name": head, "parent_name": None, "unit_type": None, "size": None}
+    words = (match.group("marks") or "").split()
+    return {"name": match.group("name").strip(), "parent_name": (match.group("parent") or "").strip() or None,
+            "unit_type": next((w for w in words if w not in UNIT_SIZES), None),
+            "size": next((w for w in words if w in UNIT_SIZES), None)}
 
 
 def checklist(op: dict[str, Any]) -> list[str]:
@@ -300,7 +316,9 @@ class State:
         if problems:
             raise ValueError(problems)
         kept, new = set(), []
-        for squad_name, slots in squads:
+        for head, slots in squads:
+            marks = squad_marks(head)
+            squad_name = marks["name"]
             made = []
             for n, (name, role_id, locked) in enumerate(slots):
                 before = old.get((squad_name, name, n))
@@ -309,7 +327,10 @@ class State:
                     kept.add(holder)
                 made.append({"id": self._id("slot"), "name": name, "role_id": role_id, "locked": locked or bool(
                     before and before["locked"] and holder), "holder": holder})
-            new.append({"id": self._id("squad"), "name": squad_name, "slots": made})
+            new.append({"id": self._id("squad"), "name": squad_name, "slots": made, **marks})
+        ids = {squad["name"].casefold(): squad["id"] for squad in new}
+        for squad in new:
+            squad["parent"] = ids.get((squad.pop("parent_name") or "").casefold())
         displaced = [s["holder"] for s in old.values() if s["holder"] is not None and s["holder"] not in kept]
         op["squads"] = new
         for position, person_id in enumerate(displaced):
@@ -408,7 +429,8 @@ class State:
                        "limit": op["signup_limit"], "coming": coming,
                        "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"]),
                        "roles": roles},
-            "orbat": [{"id": squad["id"], "name": squad["name"], "free": sum(
+            "orbat": [{"id": squad["id"], "name": squad["name"], "parent": squad.get("parent"),
+                       "unit_type": squad.get("unit_type"), "size": squad.get("size"), "free": sum(
                 s["holder"] is None and not s["locked"] for s in squad["slots"]), "slots": [
                 {"id": s["id"], "name": s["name"], "locked": s["locked"], "offered": s["id"] in offered,
                  "required_role": {"id": s["role_id"], "name": s["role_id"]} if s["role_id"] else None,
@@ -1400,8 +1422,14 @@ def make_app(state: State | None = None) -> web.Application:
 
     def _orbat_text(op: dict[str, Any]) -> str:
         lines = []
+        names = {squad["id"]: squad["name"] for squad in op["squads"]}
         for squad in op["squads"]:
-            lines.append(f"# {squad['name']}")
+            head = f"# {squad['name']}"
+            if squad.get("parent") in names:
+                head += f" < {names[squad['parent']]}"
+            if marks := " ".join(m for m in (squad.get("unit_type"), squad.get("size")) if m):
+                head += f" {{{marks}}}"
+            lines.append(head)
             for slot in squad["slots"]:
                 closed = "!" if slot["locked"] and slot["holder"] is None else ""
                 role = f" [{slot['role_id']}]" if slot["role_id"] else ""

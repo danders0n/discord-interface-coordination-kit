@@ -165,7 +165,8 @@ class SlotTools(discord.ui.View):
 
     def __init__(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         super().__init__(timeout=TIMEOUT)
-        self.op_id, self.squads, self.slot_id = int(op["id"]), op.get("orbat") or [], None
+        self.op_id, self.slot_id = int(op["id"]), None
+        self.squads = [squad for squad in op.get("orbat") or [] if squad.get("slots")]  # (not a headquarters only)
         squads = discord.ui.Select(placeholder=t("Squad", interaction.locale), options=[
             discord.SelectOption(label=str(squad["name"])[:100], value=str(squad["id"])) for squad in self.squads[:25]])
         squads.callback = lambda i, s=squads: self._squad(i, int(s.values[0]))

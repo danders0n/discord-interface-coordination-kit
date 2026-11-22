@@ -283,7 +283,9 @@ def orbat(op: dict[str, Any], ctx: Context) -> list[Message]:
     blocks = [_header(op, ctx, t("Taken slots: {taken}", language,
                                  taken=f"**{counts.get('taken', 0)}/{counts.get('total', 0)}**"), counts.get("closed", 0))]
     for squad in squads:
-        lines = [_slot_line(n, slot, language) for n, slot in enumerate(squad.get("slots") or [], 1)]
+        if not squad.get("slots"):  # a headquarters that only holds the tree (the supervisor's diagram)
+            continue
+        lines = [_slot_line(n, slot, language) for n, slot in enumerate(squad["slots"], 1)]
         blocks.append("\n".join([f"**{plain(squad['name'])}**", *lines]))
     if not squads:
         blocks.append(t("Not set yet.", language))

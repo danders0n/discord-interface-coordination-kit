@@ -1157,7 +1157,7 @@
       "OrbatIn": {
         "properties": {
           "text": {
-            "description": "# Squad lines, then slots: 'Name [Role] xN', '!' closes one",
+            "description": "'# Squad < Parent {type size}' lines, then slots: 'Name [Role] xN', '!' closes one",
             "maxLength": 4000,
             "title": "Text",
             "type": "string"
