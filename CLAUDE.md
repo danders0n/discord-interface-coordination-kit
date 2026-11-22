@@ -147,7 +147,10 @@ exactly the settings.
   the config language from their `event` and fields, its English `text` for an event it doesn't know), `app/live.py` (`Live`: the supervisor's live events wake the workers; `system` only with `system_events`),
   `app/health.py` (`SupervisorHealth`, `services.health`: `up` / `updating` / `down` / `blocked` from every call
   (`SupervisorClient.on_call`), the `system` event and `hello`'s `boot`; the check again after a restart; staff-log
-  lines for an announced update, its end and an overstay; `minutes_left()` for the members' words),
+  lines for an announced update, its end and an overstay; `minutes_left()` for the members' words), `app/queued/`
+  (`service.py`: `Queue`, table `queued_action`, a client method from `QUEUEABLE` and its arguments, collapsed,
+  expired, sent when the health is `up`; `ui.py`: `act_or_queue()`, `QUEUED`, `Teller` edits the *Queued* reply or
+  sends a DM),
   `app/supervisor_check.py` (`api_level`, `integration.act_as`, the zone; `gate()` holds that work back until it
   passes). Act-as calls pass `act_as=<discord id>` to the client; a `SupervisorError` reaching the command, button
   or modal error handler is answered in words (`discord_util.supervisor_words`).
@@ -167,6 +170,10 @@ These rules span many features; read them before writing any handler.
   for its own commands (*bot admin*). A `SupervisorError` reaching a command, button or modal error handler is
   answered in words (`discord_util.supervisor_words`, codes in `app/operations/words.py`), so handlers rarely catch
   one. Buttons are shown for what `my.actions` allows, and pressing one reads the operation again.
+- **A member's write may wait for the supervisor** (`app/queued/ui.act_or_queue`, for the methods in
+  `QUEUEABLE`): queued only when it can't have reached it (the health says away, or a refused connection,
+  `SupervisorUnreachable.sent is False`), never after a timeout. Reads, creates, deletes and uploads are not queued.
+  A new write worth sending late goes through `act_or_queue` with its `done` words and is added to `QUEUEABLE`.
 - **Organiser writes send `If-Match`** with the revision read (`app/operations/ui.write`); a 409 `stale` answers with
   *Reopen*. Nothing is merged. Sign-up presses send none.
 - **Drawing is idempotent and converges** on the operation as the feed last gave it (`operation_channel.operation`):

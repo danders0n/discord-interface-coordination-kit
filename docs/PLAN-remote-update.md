@@ -1,8 +1,9 @@
 # Plan: updating the bot from Discord, and the two apps watching each other
 
-Status: steps 1-4 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
+Status: steps 1-5 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
 `tests/test_update.py`; the heartbeat's state and health, `tests/test_supervisor_client.py`, against the supervisor's
-part, built on its `feature/discord-roles` branch; the supervisor's health, `tests/test_health.py`); steps 5-7 next. Written 2026-11-22 from a
+part, built on its `feature/discord-roles` branch; the supervisor's health, `tests/test_health.py`; queued actions,
+`tests/test_queue.py`); steps 6-7 (docs, end to end) next. Written 2026-11-22 from a
 short design interview with the owner. The supervisor's part is its `docs/PLAN-bot-health.md`; the two are built and
 deployed separately (*Order of release*). See *As built* at the end for where the code departs from this plan.
 
@@ -372,6 +373,29 @@ Step 4 (2026-11-22):
 - **Members' words:** `supervisor_words` takes the health: while `updating`, *The app is updating and should be back
   in about N min* (or *any moment* once the time passed).
 - The heartbeat's `health` gains `supervisor` (the state).
+
+Step 5 (2026-11-22):
+
+- **`app/queued/`, not `app/queue/`** (no name like the standard library's `queue`).
+- **A row is a client method and its arguments**, not a kind with its own call: `QUEUEABLE` lists the client methods
+  that may wait (`answer`, `leave`, `take_slot`, `accept_offer`, `decline_offer`, `rate`, `correct_attendance`,
+  `approve_request`, `reject_request`, `update_operation`, `set_opord`, `set_organisers`, `set_orbat`,
+  `operation_step`, `cancel_operation`, `end_operation`), replayed as `getattr(client, method)(member, *args)`
+  through `Roster.as_member`. So the organiser panel's `write()` takes the method and its arguments instead of a
+  lambda (the revision read among them, for `If-Match`), and needs no table of kinds.
+- **`done` is stored worded** (the member's language at the press) rather than looked up at replay; a success says
+  *Sent now that the app is back: …* with the DLC warning, a refusal *Not done now that the app is back: …*
+  (`supervisor_words`), `stale` *Not saved* with the texts the organiser sent, a timeout at replay *check whether
+  this went through* (not sent again).
+- **Order:** a member with queued rows has every next write queued too, even when the supervisor is up, so theirs
+  reach it in order. Collapse keys: `signup:<op>` (the buttons, the picker and `/slot take`), `offer:<offer>`,
+  `rating:<op>`, `request:<id>`; replaced rows' replies say *Replaced by your later choice*.
+- **The interactions stay in memory** (`Teller`), not in the table: their tokens are credentials and expire in 15
+  minutes. After a restart of the bot, or past 14 minutes, the answer is a DM; one that can't be edited is a DM too.
+- **The queue sends only when the health is `up`**, oldest first, stopping at the first refused connection; its loop
+  (started with the other supervisor workers) also expires rows every minute while the supervisor is away.
+- **Not queued** (answered with the updating words): reads, the wizard's create, copy, delete, uploads, templates,
+  `/link`, `/privacy-erase`. The heartbeat's health has no queue count yet.
 
 ## Out of scope
 

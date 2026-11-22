@@ -27,6 +27,7 @@ from app.discord_util import answers, finish, reply, services, thinking
 from app.i18n import t
 from app.operations import times
 from app.operations.words import missing, time_problem
+from app.queued.ui import QUEUED, act_or_queue
 from app.signup.ui import act
 from app.supervisor_client import SupervisorError
 
@@ -44,16 +45,19 @@ async def read(interaction: discord.Interaction, op_id: int) -> dict[str, Any]:
     return await act(interaction, lambda me: client.operation(op_id, act_as=me))
 
 
-async def write(interaction: discord.Interaction, op_id: int, section: str,
-                call: Callable[[int], Awaitable[Any]]) -> Any | None:
-    """An act-as write; a stale one (the operation changed since it was read) is answered with *Reopen* for the
-    section and gives None. Other refusals go up to the error handler, which words them."""
+async def write(interaction: discord.Interaction, op_id: int, section: str, method: str, *args: Any) -> Any | None:
+    """An act-as write, ``client.<method>(member, op_id, *args)`` (the revision read among ``args``, for
+    ``If-Match``); a stale one (the operation changed since it was read) is answered with *Reopen* for the section
+    and gives None, and so does one queued while the supervisor is away (app/queued/: the member hears the outcome
+    later). Other refusals go up to the error handler, which words them."""
+    locale = interaction.locale
     try:
-        return await act(interaction, call)
+        answer = await act_or_queue(interaction, method, op_id, *args,
+                                    done=t("Your change to OP-{id} is saved.", locale, id=op_id))
+        return None if answer is QUEUED else answer
     except SupervisorError as exc:
         if exc.code != "stale":
             raise
-    locale = interaction.locale
     view = discord.ui.View(timeout=None)
     view.add_item(PanelAction(op_id, section, t("Reopen", locale)))
     await reply(interaction, t("The operation changed meanwhile; open it again to see the change.", locale), view=view)
@@ -177,8 +181,7 @@ class Choices(discord.ui.View):
         await interaction.response.defer()  # (finish() edits these choices)
         client, op = services(interaction).supervisor, self.op
         fields = self.fields()
-        if await write(interaction, op["id"], "choices",
-                       lambda me: client.update_operation(me, op["id"], fields, op["revision"])) is not None:
+        if await write(interaction, op["id"], "choices", "update_operation", fields, op["revision"]) is not None:
             self.stop()
             await finish(interaction, t("Saved.", self.locale))
 
@@ -258,8 +261,7 @@ class DetailsModal(discord.ui.Modal):
         if not fields:
             await reply(interaction, t("Nothing changed.", locale))
             return
-        answer = await write(interaction, op["id"], "details",
-                             lambda me: s.supervisor.update_operation(me, op["id"], fields, op["revision"]))
+        answer = await write(interaction, op["id"], "details", "update_operation", fields, op["revision"])
         if answer is None:
             return
         if answer.get("proposal"):
@@ -502,8 +504,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
             if text and not text.isdigit():
                 return t("Type a whole number, or leave it empty.", locale)
             fields = {"signup_limit": int(text) if text else None}
-            done = await write(modal_interaction, op["id"], "limit",
-                               lambda me: client.update_operation(me, op["id"], fields, op["revision"]))
+            done = await write(modal_interaction, op["id"], "limit", "update_operation", fields, op["revision"])
             return t("Saved.", locale) if done is not None else None
 
         await interaction.response.send_modal(TextModal(interaction, t("Sign-up limit", locale),
@@ -514,8 +515,8 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         client, locale = services(interaction).supervisor, interaction.locale
 
         async def save(modal_interaction: discord.Interaction, text: str) -> str | None:
-            done = await write(modal_interaction, op["id"], "join", lambda me: client.update_operation(
-                me, op["id"], {"how_to_join": text.strip()}, op["revision"]))
+            done = await write(modal_interaction, op["id"], "join", "update_operation",
+                               {"how_to_join": text.strip()}, op["revision"])
             return t("Saved.", locale) if done is not None else None
 
         await interaction.response.send_modal(TextModal(interaction, t("How to join", locale),
@@ -531,8 +532,7 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         await thinking(interaction)
         wanted = "off" if op.get("hold") in ("on", "requested") else "on"
         client = services(interaction).supervisor
-        answer = await write(interaction, op["id"], "hold",
-                             lambda me: client.update_operation(me, op["id"], {"hold": wanted}, op["revision"]))
+        answer = await write(interaction, op["id"], "hold", "update_operation", {"hold": wanted}, op["revision"])
         if answer is None:
             return
         words = {"on": t("The host is held for this operation.", interaction.locale),
@@ -543,17 +543,16 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
     async def _autoend(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await thinking(interaction)
         value, client = not op.get("dont_end_automatically"), services(interaction).supervisor
-        if await write(interaction, op["id"], "autoend", lambda me: client.update_operation(
-                me, op["id"], {"dont_end_automatically": value}, op["revision"])) is not None:
+        if await write(interaction, op["id"], "autoend", "update_operation", {"dont_end_automatically": value},
+                       op["revision"]) is not None:
             await reply(interaction, t("A finished mission no longer ends this operation; the host's end or End "
                                        "operation does.", interaction.locale) if value else
                         t("A finished mission ends this operation again.", interaction.locale))
 
     async def _step(self, interaction: discord.Interaction, op: dict[str, Any], step: str, done: str) -> None:
         await thinking(interaction)
-        client = services(interaction).supervisor
-        await act(interaction, lambda me: client.operation_step(me, op["id"], step))
-        await reply(interaction, done)
+        if await act_or_queue(interaction, "operation_step", op["id"], step, done=done) is not QUEUED:
+            await reply(interaction, done)
 
     async def _publish(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await self._step(interaction, op, "publish", t("Published.", interaction.locale))
@@ -578,8 +577,9 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         client, locale = services(interaction).supervisor, interaction.locale
 
         async def save(modal_interaction: discord.Interaction, reason: str) -> str | None:
-            await act(modal_interaction, lambda me: client.cancel_operation(me, op["id"], reason.strip()))
-            return t("Cancelled.", locale)
+            done = t("Cancelled.", locale)
+            answer = await act_or_queue(modal_interaction, "cancel_operation", op["id"], reason.strip(), done=done)
+            return None if answer is QUEUED else done
 
         await interaction.response.send_modal(TextModal(interaction, t("Cancel operation", locale), "", 500, save,
                                                         label=t("Reason", locale)))
@@ -587,10 +587,9 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
     async def _end(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         """After the start: the operation ends now and the attendance is read shortly after."""
         await thinking(interaction)
-        s = services(interaction)
-        await act(interaction, lambda me: s.supervisor.end_operation(me, op["id"]))  # (the staff log: its notice)
-        await reply(interaction, t("The operation has ended; the attendance report follows shortly.",
-                                   interaction.locale))
+        done = t("The operation has ended; the attendance report follows shortly.", interaction.locale)
+        if await act_or_queue(interaction, "end_operation", op["id"], done=done) is not QUEUED:  # (staff log: its notice)
+            await reply(interaction, done)
 
     async def _delete(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await reply(interaction, t("Delete the draft {title}? This can't be undone.", interaction.locale,
@@ -658,8 +657,7 @@ class OpordModal(discord.ui.Modal):
         if not changed:
             await reply(interaction, t("Nothing changed.", interaction.locale))
             return
-        if await write(interaction, op["id"], "opord",
-                       lambda me: client.set_opord(me, op["id"], changed, op["revision"])) is not None:
+        if await write(interaction, op["id"], "opord", "set_opord", changed, op["revision"]) is not None:
             await reply(interaction, t("Saved.", interaction.locale))
 
 
@@ -691,8 +689,8 @@ class SignupStartModal(discord.ui.Modal):
                 return
             opens = datetime.combine(day, clock, s.settings.tz).isoformat()
         await thinking(interaction)
-        if await write(interaction, op["id"], "signup", lambda me: s.supervisor.update_operation(
-                me, op["id"], {"signup_opens_at": opens}, op["revision"])) is not None:
+        if await write(interaction, op["id"], "signup", "update_operation", {"signup_opens_at": opens},
+                       op["revision"]) is not None:
             await reply(interaction, t("Saved.", interaction.locale))
 
 
@@ -730,6 +728,5 @@ class Organisers(discord.ui.View):
         now = [int(p["id"]) for p in op.get("organisers") or []]
         wanted = list(dict.fromkeys(now + picked)) if add else [p for p in now if p not in picked]
         client = services(interaction).supervisor
-        if await write(interaction, self.op_id, "organisers",
-                       lambda me: client.set_organisers(me, self.op_id, wanted, op["revision"])) is not None:
+        if await write(interaction, self.op_id, "organisers", "set_organisers", wanted, op["revision"]) is not None:
             await reply(interaction, t("Saved.", interaction.locale))

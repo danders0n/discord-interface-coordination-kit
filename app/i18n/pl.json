@@ -696,5 +696,17 @@
   "The supervisor is back.": "Supervisor wrócił.",
   "The supervisor has not come back from its update for {minutes} min.": "Supervisor nie wrócił po aktualizacji od {minutes} min.",
   "The app is updating and should be back in about {minutes} min. Try again then.": "Aplikacja się aktualizuje i powinna wrócić za około {minutes} min. Spróbuj wtedy ponownie.",
-  "The app is updating and should be back any moment. Try again in a minute.": "Aplikacja się aktualizuje i powinna wrócić lada chwila. Spróbuj ponownie za minutę."
+  "The app is updating and should be back any moment. Try again in a minute.": "Aplikacja się aktualizuje i powinna wrócić lada chwila. Spróbuj ponownie za minutę.",
+  "Too many of your actions are waiting for the app. Try again when it is back.": "Za dużo Twoich działań czeka na aplikację. Spróbuj ponownie, gdy wróci.",
+  "Queued: the app is updating and should be back in about {minutes} min. You'll get the answer here.": "W kolejce: aplikacja się aktualizuje i powinna wrócić za około {minutes} min. Odpowiedź dostaniesz tutaj.",
+  "Queued: the app can't be reached right now. It goes through once the app is back, and you'll get the answer here.": "W kolejce: aplikacja jest teraz niedostępna. Pójdzie, gdy aplikacja wróci, a odpowiedź dostaniesz tutaj.",
+  "Replaced by your later choice.": "Zastąpione Twoim późniejszym wyborem.",
+  "Not sent: the app was away too long. Press again.": "Nie wysłano: aplikacji nie było zbyt długo. Naciśnij ponownie.",
+  "The app did not answer in time: check whether this went through.": "Aplikacja nie odpowiedziała na czas: sprawdź, czy to przeszło.",
+  "Done.": "Zrobione.",
+  "Sent now that the app is back: {text}": "Wysłano, gdy aplikacja wróciła: {text}",
+  "Not saved: the operation changed while the app was away. Open it again and redo the change.": "Nie zapisano: operacja zmieniła się, gdy aplikacji nie było. Otwórz ją ponownie i wprowadź zmianę jeszcze raz.",
+  "What you sent:": "Co wysłano:",
+  "Not done now that the app is back: {reason}": "Nie zrobiono po powrocie aplikacji: {reason}",
+  "Your change to OP-{id} is saved.": "Twoja zmiana OP-{id} jest zapisana."
 }

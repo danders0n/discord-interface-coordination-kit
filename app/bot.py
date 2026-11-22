@@ -38,6 +38,8 @@ from app.operations.cog import OperationCog
 from app.operations.header import Header
 from app.operations.ui import CreateOperation, PanelAction, PanelButton, expired
 from app.privacy.cog import PrivacyCog
+from app.queued.service import Queue
+from app.queued.ui import Teller
 from app.roster.service import Member as RosterMember
 from app.roster.service import Role as RosterRole
 from app.roster.service import Roster
@@ -142,10 +144,15 @@ class EventBot(commands.Bot):
         s.channels.watchers += [s.offers, s.moderation]  # (offers closed, requests drawn as the feed changes them)
         s.health = SupervisorHealth(s.supervisor, s.staff.post, lambda: s.settings.language, s.scheduler.clock,
                                     check=self.supervisor_problems)
+        s.queue = Queue(s.db, s.supervisor, s.roster, s.store, s.scheduler.clock, s.health)
+        s.queue.tell = Teller(self.user_by_id)
         s.live = Live(s.supervisor, {"notice": lambda _event: s.notices.wake(),
                                      "operation": lambda _event: s.feed.wake(),
                                      "system": lambda event: s.health.system(event.data.get("data") or {})},
                       on_hello=s.health.hello)
+
+    async def user_by_id(self, user_id: int) -> discord.User:
+        return self.get_user(user_id) or await self.fetch_user(user_id)
 
     async def supervisor_problems(self) -> tuple[str, ...]:
         """The supervisor check again, after the supervisor restarted (app/health.py): what blocks the bot's work."""
@@ -275,7 +282,8 @@ class EventBot(commands.Bot):
         await s.roster.start()
         await s.channels.refresh_all()  # what was drawn before; the feed brings what changed meanwhile
         names = {task.get_name() for task in self._tasks}
-        for name, job in (("notices", s.notices.run), ("operations", s.feed.run), ("live", s.live.run)):
+        for name, job in (("notices", s.notices.run), ("operations", s.feed.run), ("live", s.live.run),
+                          ("queue", s.queue.run)):
             if name not in names:
                 self._tasks.append(asyncio.create_task(job(), name=name))
 

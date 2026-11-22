@@ -38,6 +38,7 @@ class Services:
     moderation: Any = None  # app.approval.moderation.Moderation
     live: Any = None  # app.live.Live
     health: Any = None  # app.health.SupervisorHealth (the supervisor up / updating / down / blocked)
+    queue: Any = None  # app.queued.service.Queue (members' writes while the supervisor is away)
     updater: Any = None  # app.update.service.Updater (/update)
     # A member's role ids now, or None when they are not on the server.
     roles_of: Callable[[int], frozenset[int] | None] = lambda _member: None

@@ -50,9 +50,7 @@ class OrbatTools(discord.ui.View):
         return await act(interaction, lambda me: client.orbat(me, self.op_id))
 
     async def _set(self, interaction: discord.Interaction, text: str, revision: int | None) -> str | None:
-        client = services(interaction).supervisor
-        answer = await write(interaction, self.op_id, "orbat",
-                             lambda me: client.set_orbat(me, self.op_id, text, revision))
+        answer = await write(interaction, self.op_id, "orbat", "set_orbat", text, revision)
         return summary(answer, interaction.locale) if answer is not None else None
 
     async def _paste(self, interaction: discord.Interaction) -> None:

@@ -133,6 +133,14 @@ class Update(BaseModel):
                                                             "action before it goes anyway")
 
 
+class Queue(BaseModel):
+    """Members' actions queued while the supervisor is away (docs/PLAN-remote-update.md, *Queued actions*)."""
+
+    max_minutes: int = Field(60, ge=5, le=24 * 60, description="A queued action not sent within this long is dropped "
+                                                               "(the member is told)")
+    per_member: int = Field(20, ge=1, le=100, description="Queued actions per member at most")
+
+
 class Settings(BaseSettings):
     # An empty variable means the default, as in .env.example's blank lines.
     model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_nested_delimiter="__", env_file=ENV_FILE,
@@ -156,6 +164,7 @@ class Settings(BaseSettings):
     backup: Backup = Field(default_factory=Backup)
     logs: Logs = Field(default_factory=Logs)
     update: Update = Field(default_factory=Update)
+    queue: Queue = Field(default_factory=Queue)
 
     @field_validator("timezone")
     @classmethod

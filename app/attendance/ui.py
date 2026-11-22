@@ -18,7 +18,7 @@ from app.channel import render
 from app.discord_util import answers, reply, services, thinking
 from app.i18n import t
 from app.operations.ui import TIMEOUT, person_ids, read
-from app.signup.ui import act
+from app.queued.ui import QUEUED, act_or_queue
 
 CORRECTABLE = ("attended", "no_show", "excused")
 
@@ -92,10 +92,11 @@ class RateModal(discord.ui.Modal):
             await reply(interaction, t("Give 1 to 5 stars.", locale))
             return
         await thinking(interaction)
-        client, comment = services(interaction).supervisor, self.comment.value.strip()
-        await act(interaction, lambda me: client.rate(me, self.op_id, int(typed), comment))
-        await reply(interaction, t("Thank you: your rating is saved. You can change it until the ratings close.",
-                                   locale))
+        comment = self.comment.value.strip()
+        done = t("Thank you: your rating is saved. You can change it until the ratings close.", locale)
+        if await act_or_queue(interaction, "rate", self.op_id, int(typed), comment, done=done,
+                              collapse=f"rating:{self.op_id}") is not QUEUED:
+            await reply(interaction, done)
 
 
 class Editor(discord.ui.View):
@@ -123,7 +124,9 @@ class Editor(discord.ui.View):
         persons = await person_ids(interaction, members)
         if persons is None:
             return
-        client, status = services(interaction).supervisor, self.status
-        await act(interaction, lambda me: client.correct_attendance(me, self.op_id, persons, status))
-        await reply(interaction, t(("{count} member is now {status}.", "{count} members are now {status}."), locale,
-                                   count=len(persons), status=render.status_name(status, locale)))
+        status = self.status
+        done = t(("{count} member is now {status}.", "{count} members are now {status}."), locale,
+                 count=len(persons), status=render.status_name(status, locale))
+        if await act_or_queue(interaction, "correct_attendance", self.op_id, persons, status,
+                              done=done) is not QUEUED:
+            await reply(interaction, done)

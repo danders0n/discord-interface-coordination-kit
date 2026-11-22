@@ -151,6 +151,28 @@ class NoticeDelivery(Base):
     reported_at: Mapped[datetime | None]
 
 
+class QueuedAction(Base):
+    """A member's write the supervisor could not take because it was away (docs/PLAN-remote-update.md, *Queued
+    actions*): the client ``method`` and its ``args`` (after the member's Discord id), sent in their name once it is
+    back. ``done``: what to tell them then, in their language. ``collapse``: a later row with the same key replaces
+    this one (their last sign-up choice counts)."""
+
+    __tablename__ = "queued_action"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    discord_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    method: Mapped[str] = mapped_column(String(40))
+    args: Mapped[dict[str, Any]] = mapped_column(default=dict)  # {"args": [...]}
+    done: Mapped[str] = mapped_column(Text, default="")
+    locale: Mapped[str] = mapped_column(String(20), default="en")
+    collapse: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str] = mapped_column(String(20), default="queued", index=True)  # queued, sent, failed, expired, replaced
+    answer: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]
+    finished_at: Mapped[datetime | None]
+
+
 class BotState(Base):
     """Small values the bot keeps between restarts (the feed's and the notices' cursors, the header message id)."""
 

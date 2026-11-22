@@ -17,7 +17,7 @@ import discord
 from app.channel import render
 from app.discord_util import answers, reply, services, thinking
 from app.i18n import t
-from app.signup.ui import act
+from app.queued.ui import QUEUED, act_or_queue
 
 COLOURS = {"pending": 0xF1C40F, "approved": 0x2ECC71, "rejected": 0xE74C3C, "withdrawn": 0x95A5A6}
 
@@ -91,9 +91,10 @@ class ApprovalAction(discord.ui.DynamicItem[discord.ui.Button],
             await interaction.response.send_modal(RejectModal(interaction, self.request_id))
             return
         await thinking(interaction)  # approving publishes: the channel turns public, the announcement goes out
-        client = services(interaction).supervisor
-        await act(interaction, lambda me: client.approve_request(me, self.request_id))
-        await reply(interaction, t("Approved.", interaction.locale))
+        done = t("Approved.", interaction.locale)
+        if await act_or_queue(interaction, "approve_request", self.request_id, done=done,
+                              collapse=f"request:{self.request_id}") is not QUEUED:
+            await reply(interaction, done)
 
 
 class RejectModal(discord.ui.Modal):
@@ -106,6 +107,7 @@ class RejectModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await thinking(interaction)
-        client, reason = services(interaction).supervisor, self.reason.value
-        await act(interaction, lambda me: client.reject_request(me, self.request_id, reason))
-        await reply(interaction, t("Rejected.", interaction.locale))
+        done = t("Rejected.", interaction.locale)
+        if await act_or_queue(interaction, "reject_request", self.request_id, self.reason.value, done=done,
+                              collapse=f"request:{self.request_id}") is not QUEUED:
+            await reply(interaction, done)

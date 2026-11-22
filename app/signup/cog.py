@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from app.discord_util import reply, thinking
 from app.i18n import t
+from app.queued.ui import QUEUED, act_or_queue
 from app.services import Services
 from app.signup import ui
 
@@ -38,9 +39,10 @@ class SlotCog(commands.Cog):
             await reply(interaction, t("Pick a slot from the list.", interaction.locale))
             return
         await thinking(interaction)
-        client = self.services.supervisor
-        body = await ui.act(interaction, lambda me: client.take_slot(me, op_id, int(slot)))
-        await ui.answer(interaction, body, t("You have the slot. See you there!", interaction.locale), ask_link=True)
+        done = t("You have the slot. See you there!", interaction.locale)
+        body = await act_or_queue(interaction, "take_slot", op_id, int(slot), done=done, collapse=ui.collapse(op_id))
+        if body is not QUEUED:
+            await ui.answer(interaction, body, done, ask_link=True)
 
     @take.autocomplete("slot")
     async def free_slots(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

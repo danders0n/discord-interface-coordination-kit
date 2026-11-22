@@ -21,6 +21,7 @@ from app.channel import render
 from app.discord_util import answers, fleeting, reply, services, supervisor_words, thinking
 from app.i18n import t
 from app.links.ui import link_view
+from app.queued.ui import QUEUED, act_or_queue
 from app.supervisor_client import SupervisorError
 
 T = TypeVar("T")
@@ -157,24 +158,32 @@ class SignupAction(discord.ui.DynamicItem[discord.ui.Button], template=r"signup:
         await press(interaction, self.op_id, self.action)
 
 
+def collapse(op_id: int) -> str:
+    """A member's queued sign-up choices for one operation: only the last one counts (app/queued/)."""
+    return f"signup:{int(op_id)}"
+
+
 async def press(interaction: discord.Interaction, op_id: int, action: str) -> None:
-    """A sign-up button (or ``/slot leave``): the supervisor's answer in words."""
-    client, locale = services(interaction).supervisor, interaction.locale
+    """A sign-up button (or ``/slot leave``): the supervisor's answer in words. While the supervisor is away the
+    choice is queued (app/queued/ui.py)."""
+    locale = interaction.locale
     if action == "take":
         await pick(interaction, op_id)
-    elif action == "leave":
-        await answer(interaction, await act(interaction, lambda me: client.leave(me, op_id)),
-                     t("You are off this operation.", locale))
+        return
+    if action == "leave":
+        method, args, done, ask = "leave", (op_id,), t("You are off this operation.", locale), False
     elif action == "reserve":
-        await answer(interaction, await act(interaction, lambda me: client.answer(me, op_id, "reserve")),
-                     t("You are on the reserve list; you'll be offered a freed slot.", locale))
+        method, args, done, ask = ("answer", (op_id, "reserve"),
+                                   t("You are on the reserve list; you'll be offered a freed slot.", locale), False)
     elif action in ("maybe", "cant", "notcoming"):
-        status = "maybe" if action == "maybe" else "cant"
-        await answer(interaction, await act(interaction, lambda me: client.answer(me, op_id, status)),
-                     t("Noted.", locale))
+        method, args, done, ask = "answer", (op_id, "maybe" if action == "maybe" else "cant"), t("Noted.", locale), False
     elif action == "coming":
-        await answer(interaction, await act(interaction, lambda me: client.answer(me, op_id, "coming")),
-                     t("You are coming. See you there!", locale), ask_link=True)
+        method, args, done, ask = "answer", (op_id, "coming"), t("You are coming. See you there!", locale), True
+    else:
+        return
+    body = await act_or_queue(interaction, method, *args, done=done, collapse=collapse(op_id))
+    if body is not QUEUED:
+        await answer(interaction, body, done, ask_link=ask)
 
 
 def why_not(op: dict[str, Any], now: datetime, locale: Any) -> str:
@@ -255,7 +264,12 @@ class SlotPicker(discord.ui.View):
         """Taken: the picker becomes the answer. Refused (say someone was faster): the refusal above fresh lists."""
         client, slot_id = services(interaction).supervisor, self.slot_id
         try:
-            body = await act(interaction, lambda me: client.take_slot(me, self.op_id, slot_id))
+            body = await act_or_queue(interaction, "take_slot", self.op_id, slot_id,
+                                      done=t("You have the slot. See you there!", self.locale),
+                                      collapse=collapse(self.op_id))
+            if body is QUEUED:
+                self.stop()
+                return
         except SupervisorError as exc:
             op = await act(interaction, lambda me: client.operation(self.op_id, act_as=me))
             self.squads = free(op, role_ids(interaction)) or self.squads
@@ -285,13 +299,16 @@ class OfferAction(discord.ui.DynamicItem[discord.ui.Button],
 
     @answers
     async def callback(self, interaction: discord.Interaction) -> None:
-        client, locale = services(interaction).supervisor, interaction.locale
+        locale = interaction.locale
         await thinking(interaction)
+        key = f"offer:{self.offer_id}"
         if self.action == "take":
-            body = await act(interaction, lambda me: client.accept_offer(me, self.op_id, self.offer_id))
-            await answer(interaction, body, t("You have the slot. See you there!", locale), ask_link=True)
-        else:
-            await act(interaction, lambda me: client.decline_offer(me, self.op_id, self.offer_id))
+            done = t("You have the slot. See you there!", locale)
+            body = await act_or_queue(interaction, "accept_offer", self.op_id, self.offer_id, done=done, collapse=key)
+            if body is not QUEUED:
+                await answer(interaction, body, done, ask_link=True)
+        elif await act_or_queue(interaction, "decline_offer", self.op_id, self.offer_id, done=t("Noted.", locale),
+                                collapse=key) is not QUEUED:
             await reply(interaction, t("Noted.", locale))
 
 
