@@ -43,7 +43,7 @@ except ImportError:  # run as python -m tests.fake_supervisor
 TOKEN = "test-token"
 ALL = ["events_stream", "heartbeat", "members", "act_as", "notices", "steam_links", "operations", "operation_feed",
        "operation_files", "orbat", "signups", "offers", "orbat_templates", "approval", "operation_attendance",
-       "ratings", "reports", "erasure"]
+       "ratings", "reports", "erasure", "heartbeat_state"]
 TZ = ZoneInfo("Europe/Warsaw")
 KINDS = ("internal", "guest", "hosted", "zeus", "training")
 COMING = ("zeus", "training")

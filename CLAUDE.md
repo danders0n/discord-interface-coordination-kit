@@ -89,7 +89,8 @@ exactly the settings.
   Records are written by a thread of their own (the loop only queues them: a stuck console must not freeze the
   bot); asyncio's harmless `ConnectionResetError` on Windows becomes a WARNING line.
 - `app/supervisor_client/`, `app/heartbeat.py`: HTTP client (act-as, the roster, notices, the stream, the
-  operations' feed, `meta`, files and plumbing), capabilities, heartbeat loop.
+  operations' feed, `meta`, files and plumbing), capabilities, heartbeat loop (with `heartbeat_state`: the version
+  and `EventBot.health()`; `announce()` sends `updating` before an `/update` restart and `stopping` on a plain stop).
 - Domains: `app/admin/` (`/reload`), `app/privacy/` (`/privacy` and its texts; `/privacy-erase` with a
   confirmation, erasing in the supervisor in the staff member's name; `erase.py` emptying what the bot holds when
   the `erased` notice comes: link reminders, archived messages, as the supervisor's `former:<n>` stored as `-n`).

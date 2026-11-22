@@ -83,7 +83,7 @@ async def test_setup_registers_the_guild_commands_and_starts_the_tasks(services,
         synced.append(guild.id)
         return []
 
-    async def no_heartbeat(client):
+    async def no_heartbeat(client, *_args):
         return None
 
     monkeypatch.setattr(heartbeat, "run", no_heartbeat)

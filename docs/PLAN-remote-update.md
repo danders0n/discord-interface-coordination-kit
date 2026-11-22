@@ -1,7 +1,8 @@
 # Plan: updating the bot from Discord, and the two apps watching each other
 
-Status: steps 1-2 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
-`tests/test_update.py`); steps 3-7 next. Written 2026-11-22 from a
+Status: steps 1-3 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
+`tests/test_update.py`; the heartbeat's state and health, `tests/test_supervisor_client.py`, against the supervisor's
+part, built on its `feature/discord-roles` branch); steps 4-7 next. Written 2026-11-22 from a
 short design interview with the owner. The supervisor's part is its `docs/PLAN-bot-health.md`; the two are built and
 deployed separately (*Order of release*). See *As built* at the end for where the code departs from this plan.
 
@@ -340,6 +341,19 @@ Step 2 (2026-11-22):
   joins it in step 3. Then `StaffLog.flush()` (which returns at once when no staff-log task runs) and the exit.
 - **The start-up report** runs in `on_ready` right after `boot.ready()`, so a rolled-back or given-up update is told
   by the version that came up.
+
+Step 3 (2026-11-22):
+
+- **The supervisor's part came first** (its `docs/PLAN-bot-health.md`, built the same day), so the contract has the
+  fields; `heartbeat_state` stays optional here (not in `supervisor_check.CAPABILITIES`).
+- **`to` is a field of its own** (the supervisor's *As built*): `version` is the commit the bot runs (short, read
+  once in `setup_hook` with `Updater.head()`), `to` the short commit an update goes to. A restart sends `updating`
+  without `to`. `eta_s`: 60 s, or 600 s when the dependencies change.
+- **`heartbeat.announce()`** sends `updating` / `stopping` within 5 seconds or gives up, so neither a restart nor a
+  stop waits for a supervisor that is away. `updating` goes from `EventBot.announce_restart` (the updater's hook,
+  before the presence); `stopping` from `EventBot.close()` unless a restart was asked for.
+- **Health:** `discord` (ready and not closed), `guild`, `scheduler` (`idle` / `busy` / `held`),
+  `scheduler_started`. The queue and the supervisor as the bot sees it join in steps 4 and 5.
 
 ## Out of scope
 

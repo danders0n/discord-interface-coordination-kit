@@ -13,7 +13,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from app import boot, heartbeat, startup_checks, supervisor_check
+from app import boot, heartbeat, restarter, startup_checks, supervisor_check
 from app.admin.cog import AdminCog
 from app.approval.moderation import Moderation
 from app.approval.ui import ApprovalAction
@@ -86,12 +86,24 @@ class EventBot(commands.Bot):
         if services.updater is None:
             services.updater = Updater(services.store, services.scheduler, services.staff)
         services.updater.announce = self.announce_restart
+        self.version = ""  # the commit, short (setup_hook), for the heartbeat
 
     async def announce_restart(self, plan: dict) -> None:
-        """Just before a restart for /update: members see the bot is updating, not gone."""
+        """Just before a restart for /update: the supervisor holds its silence alert for the time announced
+        (app/heartbeat.py), and members see the bot is updating, not gone."""
+        await heartbeat.announce(self.services.supervisor, "updating", self.version, to=(plan.get("to") or "")[:7],
+                                 eta_s=heartbeat.ETA_PIP if plan.get("requirements") else heartbeat.ETA,
+                                 health=self.health)
         name = t("Updating…", self.services.settings.language) if plan.get("to") else \
             t("Restarting…", self.services.settings.language)
         await self.change_presence(status=discord.Status.idle, activity=discord.CustomActivity(name=name))
+
+    def health(self) -> dict:
+        """What the heartbeat tells the supervisor about the bot (shown on its Users page)."""
+        scheduler = self.services.scheduler
+        return {"discord": self.is_ready() and not self.is_closed(), "guild": self.guild() is not None,
+                "scheduler": "held" if scheduler.held else "busy" if scheduler.running is not None else "idle",
+                "scheduler_started": any(task.get_name() == "scheduler" for task in self._tasks)}
 
     @property
     def guild_object(self) -> discord.Object:
@@ -218,9 +230,12 @@ class EventBot(commands.Bot):
         await self.tree.sync(guild=self.guild_object)
         # The scheduler waits for on_ready: its actions need the guild and the resolved ids, and one run before
         # them would be marked done having done nothing (an archive, a ping).
+        head = await asyncio.to_thread(self.services.updater.head)
+        self.version = (head or "")[:7]
         self._tasks = [
             asyncio.create_task(self.services.staff.run(self._send_staff), name="staff-log"),
-            asyncio.create_task(heartbeat.run(self.services.supervisor), name="heartbeat"),
+            asyncio.create_task(heartbeat.run(self.services.supervisor, lambda: self.version, self.health),
+                                name="heartbeat"),
         ]
 
     def start_scheduler(self) -> None:
@@ -306,6 +321,8 @@ class EventBot(commands.Bot):
     async def close(self) -> None:
         for task in self._tasks:
             task.cancel()
+        if not restarter.exit_requested() and not self.is_closed():  # a plain stop (an update said `updating`)
+            await heartbeat.announce(self.services.supervisor, "stopping", self.version, health=self.health)
         await self.services.supervisor.close()
         await self.services.db.close()
         await super().close()

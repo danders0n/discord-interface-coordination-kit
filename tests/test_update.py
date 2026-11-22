@@ -427,6 +427,27 @@ async def test_update_status_says_who_restarts_the_bot(services, updater):
     assert "on main" in text and "Started again by: console." in text
 
 
+async def test_the_bot_tells_the_supervisor_it_is_updating(services, fake, monkeypatch):
+    from app.bot import EventBot
+
+    bot = EventBot(services)
+    presence = []
+
+    async def change_presence(**kwargs):
+        presence.append(kwargs["activity"].name)
+
+    monkeypatch.setattr(bot, "change_presence", change_presence)
+    bot.version = "abc1234"
+    await bot.announce_restart({"kind": "update", "to": "d" * 40, "requirements": True})
+    beat = fake.heartbeats[-1]
+    assert (beat["state"], beat["version"], beat["to"], beat["eta_s"]) == ("updating", "abc1234", "ddddddd", 600)
+    assert beat["health"]["scheduler"] in ("idle", "held") and beat["health"]["discord"] is False
+    assert presence == ["Aktualizacja…"]  # (the public language)
+    await bot.announce_restart({"kind": "restart", "to": None})
+    assert (fake.heartbeats[-1]["eta_s"], fake.heartbeats[-1].get("to")) == (60, None)
+    await bot.http.close()
+
+
 def test_the_check_embed_in_polish():
     check = {"branch": "main", "head": "a" * 40, "tip": "b" * 40, "requirements": True, "migrations": True,
              "dirty": ["x", "y"], "local_commits": [],

@@ -26,6 +26,47 @@ async def test_capabilities_gate_the_heartbeat(supervisor):
     assert len(state.heartbeats) == 1
 
 
+async def test_the_heartbeat_carries_the_version_and_health(supervisor):
+    state, client = supervisor
+    assert await heartbeat.beat_once(client, refresh=True, version="abc1234", health=lambda: {"discord": True})
+    assert state.heartbeats[-1] == {"name": "discord-bot", "interval_s": 60, "version": "abc1234",
+                                    "health": {"discord": True}}
+    state.capabilities = ["heartbeat"]  # a supervisor before heartbeat_state: the old body
+    assert await heartbeat.beat_once(client, refresh=True, version="abc1234", health=lambda: {"discord": True})
+    assert state.heartbeats[-1] == {"name": "discord-bot", "interval_s": 60}
+
+
+async def test_a_broken_health_still_reports(supervisor):
+    state, client = supervisor
+
+    def broken():
+        raise RuntimeError("no")
+
+    assert await heartbeat.beat_once(client, refresh=True, health=broken)
+    assert "health" not in state.heartbeats[-1]
+
+
+async def test_an_update_and_a_stop_are_announced(supervisor):
+    state, client = supervisor
+    assert await heartbeat.announce(client, "updating", "abc1234", to="def5678", eta_s=600)
+    assert state.heartbeats[-1] == {"name": "discord-bot", "interval_s": 60, "version": "abc1234", "state": "updating",
+                                    "to": "def5678", "eta_s": 600}
+    assert await heartbeat.announce(client, "stopping", "abc1234")
+    assert state.heartbeats[-1] == {"name": "discord-bot", "interval_s": 60, "version": "abc1234", "state": "stopping"}
+    state.capabilities = ["heartbeat"]
+    await client.refresh_info()
+    assert not await heartbeat.announce(client, "stopping")  # the supervisor wouldn't understand: nothing sent
+    assert len(state.heartbeats) == 2
+
+
+async def test_an_announcement_to_a_supervisor_that_is_away_gives_up():
+    client = SupervisorClient("http://127.0.0.1:1", TOKEN)
+    try:
+        assert not await heartbeat.announce(client, "updating", to="def5678", eta_s=60)
+    finally:
+        await client.close()
+
+
 async def test_an_older_supervisor_offers_nothing_new(supervisor):
     state, client = supervisor
     state.has_system_info = False

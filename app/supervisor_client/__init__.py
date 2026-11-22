@@ -123,8 +123,11 @@ class SupervisorClient:
             await self.refresh_info()
         return self.info
 
-    async def heartbeat(self, name: str, interval_s: int) -> None:
-        await self.request("POST", "/api/integrations/heartbeat", json={"name": name, "interval_s": interval_s})
+    async def heartbeat(self, name: str, interval_s: int, **extra: Any) -> None:
+        """``extra`` (with the ``heartbeat_state`` capability): ``state``, ``version``, ``to``, ``eta_s``, ``health``;
+        the ones given only."""
+        body = {"name": name, "interval_s": interval_s} | {k: v for k, v in extra.items() if v is not None}
+        await self.request("POST", "/api/integrations/heartbeat", json=body)
 
     async def me(self, act_as: int | None = None) -> dict[str, Any]:
         """Who the call runs as: the bot's account, or with ``act_as`` the member (``permissions`` ...)."""

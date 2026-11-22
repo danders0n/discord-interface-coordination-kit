@@ -309,6 +309,27 @@
       },
       "HeartbeatIn": {
         "properties": {
+          "eta_s": {
+            "default": 0,
+            "description": "updating: how long it expects to be away (seconds)",
+            "maximum": 3600.0,
+            "minimum": 0.0,
+            "title": "Eta S",
+            "type": "integer"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whatever it wants staff to see (at most 2 KB of JSON)",
+            "title": "Health"
+          },
           "interval_s": {
             "description": "How often it reports (seconds)",
             "maximum": 3600.0,
@@ -322,6 +343,31 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9._-]+$",
             "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "default": "ok",
+            "description": "updating: it restarts for an update now (silence is not alerted within eta_s); stopping: a plain stop (the alert says so)",
+            "enum": [
+              "ok",
+              "updating",
+              "stopping"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "to": {
+            "default": "",
+            "description": "updating: the version it goes to",
+            "maxLength": 40,
+            "title": "To",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "description": "The version it runs, e.g. a short commit",
+            "maxLength": 40,
+            "title": "Version",
             "type": "string"
           }
         },
@@ -1368,7 +1414,7 @@
         "operationId": "stream_api_events_stream_get",
         "parameters": [
           {
-            "description": "Comma separated: server, operation, job, servers, member, notice (default: all)",
+            "description": "Comma separated: server, operation, job, servers, member, notice, system (default: all)",
             "in": "query",
             "name": "kinds",
             "required": false,
@@ -1381,7 +1427,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Comma separated: server, operation, job, servers, member, notice (default: all)",
+              "description": "Comma separated: server, operation, job, servers, member, notice, system (default: all)",
               "title": "Kinds"
             }
           },
@@ -1461,7 +1507,7 @@
     },
     "/api/integrations/heartbeat": {
       "post": {
-        "description": "Any signed-in caller: \"this program is alive\". Silent for 5 intervals, it gets an ``integration_silent``\nalert in Discord; ``integration_back`` when it reports again. Per account and name.",
+        "description": "Any signed-in caller: \"this program is alive\". Silent for 5 intervals, it gets an ``integration_silent``\nalert in Discord; ``integration_back`` when it reports again. Per account and name. ``state: updating`` just\nbefore an update's restart holds the alert for ``eta_s`` more and records ``integration_updating``.",
         "operationId": "heartbeat_api_integrations_heartbeat_post",
         "requestBody": {
           "content": {
