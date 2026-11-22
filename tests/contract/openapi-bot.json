@@ -1516,7 +1516,7 @@
     },
     "/api/members": {
       "get": {
-        "description": "Persons from the roster with their account (role, state, last login link), the app role their Discord roles\ngive, and their Steam link's state.",
+        "description": "Persons from the roster with their account (admin, state, last login link), the permissions their Discord\nroles grant, and their Steam link's state.",
         "operationId": "list_members_api_members_get",
         "parameters": [
           {
@@ -1831,7 +1831,7 @@
     },
     "/api/members/roles": {
       "put": {
-        "description": "The guild's roles (id, name, position, colour). A role no longer listed is kept, marked gone.",
+        "description": "The guild's roles (id, name, position, colour). A role no longer listed is kept, marked gone: it grants nothing\nthen, and the accounts follow at once.",
         "operationId": "push_roles_api_members_roles_put",
         "requestBody": {
           "content": {

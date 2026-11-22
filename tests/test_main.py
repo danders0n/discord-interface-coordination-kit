@@ -3,8 +3,9 @@ import sqlite3
 import pytest
 from conftest import make_settings
 
-from app.__main__ import main, prepare_database
+from app.__main__ import main
 from app.bot import EventBot, intents
+from app.cli import prepare_database
 from app.db import migrate
 
 
@@ -26,7 +27,7 @@ async def test_an_old_database_is_backed_up_before_migrating(tmp_path):
 
 async def test_run_wires_the_services_and_starts_the_bot(tmp_path, monkeypatch):
     import app.bot
-    from app import __main__ as entry, logs
+    from app import cli as entry, logs
 
     started = []
 

@@ -62,7 +62,12 @@ exactly the settings.
 
 ## Code map
 
-- `app/__main__.py`: the CLI; `run` wires everything (settings store, logging, database, scheduler, services, bot).
+- `app/__main__.py`: stdlib only; `run` goes through `app/boot.py` first (an update to finish or roll back, the
+  console loop), then `app/cli.py`: the CLI; `run` wires everything (settings store, logging, database, scheduler,
+  services, bot). `app/boot.py` (standard library only, importable by every version: the marker
+  `.app-update/pending.json`, `git reset`, pip, the database restore, the watchdog, `ready()` from the first
+  `on_ready`) and `app/restarter.py` (`request_exit()` closes the bot, which exits with 75; `detect()` reads
+  `BOT_RESTARTER`) are the remote update's ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md)).
 - `app/bot.py`: the Discord client, guild-only commands, background tasks, the start-up check and staff note.
 - `app/services.py`: what cogs share. `app/discord_util.py`: `require(Perm)`, `reply()` (plain text
   replies disappear after `times.reply_seconds`), `finish()` (a last word replacing a pressed message), the

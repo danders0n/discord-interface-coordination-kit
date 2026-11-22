@@ -13,7 +13,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from app import heartbeat, startup_checks, supervisor_check
+from app import boot, heartbeat, startup_checks, supervisor_check
 from app.admin.cog import AdminCog
 from app.approval.moderation import Moderation
 from app.approval.ui import ApprovalAction
@@ -274,6 +274,7 @@ class EventBot(commands.Bot):
             text += "\n" + t("Problems with the configuration:", settings.language) + "\n"
             text += "\n".join(f"- {problem}" for problem in problems)
         self.services.staff.post(text)
+        await asyncio.to_thread(boot.ready)  # an update that got here is done (app/boot.py); the supervisor may wait
         try:
             self.services.channels.header.request()
             try:
