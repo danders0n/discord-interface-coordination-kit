@@ -105,6 +105,8 @@ def buttons(op: dict[str, Any], language: Any, now: datetime) -> discord.ui.View
         chunks = [squads[i:i + PER_LIST] for i in range(0, len(squads), PER_LIST)][:LISTS] or [[]]
         for number, chunk in enumerate(chunks):
             view.add_item(SquadList(op_id, number, chunk, language, disabled=closed or not_open))
+    elif render.specialist_roles(op):
+        view.add_item(RoleList(op_id, render.specialist_roles(op), language, disabled=closed or not_open))
     for action in COMING_ACTIONS if coming else ORBAT_ACTIONS:
         button = SignupAction(op_id, action, labels[action], styles.get(action, discord.ButtonStyle.secondary))
         button.item.disabled = closed or (not_open and action in ("reserve", "coming")) or (full and action == "coming")
@@ -140,6 +142,45 @@ class SquadList(discord.ui.DynamicItem[discord.ui.Select], template=r"squad:(?P<
         values = (interaction.data or {}).get("values") or ["0"]
         await thinking(interaction)  # (a rush at sign-up opening: answer within Discord's 3 s)
         await pick(interaction, self.op_id, int(values[0]))
+
+
+NO_ROLE = "-"  # RoleList's option for coming as no specialist role
+
+
+class RoleList(discord.ui.DynamicItem[discord.ui.Select], template=r"coming:(?P<op>\d+)"):
+    """A Zeus or training operation's specialist roles, under its list: picking one is *Coming* as it (coming
+    already: the role changes). The supervisor checks the role and its limit."""
+
+    def __init__(self, op_id: int, roles: list[dict[str, Any]] | None = None, language: Any = None,
+                 *, disabled: bool = False) -> None:
+        options = []
+        for role in (roles or [])[:PER_LIST - 1]:
+            count, limit = int(role.get("count") or 0), role.get("limit")
+            full = bool(limit) and count >= int(limit)
+            options.append(discord.SelectOption(
+                label=str(role["name"])[:100], value=str(role["name"])[:100],
+                description=(t("Full", language) + " · " if full else "") + (f"{count}/{limit}" if limit else str(count))))
+        options.append(discord.SelectOption(label=t("No specialist role", language)[:100], value=NO_ROLE))
+        super().__init__(discord.ui.Select(custom_id=f"coming:{op_id}", options=options, row=0, disabled=disabled,
+                                           placeholder=t("Come as a specialist role", language)[:150]))
+        self.op_id = op_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match: Any) -> RoleList:
+        return cls(int(match["op"]))
+
+    @answers
+    async def callback(self, interaction: discord.Interaction) -> None:
+        values = (interaction.data or {}).get("values") or [NO_ROLE]
+        role = None if values[0] == NO_ROLE else values[0]
+        await thinking(interaction)
+        locale = interaction.locale
+        done = t("You are coming as {role}. See you there!", locale, role=role) if role else \
+            t("You are coming. See you there!", locale)
+        body = await act_or_queue(interaction, "answer", self.op_id, "coming", role, done=done,
+                                  collapse=collapse(self.op_id))
+        if body is not QUEUED:
+            await answer(interaction, body, done, ask_link=True)
 
 
 class SignupAction(discord.ui.DynamicItem[discord.ui.Button], template=r"signup:(?P<op>\d+):(?P<action>[a-z]+)"):

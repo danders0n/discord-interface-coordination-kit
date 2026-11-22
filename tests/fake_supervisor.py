@@ -49,9 +49,9 @@ KINDS = ("internal", "guest", "hosted", "zeus", "training")
 COMING = ("zeus", "training")
 PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
-EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "assembly_at", "start_at",
-            "duration_minutes", "signup_opens_at", "signup_limit", "how_to_join", "dont_end_automatically", "public",
-            "hold", "note")
+EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "author_name", "assembly_at",
+            "start_at", "duration_minutes", "signup_opens_at", "signup_limit", "specialist_roles", "how_to_join",
+            "dont_end_automatically", "public", "hold", "note")
 TIMES = ("assembly_at", "start_at", "signup_opens_at")
 PUBLISH, SIGNUP, APPROVE = "operations.publish", "operations.signup", "operations.approve"
 SLOT_LINE = re.compile(r"^(?P<lock>!)?\s*(?P<name>.*?)(?:\s+x(?P<count>\d+))?(?:\s*\[(?P<role>[^\[\]]*)\])?"
@@ -219,9 +219,10 @@ class State:
         assembly = assembly or self.now + timedelta(days=3)
         op = {"id": max(self.operations, default=0) + 1, "kind": kind, "title": title, "status": "draft",
               "climate": "", "climate_role_id": None, "host_group_id": None, "group_ids": [], "created_by": by,
-              "author_person_id": None, "organisers": [], "assembly_at": assembly,
+              "author_person_id": None, "author_name": "", "organisers": [], "assembly_at": assembly,
               "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
-              "signup_opens_at": None, "signup_limit": None, "how_to_join": "", "dont_end_automatically": False,
+              "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
+              "dont_end_automatically": False,
               "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
@@ -321,12 +322,13 @@ class State:
         return displaced
 
     def _list(self, op: dict[str, Any], person_id: int, status: str | None, *, top: int | None = None,
-              assigned: bool = False) -> None:
-        """Put a person on a list (off any other), or off every list (``status`` None)."""
+              assigned: bool = False, role: str = "") -> None:
+        """Put a person on a list (off any other), or off every list (``status`` None); ``role``: Coming as it."""
         op["signups"] = [e for e in op["signups"] if e["person_id"] != person_id]
         if status is None:
             return
-        entry = {"person_id": person_id, "status": status, "assigned": assigned, "reserve_position": None}
+        entry = {"person_id": person_id, "status": status, "assigned": assigned, "reserve_position": None,
+                 "role": role if status == "coming" else ""}
         if status == "reserve":
             reserve = [e for e in op["signups"] if e["status"] == "reserve"]
             entry["reserve_position"] = 0
@@ -395,12 +397,17 @@ class State:
         for entry in sorted(op["signups"], key=lambda e: (e["reserve_position"] is None, e["reserve_position"] or 0)):
             out = self._person_out(entry["person_id"])
             if out is not None:
-                lists[entry["status"]].append(out | {"assigned": entry["assigned"], "missing_dlc": []})
+                lists[entry["status"]].append(out | {"assigned": entry["assigned"], "missing_dlc": [],
+                                                     "role": entry.get("role") or None})
+        roles = [{"name": r["name"], "limit": r.get("limit"), "count": sum(
+            e["status"] == "coming" and e.get("role") == r["name"] for e in op["signups"])}
+            for r in op.get("specialist_roles") or []]
         return {
             "slots": counts,
             "signup": {"state": self.signup_state(op), "opens_at": iso(op["signup_opens_at"]),
                        "limit": op["signup_limit"], "coming": coming,
-                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"])},
+                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"]),
+                       "roles": roles},
             "orbat": [{"id": squad["id"], "name": squad["name"], "free": sum(
                 s["holder"] is None and not s["locked"] for s in squad["slots"]), "slots": [
                 {"id": s["id"], "name": s["name"], "locked": s["locked"], "offered": s["id"] in offered,
@@ -419,7 +426,8 @@ class State:
         slot, entry = self.held(op, person["id"]), self.entry(op, person["id"])
         place = ({"slot_id": slot["id"], "slot": slot["name"], "locked": slot["locked"],
                   "squad": next(s["name"] for s in op["squads"] if slot in s["slots"])} if slot is not None else
-                 {"list": entry["status"], "reserve_position": entry["reserve_position"]} if entry is not None else None)
+                 {"list": entry["status"], "reserve_position": entry["reserve_position"],
+                  "role": entry.get("role") or None} if entry is not None else None)
         offers = [o["id"] for o in op["offers"] if o["state"] == "open" and (
             o["person_id"] == person["id"] or (o["person_id"] is None and entry and entry["status"] == "reserve"))]
         actions, state = [], self.signup_state(op)
@@ -428,6 +436,8 @@ class State:
             if op["kind"] in COMING:
                 if state == "open" and current != "coming" and not self.board(op)["signup"]["full"]:
                     actions.append("coming")
+                elif state == "open" and current == "coming" and op.get("specialist_roles"):
+                    actions.append("coming")  # (another role)
                 if current != "cant":
                     actions.append("cant")
             else:
@@ -576,12 +586,12 @@ class State:
             "title": op["title"], "status": op["status"], "climate": op["climate"],
             "climate_role_id": op["climate_role_id"], "host_group": self._group(op["host_group_id"]),
             "groups": [g for g in map(self._group, op["group_ids"]) if g], "created_by": op["created_by"],
-            "author": self._person(op["author_person_id"]),
+            "author": self._person(op["author_person_id"]), "author_name": op.get("author_name") or "",
             "organisers": [p for p in map(self._person, op["organisers"]) if p],
             "assembly_at": iso(op["assembly_at"]), "start_at": iso(op["start_at"]),
             "duration_minutes": op["duration_minutes"], "ends_at": iso(ends),
             "signup_opens_at": iso(op["signup_opens_at"]), "signup_limit": op["signup_limit"],
-            "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
+            "specialist_roles": [dict(r) for r in op.get("specialist_roles") or []], "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
             "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
             "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
@@ -1235,14 +1245,27 @@ def make_app(state: State | None = None) -> web.Application:
         op = _get(request)
         if isinstance(op, web.Response):
             return op
-        status = (await request.json())["status"]
+        body = await request.json()
+        status, wanted = body["status"], (body.get("role") or "").strip()
         person, refused = _signer(op, request, answer=status in ("maybe", "cant"))
         if refused is not None:
             return refused
         if (status == "coming") != (op["kind"] in COMING) and status != "cant":
             return _refuse("wrong_kind", "That answer doesn't fit this operation")
-        if status == "coming" and state.board(op)["signup"]["full"]:
+        entry, role = state.entry(op, person["id"]), None
+        again = entry is not None and entry["status"] == "coming"
+        if status == "coming" and wanted:  # (as the real Signups.coming: by name, any case, with its limit)
+            role = next((r for r in op.get("specialist_roles") or [] if r["name"].casefold() == wanted.casefold()), None)
+            if role is None:
+                return _error(422, f"OP-{op['id']} has no specialist role {wanted}", code="unknown_role")
+        if status == "coming" and again and (entry.get("role") or "") == (role["name"] if role else ""):
+            return _refuse("already", "You are coming already")
+        if status == "coming" and not again and state.board(op)["signup"]["full"]:
             return _refuse("full", "Everybody who may come is coming already")
+        if role is not None and role.get("limit") and sum(
+                e["status"] == "coming" and e.get("role") == role["name"] and e["person_id"] != person["id"]
+                for e in op["signups"]) >= role["limit"]:
+            return _refuse("role_full", f"{role['name']} is full ({role['limit']})", role=role["name"])
         if status == "reserve" and any(s["holder"] is None and not s["locked"] for s in state.slots(op)):
             return _refuse("not_full", "There is a free slot: take it")
         mine = state.held(op, person["id"])
@@ -1250,7 +1273,7 @@ def make_app(state: State | None = None) -> web.Application:
             return _refuse("locked", "An organiser assigned you a slot: ask them to move you")
         if mine is not None:
             state.free(op, mine)
-        state._list(op, person["id"], status)
+        state._list(op, person["id"], status, role=role["name"] if role else "")
         _changed(op, request)
         return _signed(op, request)
 

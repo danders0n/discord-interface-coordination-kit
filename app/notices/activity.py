@@ -59,7 +59,7 @@ class _Line:
         return render.plain(value) if value else "—"
 
     def kind(self, kind: str) -> str:
-        return render.plain(self.kinds.get(kind) or kind)
+        return render.plain(self.kinds.get(kind) or render.kind_name(kind, None, self.language))
 
 
 # ---------------------------------------------------------------- the operation
@@ -79,7 +79,8 @@ def _copied(x: _Line) -> list[str]:
 def _label(field: str, language: str) -> str:
     return {"kind": t("Kind", language), "title": t("Title", language), "climate": t("Played preset", language),
             "host_group_id": t("Host group", language), "group_ids": t("Invited groups", language),
-            "author_person_id": t("Author", language), "assembly_at": t("Assembly", language),
+            "author_person_id": t("Author", language), "author_name": t("Author", language),
+            "specialist_roles": t("Specialist roles", language), "assembly_at": t("Assembly", language),
             "start_at": t("Start", language), "duration_minutes": t("Duration", language),
             "signup_opens_at": t("Sign-up opens", language), "signup_limit": t("Sign-up limit", language),
             "how_to_join": t("How to join", language), "dont_end_automatically": t("Don't end automatically", language),
@@ -100,6 +101,8 @@ def _value(x: _Line, field: str, value: Any) -> str:
         return x.kind(value)
     if field == "author_person_id":
         return x.who(value)
+    if field == "specialist_roles":
+        return render.roles_text(value or [], ", ") or "—"
     if field in BOOLEANS or isinstance(value, bool):
         return t("yes", language) if value else t("no", language)
     if field == "hold":
@@ -257,6 +260,8 @@ def _answered(x: _Line) -> list[str]:
     else:
         line = t("{member} answered {answer} for {operation}.", x.language, member=member,
                  answer=_list_name(x, status), operation=x.operation)
+    if status == "coming" and x.get("role"):
+        line += " " + t("(as {role})", x.language, role=x.text(x["role"]))
     if x.get("left_slot"):
         line += " " + t("(gave up {slot})", x.language, slot=x.text(x["left_slot"]))
     return [line]

@@ -466,6 +466,13 @@
             "title": "Assembly At",
             "type": "string"
           },
+          "author_name": {
+            "default": "",
+            "description": "the author typed, shown before the person (guest: someone who isn't a member here)",
+            "maxLength": 100,
+            "title": "Author Name",
+            "type": "string"
+          },
           "author_person_id": {
             "anyOf": [
               {
@@ -499,7 +506,7 @@
                 "type": "null"
               }
             ],
-            "description": "A name from the climate list (stored by value)",
+            "description": "A played preset: a name from that list (stored by value)",
             "title": "Climate"
           },
           "dont_end_automatically": {
@@ -647,6 +654,15 @@
             ],
             "title": "Signup Opens At"
           },
+          "specialist_roles": {
+            "description": "zeus / training: what a member may come as (e.g. Medic)",
+            "items": {
+              "$ref": "#/components/schemas/SpecialistRoleIn"
+            },
+            "maxItems": 10,
+            "title": "Specialist Roles",
+            "type": "array"
+          },
           "start_at": {
             "format": "date-time",
             "title": "Start At",
@@ -685,6 +701,18 @@
               }
             ],
             "title": "Assembly At"
+          },
+          "author_name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Name"
           },
           "author_person_id": {
             "anyOf": [
@@ -913,6 +941,21 @@
               }
             ],
             "title": "Signup Opens At"
+          },
+          "specialist_roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SpecialistRoleIn"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specialist Roles"
           },
           "start_at": {
             "anyOf": [
@@ -1235,6 +1278,19 @@
       },
       "SignupIn": {
         "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "coming: one of the operation's specialist roles (null: none); coming already, it changes the role",
+            "title": "Role"
+          },
           "status": {
             "description": "maybe, cant (a zeus operation's Not coming), reserve (no slot free for you) or coming (zeus / training)",
             "enum": [
@@ -1251,6 +1307,34 @@
           "status"
         ],
         "title": "SignupIn",
+        "type": "object"
+      },
+      "SpecialistRoleIn": {
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "how many may come as it (null: no limit)",
+            "title": "Limit"
+          },
+          "name": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SpecialistRoleIn",
         "type": "object"
       },
       "SteamBody": {
@@ -5324,7 +5408,7 @@
         "x-act-as": true
       },
       "put": {
-        "description": "Maybe, Can't come (Not coming), the reserve list (only when no slot is free for you), or Coming (zeus /\ntraining; code full at the limit). Maybe and Can't come work before sign-up opens.",
+        "description": "Maybe, Can't come (Not coming), the reserve list (only when no slot is free for you), or Coming (zeus /\ntraining; code full at the limit). Coming takes one of the operation's specialist roles, ``role`` (code\nrole_full at its limit, unknown_role); coming already, it changes the role. Maybe and Can't come work before\nsign-up opens.",
         "operationId": "answer_api_operations__op_id__signup_put",
         "parameters": [
           {

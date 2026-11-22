@@ -110,7 +110,7 @@ recomputed on every change of that operation:
 | Ping | Rule |
 |---|---|
 | Sign-up open | At `signup_opens_at`, the announcement and climate roles in the thread; skipped if more than 1 h late. Publishing without a later opening posts no ping (the announcement is it). |
-| Reminders | At `times.reminder_minutes` before the assembly, every slot holder (or *Coming*) in the thread, split past 2000 characters; skipped once a later reminder or the assembly has passed. |
+| Reminders | At `times.reminder_minutes` before the assembly, every slot holder (or *Coming*) in the operation's channel (decided 2026-11-22; before, the thread), split past 2000 characters; skipped once a later reminder or the assembly has passed. |
 
 ### Notices
 
@@ -439,7 +439,8 @@ templates, approval; its `State` gained `set_orbat`, `sign`, `free`, `request` f
   offer no longer open, the message is closed (*has ended*, no buttons), after one fresh read of the operation, since an
   older one from the feed looks the same.
 - **Reminders:** `reminder:<op>:<minutes>` actions while ahead, recomputed on every redraw (an offset /reload removed is
-  dropped); the slot holders and Coming in the thread, skipped once the assembly or a later reminder has come.
+  dropped); the slot holders and Coming in the thread (the channel since 2026-11-22, below), skipped once the
+  assembly or a later reminder has come.
 - **Pings** (`OperationChannels.ping`): the thread, mentions split at 2000 characters, a view on the first message; a
   draft (no thread): by DM; an archived thread (a cancelled operation, archived at once) is opened for the message and
   locked again.
@@ -584,6 +585,32 @@ the config language, as `master`'s `app/activity.py` did.
   supervisor's webhook), templates, climates and groups.
 - The panel's *End* no longer posts its own line: the supervisor's `operation.ended` says it, also for an end in the
   app.
+
+### Operation tweaks (2026-11-22)
+
+Asked by the owner after the test server: with the supervisor's matching change (its `feature/operation-tweaks`).
+
+- **Reminders go to the operation's channel**, under its messages, not to the thread (`_reminder_action`), so they are
+  seen with the operation. They are the bot's own messages outside `operation_channel.messages`: redraws keep to their
+  stored ids and append after them, and the archive skips the bot's messages. Without the channel at hand: the thread,
+  as other pings. Every other ping still goes to the thread.
+- **The preset message is a heading**, `## Modset for the Arma 3 Launcher: name`, with the empty first line, as the
+  OPORD's paragraphs.
+- **The kind is translated** (`render.kind_name` / `op_kind`): the supervisor's English default names (`Internal`,
+  `Guest`, `Hosted`, `Zeus`, `Training`) in the config language (or the member's, privately; `guest` is *External*,
+  *Zewnętrzna*); a name its admin chose is shown as it is. Everywhere: the info, the topic, the announcement, the
+  header calendar, `/operations`, the wizard, the approval request, the archive, the staff log.
+- **An external (guest) operation's author can be typed** (`author_name`, at most 100 characters): someone of the
+  host group who isn't on this server. The panel's *Author* (guest only); shown before the person in the info and the
+  archive. Organiser rights stay with the creator and the co-organisers.
+- **Zeus and training operations have specialist roles** (`specialist_roles`: `[{name, limit}]`, at most 10, names
+  unique): the panel's *Specialist roles*, one per line, `Medic x3` for at most 3 (`ui.parse_roles`). A member comes
+  *as* one: the persistent list `coming:<op>` (`RoleList`) under the Coming list, a role or *No specialist role*;
+  coming already, it changes the role (`answer(..., "coming", role)`, queueable like the other answers). The list
+  shows each role with its people and limit, then *Others coming* and *Not coming*. Refusals: `role_full`,
+  `unknown_role`, `bad_roles`. The supervisor keeps the role on the sign-up, counts the limit in the same locked step
+  as the operation's, and drops a role that an edit removed.
+- **The supervisor says *played preset*** for what its code and API still call `climate` (the bot already did).
 
 ### Next
 

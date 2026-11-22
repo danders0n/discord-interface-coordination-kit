@@ -285,10 +285,11 @@ class SupervisorClient:
         """Take the slot if it is still free (one atomic update), moving from the member's other place."""
         return await self.request("POST", f"/api/operations/{int(op_id)}/slots/{int(slot_id)}/take", act_as=act_as)
 
-    async def answer(self, act_as: int, op_id: int, status: str) -> dict[str, Any]:
-        """``maybe``, ``cant``, ``reserve`` or ``coming`` (Zeus and training)."""
-        return await self.request("PUT", f"/api/operations/{int(op_id)}/signup", act_as=act_as,
-                                  json={"status": status})
+    async def answer(self, act_as: int, op_id: int, status: str, role: str | None = None) -> dict[str, Any]:
+        """``maybe``, ``cant``, ``reserve`` or ``coming`` (Zeus and training), the last as one of the operation's
+        specialist roles (``role``; coming already, it changes the role)."""
+        body: dict[str, Any] = {"status": status} | ({"role": role} if role else {})
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/signup", act_as=act_as, json=body)
 
     async def leave(self, act_as: int, op_id: int) -> dict[str, Any]:
         """Off the member's slot and every list."""

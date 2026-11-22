@@ -337,7 +337,7 @@ class OperationChannels:
         await self._plumbing(row)
         await self._announce(guild, row)
         if row.archived_at is None and op["status"] in render.OPEN:
-            self._rename(op_id, channel, op["channel_name"], render.topic(op, self.store.current.tz))
+            self._rename(op_id, channel, op["channel_name"], render.topic(op, self.store.current.tz, self.language))
         self._sort_later(channel.category_id)
         await self._schedule(row)
 
@@ -347,7 +347,7 @@ class OperationChannels:
         category = guild.get_channel(self.ids().events_category)
         channel = await guild.create_text_channel(op["channel_name"], category=category,
                                                   overwrites=self._overwrites(guild, op),
-                                                  topic=render.topic(op, self.store.current.tz))
+                                                  topic=render.topic(op, self.store.current.tz, self.language))
         await self._save(row.operation_id, channel_id=channel.id, category_id=channel.category_id, thread_id=None,
                          messages={}, attached={}, drawn={})
         if self.meta:  # (else the staff roles join once the feed has read them)
@@ -669,7 +669,9 @@ class OperationChannels:
             roles=[discord.Object(r) for r in roles], users=False, everyone=False))
 
     async def _reminder_action(self, action: Action, now: datetime) -> None:
-        """The slot holders (or Coming) in the thread; skipped once the assembly or a later reminder has come."""
+        """The slot holders (or Coming) in the operation's channel, under its messages (not in the thread: the
+        reminder is seen with the operation); skipped once the assembly or a later reminder has come. The bot's own
+        message: the redraws keep to their stored ids, and the archive leaves it out."""
         self._connected()
         row = await self.row(action.operation_id)  # type: ignore[arg-type]
         op = row.operation if row is not None else {}
@@ -679,10 +681,16 @@ class OperationChannels:
         later = [m for m in self.store.current.times.reminder_minutes if m < int(action.payload.get("minutes", 0))]
         if any(now >= assembly - timedelta(minutes=m) for m in later):
             return  # a later reminder is due already: that one speaks
-        members = attending(op)
-        if members:
-            await self.ping(row.operation_id, t("Reminder: {title}, assembly {when}.", self.language,
-                                                title=op["title"], when=render.ts(assembly, "R")), members)
+        members = list(dict.fromkeys(attending(op)))
+        if not members:
+            return
+        text = t("Reminder: {title}, assembly {when}.", self.language, title=op["title"], when=render.ts(assembly, "R"))
+        channel = self._channel(row)
+        if channel is None:  # (not on Discord's list just now: the thread, as other pings)
+            await self.ping(row.operation_id, text, members)
+            return
+        for content in mention_chunks(text, members):
+            await channel.send(content, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
 
     async def ping(self, op_id: int, text: str, member_ids: list[int], view: discord.ui.View | None = None) -> Any:
         """``text`` and the members' mentions in the operation's thread, split before Discord's 2000 characters; a

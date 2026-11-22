@@ -19,7 +19,7 @@ import discord
 from sqlalchemy import select
 
 from app.channel import sync
-from app.channel.render import Message, plain, ts, when
+from app.channel.render import Message, op_kind, plain, ts, when
 from app.channel.service import Redrawer
 from app.db import Database, state
 from app.db.models import OperationChannel
@@ -58,7 +58,7 @@ class Header:
             if assembly is None or assembly > until:
                 continue
             link = f" · <#{row.channel_id}>" if row.channel_id else ""
-            lines.append(f"{ts(assembly, 'f')} · {plain(op.get('kind_name') or op['kind'])} · "
+            lines.append(f"{ts(assembly, 'f')} · {plain(op_kind(op, self.store.current.language))} · "
                          f"**{plain(op['title'])}**{link}")
         return lines
 

@@ -122,7 +122,8 @@ class Delivery:
         if notice.get("operation_id") is not None and self.s.channels is not None:
             row = await self.s.channels.row(int(notice["operation_id"]))
             channel_id = row.channel_id if row is not None else None
-        kinds = {k["id"]: k.get("name") or k["id"] for k in (self.s.channels.meta.get("kinds") or [])} \
+        kinds = {k["id"]: render.kind_name(k["id"], k.get("name"), self.language)
+                 for k in (self.s.channels.meta.get("kinds") or [])} \
             if self.s.channels is not None else {}
         created = notice.get("created_at")
         text = describe(notice.get("data") or {}, self.language, channel_id=channel_id, kinds=kinds,

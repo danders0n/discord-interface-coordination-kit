@@ -46,7 +46,7 @@ from app.roster.service import Roster
 from app.services import Services
 from app.signup.cog import SlotCog
 from app.signup.offers import Offers
-from app.signup.ui import OfferAction, SignupAction, SquadList
+from app.signup.ui import OfferAction, RoleList, SignupAction, SquadList
 from app.staff_threads import KINDS
 from app.supervisor_client import SupervisorUnreachable
 from app.update.cog import UpdateButton, UpdateCog
@@ -241,8 +241,8 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction, CreateOperation,
-                               PanelButton, PanelAction, ReportAction, UpdateButton)  # outlive a restart
+        self.add_dynamic_items(LinkNow, SignupAction, SquadList, RoleList, OfferAction, ApprovalAction,
+                               CreateOperation, PanelButton, PanelAction, ReportAction, UpdateButton)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),

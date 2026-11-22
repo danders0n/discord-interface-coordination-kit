@@ -98,6 +98,23 @@ def organisers(op: dict[str, Any]) -> list[int]:
     return list(dict.fromkeys(found))
 
 
+SUPERVISOR_KINDS = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
+
+
+def kind_name(kind: str, name: str | None, language: Any) -> str:
+    """An operation's kind in ``language``. ``name`` is the supervisor's (``kind_name``, ``meta``'s kinds): one its
+    admin chose is shown as it is; its English default is translated."""
+    if name and name != SUPERVISOR_KINDS.get(kind):
+        return name
+    words = {"internal": t("Internal", language), "guest": t("External", language), "hosted": t("Hosted", language),
+             "zeus": t("Zeus", language), "training": t("Training", language)}
+    return words.get(kind, name or kind)
+
+
+def op_kind(op: dict[str, Any], language: Any) -> str:
+    return kind_name(op.get("kind") or "", op.get("kind_name"), language)
+
+
 def signup_state(op: dict[str, Any], now: datetime, language: str) -> str:
     start, opens = when(op, "start_at"), when(op, "signup_opens_at")
     if op["status"] in ("draft", "pending"):
@@ -120,7 +137,7 @@ def info(op: dict[str, Any], ctx: Context) -> Message:
     embed = discord.Embed(title=f"{mark} · {op['title']}" if mark else op["title"], colour=COLOURS.get(status, 0x2ECC71))
     if status == "cancelled" and op.get("cancel_reason"):
         embed.description = t("Cancelled: {reason}", language, reason=op["cancel_reason"])
-    embed.add_field(name=t("Kind", language), value=op.get("kind_name") or op["kind"])
+    embed.add_field(name=t("Kind", language), value=op_kind(op, language))
     if op.get("climate_role_id"):
         embed.add_field(name=t("Played preset", language), value=f"<@&{op['climate_role_id']}>")
     elif op.get("climate"):
@@ -130,7 +147,9 @@ def info(op: dict[str, Any], ctx: Context) -> Message:
         embed.add_field(name=t("Host", language), value=f"{plain(host['acronym'])} · {plain(host['name'])}")
     if op.get("groups"):
         embed.add_field(name=t("Invited", language), value=", ".join(plain(g["acronym"]) for g in op["groups"]))
-    if op.get("author"):
+    if (op.get("author_name") or "").strip():  # (typed: a guest operation's author who isn't a member here)
+        embed.add_field(name=t("Author", language), value=plain(op["author_name"].strip()))
+    elif op.get("author"):
         embed.add_field(name=t("Author", language), value=person(op["author"]))
     assembly, start = when(op, "assembly_at"), when(op, "start_at")
     embed.add_field(name=t("Date", language), value=ts(assembly, "D"), inline=False)
@@ -278,14 +297,42 @@ def orbat(op: dict[str, Any], ctx: Context) -> list[Message]:
     return [Message(content=text) for text in texts(blocks, "\n\n")]
 
 
+def roles_text(roles: list[dict[str, Any]], glue: str = "\n") -> str:
+    """A Zeus or training operation's specialist roles as organisers type them: ``Medic x3`` (at most 3), ``Command``."""
+    return glue.join(f"{r['name']} x{r['limit']}" if r.get("limit") else str(r["name"]) for r in roles)
+
+
+def specialist_roles(op: dict[str, Any]) -> list[dict[str, Any]]:
+    """The operation's specialist roles with how many come as each (``signup.roles``; else counted from the list)."""
+    counted = (op.get("signup") or {}).get("roles")
+    if counted is not None:
+        return list(counted)
+    coming = (op.get("signups") or {}).get("coming") or []
+    return [{"name": r["name"], "limit": r.get("limit"), "count": sum(1 for p in coming if p.get("role") == r["name"])}
+            for r in op.get("specialist_roles") or []]
+
+
 def coming_list(op: dict[str, Any], ctx: Context) -> list[Message]:
-    """A Zeus or training operation: the header, then Coming and Not coming, one person per line."""
+    """A Zeus or training operation: the header, then Coming, one person per line (by specialist role when it has
+    some: each role with its limit, then those coming as none), and Not coming."""
     language, lists = ctx.language, op.get("signups") or {}
     coming, not_coming = lists.get("coming") or [], lists.get("cant") or []
     limit = f"/{op['signup_limit']}" if op.get("signup_limit") else ""
-    blocks = [_header(op, ctx, t("Coming: {count}", language, count=f"**{len(coming)}{limit}**")),
-              f"**{t('Coming', language)}** ({len(coming)}{limit})\n{_mentions(coming, language, chr(10), 1500)}",
-              f"**{t('Not coming', language)}** ({len(not_coming)})\n{_mentions(not_coming, language, chr(10), 1500)}"]
+    blocks = [_header(op, ctx, t("Coming: {count}", language, count=f"**{len(coming)}{limit}**"))]
+    roles = specialist_roles(op)
+    if roles:
+        for role in roles:
+            people = [p for p in coming if p.get("role") == role["name"]]
+            cap = f"/{role['limit']}" if role.get("limit") else ""
+            blocks.append(f"**{plain(role['name'])}** ({len(people)}{cap})\n{_mentions(people, language, chr(10), 1000)}")
+        named = {r["name"] for r in roles}
+        rest = [p for p in coming if p.get("role") not in named]
+        blocks.append(f"**{t('Others coming', language)}** ({len(rest)})\n{_mentions(rest, language, chr(10), 1500)}")
+    else:
+        blocks.append(f"**{t('Coming', language)}** ({len(coming)}{limit})\n{_mentions(coming, language, chr(10), 1500)}")
+    blocks.append(f"**{t('Not coming', language)}** ({len(not_coming)})\n{_mentions(not_coming, language, chr(10), 1500)}")
+    if roles and phase(op, ctx.now) == "open":
+        blocks.append("-# " + t("Pick a specialist role from the list below to come as it, or press Coming.", language))
     return [Message(content=text) for text in texts(blocks, "\n\n")]
 
 
@@ -374,8 +421,8 @@ def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     preset = ctx.files.get("preset")
     if preset is not None and preset.is_file():
         name = ((op.get("files") or {}).get("preset") or {}).get("preset_name") or preset.name
-        found["preset"] = Message(content=t("Modset for the Arma 3 Launcher: {name}", ctx.language, name=plain(name)),
-                                  files=[preset])
+        heading_text = t("Modset for the Arma 3 Launcher: {name}", ctx.language, name=plain(name))
+        found["preset"] = Message(content=f"{SPACER}## {heading_text}", files=[preset])  # (a heading, as the OPORD's)
     found |= signup_messages(op, ctx)
     drawn = report(op, ctx)
     if drawn is not None:
@@ -385,9 +432,9 @@ def messages(op: dict[str, Any], ctx: Context) -> dict[str, Message]:
     return found
 
 
-def topic(op: dict[str, Any], tz: Any) -> str:
+def topic(op: dict[str, Any], tz: Any, language: Any) -> str:
     assembly = when(op, "assembly_at")
-    return f"{op['title']} · {op.get('kind_name') or op['kind']} · {assembly.astimezone(tz):%d.%m %H:%M}"
+    return f"{op['title']} · {op_kind(op, language)} · {assembly.astimezone(tz):%d.%m %H:%M}"
 
 
 def announcement(op: dict[str, Any], language: str, channel_id: int | None) -> Message:
@@ -395,7 +442,7 @@ def announcement(op: dict[str, Any], language: str, channel_id: int | None) -> M
     assembly = when(op, "assembly_at")
     mark = t("CANCELLED", language) + " · " if op["status"] == "cancelled" else ""
     embed = discord.Embed(title=f"{mark}{op['title']}", colour=COLOURS.get(op["status"], 0x2ECC71),
-                          description=f"{op.get('kind_name') or op['kind']}\n{ts(assembly, 'F')} ({ts(assembly, 'R')})")
+                          description=f"{op_kind(op, language)}\n{ts(assembly, 'F')} ({ts(assembly, 'R')})")
     if channel_id:
         embed.add_field(name=t("Details and sign-up", language), value=f"<#{channel_id}>")
     return Message(embeds=[embed])

@@ -15,6 +15,7 @@ which word them)."""
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -73,6 +74,24 @@ def duration_text(minutes: int) -> str:
     return f"{minutes // 60}h{minutes % 60:02d}" if minutes % 60 else f"{minutes // 60}h"
 
 
+ROLE_LINE = re.compile(r"^(.*?)\s+x(\d+)$", re.IGNORECASE)
+
+
+def parse_roles(text: str) -> list[dict[str, Any]]:
+    """Specialist roles as typed, one per line: ``Medic x3`` (at most 3; ``x0``: no limit) or ``Command``. The
+    supervisor checks the names."""
+    found = []
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        match = ROLE_LINE.match(line)
+        if match and match[1].strip():
+            found.append({"name": match[1].strip(), "limit": int(match[2]) or None})
+        else:
+            found.append({"name": line, "limit": None})
+    return found
+
+
 # ---------------------------------------------------------------------------- the wizard and its choices
 
 async def expired(interaction: discord.Interaction) -> bool:
@@ -99,7 +118,7 @@ class Choices(discord.ui.View):
         self.climate = (op.get("climate") or None) if op else None
         self.host = (op.get("host_group") or {}).get("id") if op else None
         self.guests: list[int] = [g["id"] for g in (op.get("groups") or [])] if op else []
-        kinds = [(k.get("name") or k["id"], k["id"]) for k in meta.get("kinds") or []
+        kinds = [(render.kind_name(k["id"], k.get("name"), self.locale), k["id"]) for k in meta.get("kinds") or []
                  if k["id"] != "guest" or may_guest or (op and op["kind"] == "guest")]
         if op is None or op["status"] == "draft":
             self.add_item(self._select("kind", t("Kind", self.locale), kinds, self.kind))
@@ -363,7 +382,8 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
         shown.append("orbat")
     shown += [a for a in ("preset", "mission") if a in actions]  # (frozen in the quiet period: not offered)
     if "edit" in actions:
-        shown += ["signup"] + (["limit"] if kind in render.COMING else []) + (["join"] if kind == "guest" else [])
+        shown += ["signup"] + (["limit", "roles"] if kind in render.COMING else []) + (
+            ["join", "author"] if kind == "guest" else [])
         shown.append("organisers")
         if kind != "guest":
             shown.append("hold")
@@ -420,7 +440,8 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
               "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
               "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
-              "join": t("How to join", locale), "organisers": t("Co-organisers", locale),
+              "join": t("How to join", locale), "author": t("Author", locale),
+              "roles": t("Specialist roles", locale), "organisers": t("Co-organisers", locale),
               "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
                   op.get("hold"), t("Hold the host: off", locale)),
               "autoend": t("Don't end automatically: on", locale) if op.get("dont_end_automatically") else
@@ -521,6 +542,34 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
 
         await interaction.response.send_modal(TextModal(interaction, t("How to join", locale),
                                                         op.get("how_to_join") or "", 1024, save, required=False))
+
+    async def _author(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A guest operation's author as typed: someone of the host group who isn't on this Discord server. Empty:
+        the author is the person the supervisor has (the creator, unless changed in the app)."""
+        locale = interaction.locale
+
+        async def save(modal_interaction: discord.Interaction, text: str) -> str | None:
+            done = await write(modal_interaction, op["id"], "author", "update_operation",
+                               {"author_name": text.strip()}, op["revision"])
+            return t("Saved.", locale) if done is not None else None
+
+        await interaction.response.send_modal(TextModal(
+            interaction, t("Author", locale), op.get("author_name") or "", 100, save, required=False, long=False,
+            label=t("Name (empty: the creator)", locale)))
+
+    async def _roles(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A Zeus or training operation's specialist roles, one per line (``Medic x3``: at most 3); members pick one
+        with *Coming*."""
+        locale = interaction.locale
+
+        async def save(modal_interaction: discord.Interaction, text: str) -> str | None:
+            done = await write(modal_interaction, op["id"], "roles", "update_operation",
+                               {"specialist_roles": parse_roles(text)}, op["revision"])
+            return t("Saved.", locale) if done is not None else None
+
+        await interaction.response.send_modal(TextModal(
+            interaction, t("Specialist roles", locale), render.roles_text(op.get("specialist_roles") or []), 600,
+            save, required=False, label=t("One per line; Medic x3 = at most 3", locale)))
 
     async def _organisers(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         names = ", ".join(render.plain(p.get("display_name") or p.get("username") or "?")

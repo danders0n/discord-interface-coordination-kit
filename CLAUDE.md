@@ -107,8 +107,9 @@ exactly the settings.
   (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
-  or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread
-  link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
+  or Zeus / training's Coming list, by specialist role when it has some; `phase(op, now)` is the sign-up state from
+  the times), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /
   delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
@@ -120,7 +121,8 @@ exactly the settings.
   quarter; batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart; the sign-up buttons on the
   last ORBAT message; `ping()` in the thread (a draft: DMs); `by_channel()`; `watchers` hear `changed(op)` /
   `gone(id)`). `EventBot.build_operations` wires channels, header and feed.
-- `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, the private `SlotPicker`, `act()`:
+- `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, Zeus and training's
+  `RoleList` (`coming:<op>`: Coming as a specialist role), the private `SlotPicker`, `act()`:
   an act-as call through `Roster.as_member`), `cog.py` (`/slot take | leave`), `offers.py` (`Offers`: the `offer`
   notice by DM or thread, `delivered`, the message closed when the offer ends; table `offer_message`).
 - `app/approval/`: `ui.py` (the request embed, `ApprovalAction`, `RejectModal`), `moderation.py` (`Moderation`: the
@@ -191,13 +193,14 @@ These rules span many features; read them before writing any handler.
 - **Nothing typed goes into a supervisor URL unchecked.** Autocomplete only suggests, and the client quotes every
   outside path segment (`_segment`).
 - **Every button survives a restart:** persistent `DynamicItem`s with ids in `custom_id` (`operation:create`,
-  `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `offer:<op>:<offer>:`, `approval:`,
+  `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `coming:`, `offer:<op>:<offer>:`, `approval:`,
   `attendance:`, `link:now`). Private pickers and the wizard live in memory for 15 minutes. Every `DynamicItem`'s
   `callback` carries `@answers` (`discord_util`): discord.py only logs what it raises and never calls
   `View.on_error`, so without it a refusal leaves the member unanswered (a test enforces it).
 - **The operation channel is a set of bot-owned messages** (info, the OPORD paragraphs, preset, ORBAT, report, the
   thread link last), kept in order and edited in place by stored message ids; redraws are batched. Members talk in the
-  thread, and **every ping goes to the thread** too (a draft has none: DMs); the channel is read-only for members.
+  thread, and **every ping goes to the thread** too (a draft has none: DMs), except the **reminders**, which go to the
+  channel under its messages (the bot's own, outside the stored ids); the channel is read-only for members.
 - **Times** are typed in the config time zone, sent to the supervisor zone-aware (it reads naive times as its own
   local time), and shown as Discord timestamps.
 - **Naming:** *operation* in code, commands and texts (Polish *operacja*, feminine), as in the supervisor. The

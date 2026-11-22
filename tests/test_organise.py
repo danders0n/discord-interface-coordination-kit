@@ -204,6 +204,29 @@ async def test_co_organisers_hold_and_cancel(organise, guild, fake):
     assert (fake.operations[op["id"]]["status"], fake.operations[op["id"]]["cancel_reason"]) == ("cancelled", "Rain")
 
 
+async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(organise, guild, fake):
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1, specialist_roles=[{"name": "Medic", "limit": 2}])
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "roles")
+    modal = modal_of(pressed)
+    assert modal.text.default == "Medic x2"
+    submit(modal, text="Command x1\n\n  Medic  \nPilot x0")
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved."
+    assert fake.operations[zeus["id"]]["specialist_roles"] == [
+        {"name": "Command", "limit": 1}, {"name": "Medic", "limit": None}, {"name": "Pilot", "limit": None}]
+    guest = fake.operation("Theirs", kind="guest", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(guest["id"]), opened)
+    assert "author" in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    pressed = await panel_press(organise, guild, 1, guest["id"], "author")
+    modal = modal_of(pressed)
+    submit(modal, text=" Cpt. Smith ")
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved." and fake.operations[guest["id"]]["author_name"] == "Cpt. Smith"
+
+
 async def test_a_draft_is_deleted_after_a_confirmation(organise, guild, fake):
     op = fake.operation("Ibis", author_person_id=1)
     asked = await panel_press(organise, guild, 1, op["id"], "delete")
