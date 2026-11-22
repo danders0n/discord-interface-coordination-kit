@@ -54,6 +54,9 @@ class SupervisorHealth:
         self.version: str | None = None  # its commit when last read
         self.told_overstay = False
         self.restarted = False  # it announced a restart or came back with a new boot: check it before `up`
+        # Updating: it has been seen gone since the announcement. Until then an answer is the old process in its last
+        # second (the supervisor exits a moment after it announces), not the new one.
+        self.gone = False
         self.listeners: list[Callable[[str], None]] = []
         self._wake = asyncio.Event()
         self._checking: asyncio.Task[None] | None = None
@@ -75,9 +78,10 @@ class SupervisorHealth:
 
     def call_seen(self, status: int | None, sent: bool | None) -> None:
         if status is None or status in DOWN_STATUSES:
+            self.gone = True
             if self.state in ("up", "blocked"):
                 self._set("down")
-        elif self.state in ("down", "updating"):
+        elif self.state == "down" or (self.state == "updating" and self.gone):
             self._back()
 
     def system(self, data: dict[str, Any]) -> None:
@@ -86,7 +90,7 @@ class SupervisorHealth:
         if state == "restarting":
             eta = int(data.get("eta_s") or DEFAULT_ETA)
             self.eta, self.to = self.clock() + timedelta(seconds=eta), data.get("to") or None
-            self.told_overstay, self.restarted = False, True
+            self.told_overstay, self.restarted, self.gone = False, True, False
             self._set("updating")
             language = self.language()
             self.post(t("The supervisor is restarting for an update to {commit}; the bot waits for it.", language,
@@ -99,9 +103,12 @@ class SupervisorHealth:
     def hello(self, data: dict[str, Any]) -> None:
         """The stream (re)connected: the supervisor answers; a new ``boot`` means it restarted meanwhile."""
         boot = data.get("boot")
-        if self.boot is not None and boot is not None and boot != self.boot:
-            self.restarted = True
+        new = self.boot is not None and boot is not None and boot != self.boot
+        if new:
+            self.restarted = self.gone = True  # (a new start: whatever was announced is over)
         self.boot = boot or self.boot
+        if self.state == "updating" and not self.gone:
+            return  # the old process still: wait for it to go
         if self.restarted or self.state in ("down", "updating"):
             self._back()
 

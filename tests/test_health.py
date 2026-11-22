@@ -69,6 +69,22 @@ async def test_an_announced_update_waits_and_comes_back(health, fake, services, 
     assert health.notes[-1] == "The supervisor is back on def5678."
 
 
+async def test_the_old_process_answering_its_last_second_is_not_the_return(health, fake, services):
+    health.hello({"boot": "fake"})
+    health.system(restarting())
+    await services.supervisor.operations_meta()  # the supervisor exits a moment after it announces
+    health.hello({"boot": "fake"})  # (and a stream that reconnects to it meanwhile)
+    await settled(health)
+    assert health.state == "updating" and health.notes[-1].startswith("The supervisor is restarting")
+    fake.down = True
+    with pytest.raises(Exception):
+        await services.supervisor.operations_meta()  # gone
+    fake.down = False
+    await services.supervisor.operations_meta()  # and back: now it counts
+    await settled(health)
+    assert health.state == "up" and health.notes[-1] == "The supervisor is back on 5edb7e8."
+
+
 async def test_minutes_left_count_down(health, clock):
     health.system(restarting(eta_s=150))
     assert health.minutes_left() == 3

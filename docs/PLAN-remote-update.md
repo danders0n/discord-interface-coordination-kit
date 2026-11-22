@@ -1,9 +1,10 @@
 # Plan: updating the bot from Discord, and the two apps watching each other
 
-Status: steps 1-5 built (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
+Status: built, steps 1-7 (the boot step and the restart, `tests/test_boot.py`; the updater and `/update`,
 `tests/test_update.py`; the heartbeat's state and health, `tests/test_supervisor_client.py`, against the supervisor's
 part, built on its `feature/discord-roles` branch; the supervisor's health, `tests/test_health.py`; queued actions,
-`tests/test_queue.py`); steps 6-7 (docs, end to end) next. Written 2026-11-22 from a
+`tests/test_queue.py`; README; end to end, see *As built*). Not yet run under NSSM, nor with a real Discord login
+or a real supervisor update: that is the release's test instance (docs/PLAN-front-end.md, phase 6). Written 2026-11-22 from a
 short design interview with the owner. The supervisor's part is its `docs/PLAN-bot-health.md`; the two are built and
 deployed separately (*Order of release*). See *As built* at the end for where the code departs from this plan.
 
@@ -396,6 +397,28 @@ Step 5 (2026-11-22):
   (started with the other supervisor workers) also expires rows every minute while the supervisor is away.
 - **Not queued** (answered with the updating words): reads, the wizard's create, copy, delete, uploads, templates,
   `/link`, `/privacy-erase`. The heartbeat's health has no queue count yet.
+
+Steps 6-7 (2026-11-22):
+
+- **README:** *Update* (the commands, `BOT_RESTARTER`, `gave_up` by hand), *While the other one updates*, and
+  `data/updates/` in the data table.
+- **End to end, the update** (a script, not in the suite): a scratch clone of the working tree with a local bare
+  `origin`, its commits' `app/cli.py` a stand-in that calls `boot.ready()` (the real one needs Discord), the working
+  tree's `Updater` writing the markers, NSSM emulated (started again after any non-zero exit, `BOT_RESTARTER=nssm`).
+  Update 1 → 2, go back, update again, then a commit that raises at import: `[75, 1, 1, 75, 0]`, back on 2, the
+  reason in the report; a restart. All passed after two fixes:
+  - **Stale bytecode:** after a go back within the same second, Python ran the newer `.pyc` (same size, same
+    whole-second mtime). The boot step now deletes `app/**/__pycache__` after every `git reset`.
+  - **A crash nothing logs** (an import error) left the reason empty: the boot step's watched start now also notes
+    uncaught exceptions (`sys.excepthook`), and an invalid `.env` is logged as an ERROR before exiting 2.
+- **End to end, the queue:** the fake supervisor over real TCP on a fixed port, the bot's real `Live`, health and
+  queue loops: a press goes straight through; the supervisor announces its restart on the stream and goes away
+  (connections refused); a press is queued (*back in about 2 min*); it comes back with a new boot; the press is sent
+  in the member's name, the *Queued* reply becomes the answer, staff hear both lines. It found:
+  - **The old process's last second:** the supervisor exits a moment after it announces, and an answer in that moment
+    (the health's own poll) counted as its return: a premature *back*, then *down* rather than *updating*. While
+    updating, an answer now counts only once the supervisor has been seen gone (`SupervisorHealth.gone`) or the stream
+    shows a new `boot`.
 
 ## Out of scope
 

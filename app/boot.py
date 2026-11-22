@@ -211,6 +211,7 @@ class Boot:
         self.log(f"git reset --hard {short(commit)}: {_last_line(out)}")
         if code != 0:
             return f"git reset --hard {short(commit)}: {_last_line(out)}"
+        _drop_bytecode(self.root / "app")
         if requirements:
             self.log("Installing the dependencies (pip install -r requirements.txt)")
             code, out = self._run([self.python, "-m", "pip", "install", "--disable-pip-version-check", "-r",
@@ -268,6 +269,15 @@ class Boot:
     def _watch(self) -> None:
         self._errors = _ErrorKeeper(self)
         logging.getLogger().addHandler(self._errors)
+        previous = sys.excepthook
+
+        def uncaught(kind: type[BaseException], exc: BaseException, tb: Any) -> None:
+            """A crash nothing logged (an import error in the new code): its last line is the reason too."""
+            if not self._ready.is_set():
+                self.note_error(f"{kind.__name__}: {exc}")
+            previous(kind, exc, tb)
+
+        sys.excepthook = uncaught
         threading.Thread(target=self._watchdog, name="boot-watchdog", daemon=True).start()
 
     def _watchdog(self) -> None:
@@ -295,6 +305,13 @@ class Boot:
             elif state != "gave_up":  # pending / rolling_back: this process did not go through prepare()
                 return
             self.marker_file.unlink(missing_ok=True)
+
+
+def _drop_bytecode(folder: Path) -> None:
+    """Python reuses a ``.pyc`` whose source has the same size and whole-second mtime: a file reset to another
+    version within the same second (a quick go back) could run the old code. After a reset, compile afresh."""
+    for cache in folder.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
 
 
 # ---------------------------------------------------------------- restoring a database

@@ -79,7 +79,11 @@ def history(data_dir: Path) -> list[dict]:
 
 @pytest.fixture(autouse=True)
 def no_current():
+    import sys
+
+    hook = sys.excepthook
     yield
+    sys.excepthook = hook  # (each watched start wraps it)
     boot._current = None
     restarter.set_exit_handler(None)
     root = logging.getLogger()
@@ -118,6 +122,16 @@ def test_an_update_is_applied_then_started_and_closed_when_ready(repo, tmp_path)
     assert (entry_["outcome"], entry_["from"], entry_["to"], entry_["reported"]) == ("ok", first, second, False)
     assert entry_["migrations"] is False
     assert "attempt 1 of 2" in (root / ".app-update" / "boot.log").read_text()
+
+
+def test_the_apps_bytecode_is_dropped_after_a_reset(repo, tmp_path):
+    root, first, second = repo
+    cache = root / "app" / "sub" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "cli.cpython-313.pyc").write_bytes(b"old")
+    write_marker(root, tmp_path, first, second, requirements=False)
+    assert Recorder().boot(root).prepare() == RESTART_CODE
+    assert not cache.exists()
 
 
 def test_unchanged_requirements_skip_pip(repo, tmp_path):
@@ -241,6 +255,24 @@ def test_errors_logged_during_a_start_are_kept_as_the_reason(repo, tmp_path):
     watched.ready()
     logging.getLogger("x").error("after ready")
     assert not (root / ".app-update" / "pending.json").exists()
+
+
+def test_an_uncaught_crash_is_kept_as_the_reason(repo, tmp_path, monkeypatch):
+    import sys
+
+    root, first, second = repo
+    write_marker(root, tmp_path, first, second, state="applied")
+    seen = []
+    monkeypatch.setattr(sys, "excepthook", lambda *args: seen.append(args[0]))
+    watched = Recorder().boot(root, ready_timeout=30)
+    watched.prepare()
+    try:
+        raise ImportError("cannot import name 'gone' from 'app.cli'")
+    except ImportError:
+        sys.excepthook(*sys.exc_info())
+    assert watched.marker()["error"] == "ImportError: cannot import name 'gone' from 'app.cli'"
+    assert seen == [ImportError]  # (and Python's own report still runs)
+    watched.ready()
 
 
 def test_ready_without_a_boot_does_nothing(repo, tmp_path):

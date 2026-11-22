@@ -173,6 +173,7 @@ Discord plumbing, the archive, delivery bookkeeping and the link reminders.
 | `archive/` | The archived operations' attachments (unless `BOT_ARCHIVE__ATTACHMENTS_DIR` puts them elsewhere). |
 | `logs/bot.log` | The application log, rotated daily, `BOT_LOGS__KEEP_DAYS` kept. Each error has an id, also posted to the staff log. |
 | `service.log` | What NSSM caught: failures before logging starts. |
+| `updates/` | Before each `/update`: the database backup (`BOT_UPDATE__KEEP_BACKUPS` kept), local changes as a `.diff`, and `history.jsonl`. |
 
 The nightly backup covers the database only. **The host's own backups must include the archive's attachments and
 `.env`.**
@@ -191,8 +192,25 @@ HTTPS). The first version with `/update` is installed by hand:
 .\update.ps1     # checks .env, backs up, git pull, pip install, restarts the service
 ```
 
+If the new version fails and so does going back (`.app-update/pending.json` says `gave_up`), the bot starts as it
+is and tries nothing more: read `.app-update/boot.log`, fix the checkout by hand (or `git reset --hard` to a good
+commit and `pip install -r requirements.txt`), delete `.app-update/pending.json` and restart the service.
+
 The bot and the supervisor are deployed separately. A bot that needs a newer supervisor holds its supervisor work
 back and says so in the staff log until the supervisor is updated.
+
+### While the other one updates
+
+- **The supervisor updates** (from its console): it tells the bot first, and the staff log says *The supervisor is
+  restarting…*. Members' sign-ups, slots, offers, ratings, approvals and organiser edits made meanwhile are queued
+  (*Queued: the app is updating…*) and sent in their name once it is back; the answer replaces that reply, or comes
+  by DM after 15 minutes. Only a member's last sign-up choice for an operation counts. What can't wait (reading the
+  panel or a report, creating an operation, uploads) is answered *The app is updating, back in about N min*. A queued
+  action not sent within `BOT_QUEUE__MAX_MINUTES` is dropped and the member told. Nothing is queued that may already
+  have reached the supervisor.
+- **The bot updates** (`/update`): it tells the supervisor how long it will be away, so the supervisor's *program
+  stopped reporting* alert waits that long too. The supervisor keeps its notices and offers for the bot meanwhile;
+  Discord answers presses on its own (*This interaction failed*) during the minute the bot is gone.
 
 ## Development
 

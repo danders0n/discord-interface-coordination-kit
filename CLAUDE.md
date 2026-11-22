@@ -18,7 +18,9 @@ The supervisor is a separate project at `D:\Workspace\python\arma-server-supervi
 and `docs/PLAN-operations.md` (*As built*) before touching the integration.
 
 Status: the old stand-alone bot of [docs/PLAN.md](docs/PLAN.md) is on `master`. On `feature/front-end` the front end
-is built: steps 1–7, the plan's phases 1–5, tested against the fake supervisor. Next is phase 6, the release: a test
+is built: steps 1–7, the plan's phases 1–5, tested against the fake supervisor; so is the remote update with the
+two apps watching each other and the queue of members' actions ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md),
+steps 1–7, end to end without Discord; the supervisor's part is its `docs/PLAN-bot-health.md`). Next is phase 6, the release: a test
 instance against a scratch supervisor, then the merge (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays
 the reference for how things look and behave on Discord; its rules about data and decisions are the supervisor's. Read
 the relevant section before implementing a feature, and keep the plans and this file up to date as the code lands.

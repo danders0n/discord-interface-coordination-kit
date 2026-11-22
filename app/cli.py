@@ -35,8 +35,11 @@ def load_or_exit(env_file: str) -> Settings:
         return settings_module.load(env_file)
     except ValidationError as exc:
         print(f"{env_file} has errors:", file=sys.stderr)
-        for line in settings_module.describe_errors(exc):
+        lines = settings_module.describe_errors(exc)
+        for line in lines:
             print(f"  {line}", file=sys.stderr)
+        # (logged too: a start after an update keeps it as the reason for a rollback, app/boot.py)
+        log.error("%s has errors: %s", env_file, "; ".join(lines[:3]))
         raise SystemExit(2) from None
 
 
