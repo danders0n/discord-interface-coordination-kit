@@ -229,8 +229,10 @@ async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(
 
 async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(organise, guild, fake):
     """Zeus and training use their base profile's mods and mission; the panel's *Map* adds one from the
-    supervisor's Zeus maps list (its mods and its Zeus mission), and the info shows it."""
-    fake.zeus_maps = [{"id": 1, "name": "Tanoa", "mission": "zeus.Tanoa", "world": "Tanoa", "mods": [], "mod_ids": []}]
+    supervisor's Zeus maps list (its one mod and its Zeus mission), the info shows it, and the players get the
+    supervisor's preset (the base's mods and the map's) to download in the channel."""
+    cup = {"id": 5, "name": "CUP Terrains", "workshop_id": "583496184"}
+    fake.zeus_maps = [{"id": 1, "name": "Tanoa", "mission": "zeus.Tanoa", "world": "Tanoa", "mod": cup, "mod_id": 5}]
     zeus = fake.operation("Night", kind="zeus", author_person_id=1)
     opened = acting(organise, guild, 1)
     await press(PanelButton(zeus["id"]), opened)
@@ -247,12 +249,17 @@ async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(or
     await run(organise)
     channel = guild.get_channel((await row(organise, zeus["id"])).channel_id)
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
-    assert fields["Mapa"] == "Tanoa"
+    assert fields["Mapa"] == "Tanoa" and fields["Modset"] == "Standard + Tanoa: 2 mody"
+    drawn = await row(organise, zeus["id"])
+    preset = channel.get_partial_message(drawn.messages["preset"])._find()
+    assert preset.content.endswith("## Modset do Arma 3 Launchera: Standard + Tanoa")
+    assert preset.kwargs["files"][0].filename == "Standard + Tanoa.html"
     again = await panel_press(organise, guild, 1, zeus["id"], "map")
     assert said(again).startswith("Map: Tanoa")
     none = acting(organise, guild, 1)
     await again.replies[-1].kwargs["view"]._chosen(none, ui.NO_MAP)
     assert fake.operations[zeus["id"]]["zeus_map"] is None
+    assert fake.operations[zeus["id"]]["files"]["preset"]["preset_name"] == "Standard"  # (the base's alone)
     internal = fake.operation("Raid", author_person_id=1)
     refused = await panel_press(organise, guild, 1, internal["id"], "map")
     assert said(refused) == "That can't be done now; open the panel again to see what can."

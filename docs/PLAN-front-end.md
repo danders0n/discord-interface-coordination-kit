@@ -630,13 +630,17 @@ squads*).
 - **Zeus and training take a map, not a preset and a mission.** They play their base profile's mods and mission; the
   panel's *Map* (`my.actions` has `map` in place of `preset` / `mission`) picks one from the supervisor's Zeus maps
   list (`meta.zeus_maps`, read when pressed) or none (`ui.MapPicker`, a patch of `zeus_map` with `If-Match`,
-  queueable as any detail). The info shows *Map*. `/operation preset | mission` on one are refused (`wrong_kind`).
+  queueable as any detail). A map is one mod (and its Zeus mission). The info shows *Map*. `/operation preset |
+  mission` on one are refused (`wrong_kind`). The supervisor makes their launcher preset for the players (the base's
+  mods and the map's, `files.preset` with `generated`), which the bot draws as any preset: the channel offers it to
+  download and the info's *Modset* counts it.
 - **Other groups' squads** (external and hosted operations): a squad written `# Name @ACR` belongs to that other
   group, which fills it in its own sign-up. The squad comes with `group`; the ORBAT message draws it with "*ACR signs
   up for it on its own*" and its slots without holders (shown even without slots), the header counts them apart
   (`slots.other`), and the squad lists and the organisers' slot tools leave it out (`render.ours()`). Pressing one
   anyway: `other_group`.
-- The fake supervisor mirrors them (`State.zeus_maps`, `zeus_map`, `@ACR` in `set_orbat`, `other_group`).
+- The fake supervisor mirrors them (`State.zeus_maps`, `zeus_base` and `zeus_preset()`, `zeus_map`, `@ACR` in
+  `set_orbat`, `other_group`).
 - Tests: `tests/test_signup.py::test_squads_other_groups_fill_show_without_a_sign_up`,
   `tests/test_organise.py::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission`.
 

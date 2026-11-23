@@ -167,8 +167,10 @@ class State:
     files: dict[tuple[int, str], bytes] = field(default_factory=dict)
     groups: list[dict[str, Any]] = field(default_factory=list)
     climates: list[dict[str, Any]] = field(default_factory=list)
-    # the Zeus maps list ({"id", "name", "mission", "world", "mods", "mod_ids"}): what zeus / training add to the base
+    # the Zeus maps list ({"id", "name", "mission", "world", "mod": {"id", "name"} or None, "mod_id"}): what zeus /
+    # training add to their base, whose name and mods for the players (workshop id, name) are ``zeus_base``
     zeus_maps: list[dict[str, Any]] = field(default_factory=list)
+    zeus_base: dict[str, Any] = field(default_factory=lambda: {"name": "Standard", "mods": [["463939057", "ACE"]]})
     staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
     acronym: str = "IBC"
     server_missions: list[str] = field(default_factory=list)
@@ -277,6 +279,21 @@ class State:
         entry = {"file": name, "hash": hashlib.sha256(content).hexdigest(), "size": len(content), "type": kind} | info
         files = dict(self.operations[op_id]["files"]) | {slot: entry}
         self.change(op_id, files=files)
+
+    def zeus_preset(self, op_id: int) -> None:
+        """A zeus / training operation's launcher preset for the players, as the real ``zeus_preset`` makes it: the
+        base's mods (``zeus_base``), then the map's mod; ``generated``."""
+        op = self.operations[op_id]
+        if op["kind"] not in COMING:
+            return
+        zeus_map = op.get("zeus_map") or {}
+        mods = [list(m) for m in self.zeus_base["mods"]]
+        if zeus_map.get("mod"):
+            mods.append([zeus_map["mod"].get("workshop_id"), zeus_map["mod"]["name"]])
+        name = f"{self.zeus_base['name']} + {zeus_map['name']}" if zeus_map else self.zeus_base["name"]
+        rows = "".join(f'<tr data-type="ModContainer"><td data-type="DisplayName">{m[1]}</td></tr>' for m in mods)
+        self.set_file(op_id, "preset", f"<html><body><table>{rows}</table></body></html>".encode(), "preset.html",
+                      original=f"{name}.html", preset_name=name, mods=mods, staged=False, generated=True)
 
     def delete_operation(self, op_id: int) -> None:
         """A draft deleted (or a stale one cancelled): a tombstone in the feed."""
@@ -1048,7 +1065,7 @@ def make_app(state: State | None = None) -> web.Application:
             found = next((m for m in state.zeus_maps if m["name"].casefold() == fields["zeus_map"].casefold()), None)
             if found is None:
                 return _refuse("unknown_map", f"Unknown map '{fields['zeus_map']}'", 422)
-            fields["zeus_map"] = {k: found.get(k) for k in ("name", "mission", "world", "mods")}
+            fields["zeus_map"] = {k: found.get(k) for k in ("name", "mission", "world", "mod")}
         trial = op | fields
         problem = _check_times(trial) if any(k in fields for k in ("assembly_at", "start_at")) else None
         if problem is not None:
@@ -1064,6 +1081,8 @@ def make_app(state: State | None = None) -> web.Application:
             fields |= moved
         if fields:
             state.change(op["id"], by=_actor(request), **fields)
+        if "zeus_map" in fields or "kind" in fields:
+            state.zeus_preset(op["id"])
         return web.json_response(state.out(op, person) | {"proposal": proposal}, headers={"ETag": f'"{op["revision"]}"'})
 
     async def delete_operation(request: web.Request) -> web.Response:
