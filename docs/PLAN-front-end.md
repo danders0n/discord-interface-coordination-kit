@@ -620,6 +620,26 @@ Asked by the owner after the test server: with the supervisor's matching change 
   squad without slots (a headquarters only holding the tree) out of its ORBAT messages and the organisers' squad
   picker. The fake supervisor reads the marks without checking them.
 
+### Operation tweaks II (2026-11-23)
+
+Asked by the owner, with the supervisor's matching change (its *As built*, *A base per kind, Zeus maps, other groups'
+squads*).
+
+- **A base profile per kind** is the supervisor's setting (e.g. internal: the mission template, Zeus: the standard
+  one, training: another chosen in the app). Nothing changes in the bot: the server and the base stay set in the app.
+- **Zeus and training take a map, not a preset and a mission.** They play their base profile's mods and mission; the
+  panel's *Map* (`my.actions` has `map` in place of `preset` / `mission`) picks one from the supervisor's Zeus maps
+  list (`meta.zeus_maps`, read when pressed) or none (`ui.MapPicker`, a patch of `zeus_map` with `If-Match`,
+  queueable as any detail). The info shows *Map*. `/operation preset | mission` on one are refused (`wrong_kind`).
+- **Other groups' squads** (external and hosted operations): a squad written `# Name @ACR` belongs to that other
+  group, which fills it in its own sign-up. The squad comes with `group`; the ORBAT message draws it with "*ACR signs
+  up for it on its own*" and its slots without holders (shown even without slots), the header counts them apart
+  (`slots.other`), and the squad lists and the organisers' slot tools leave it out (`render.ours()`). Pressing one
+  anyway: `other_group`.
+- The fake supervisor mirrors them (`State.zeus_maps`, `zeus_map`, `@ACR` in `set_orbat`, `other_group`).
+- Tests: `tests/test_signup.py::test_squads_other_groups_fill_show_without_a_sign_up`,
+  `tests/test_organise.py::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission`.
+
 ### Next
 
 The rest of phase 6, which needs the owner: the test instance against a scratch supervisor (its own checkout and data

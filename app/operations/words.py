@@ -50,6 +50,8 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "taken": t("Someone was faster: that slot is taken.", locale),
         "offered": t("That slot is being offered to the reserve list.", locale),
         "locked": t("That slot is locked by the organisers.", locale),
+        "other_group": t("Another group fills that squad in its own sign-up.", locale),
+        "unknown_map": t("There is no such map in the Zeus maps list.", locale),
         "role": t("That slot needs a role you don't have.", locale),
         "full": t("The operation is full.", locale),
         "role_full": t("That specialist role is full.", locale),

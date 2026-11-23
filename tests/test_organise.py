@@ -227,6 +227,37 @@ async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(
     assert said(saved) == "Saved." and fake.operations[guest["id"]]["author_name"] == "Cpt. Smith"
 
 
+async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(organise, guild, fake):
+    """Zeus and training use their base profile's mods and mission; the panel's *Map* adds one from the
+    supervisor's Zeus maps list (its mods and its Zeus mission), and the info shows it."""
+    fake.zeus_maps = [{"id": 1, "name": "Tanoa", "mission": "zeus.Tanoa", "world": "Tanoa", "mods": [], "mod_ids": []}]
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(zeus["id"]), opened)
+    sections = [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    assert "map" in sections and "preset" not in sections and "mission" not in sections
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "map")
+    assert said(pressed).startswith("Map: none (the base profile's own mission)")
+    picker = pressed.replies[-1].kwargs["view"]
+    assert [o.label for o in picker.children[0].options] == ["None: the base profile's own mission", "Tanoa"]
+    chose = acting(organise, guild, 1)
+    await picker._chosen(chose, "Tanoa")
+    assert chose.original_edits[-1]["content"] == "Saved."
+    assert fake.operations[zeus["id"]]["zeus_map"]["mission"] == "zeus.Tanoa"
+    await run(organise)
+    channel = guild.get_channel((await row(organise, zeus["id"])).channel_id)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Mapa"] == "Tanoa"
+    again = await panel_press(organise, guild, 1, zeus["id"], "map")
+    assert said(again).startswith("Map: Tanoa")
+    none = acting(organise, guild, 1)
+    await again.replies[-1].kwargs["view"]._chosen(none, ui.NO_MAP)
+    assert fake.operations[zeus["id"]]["zeus_map"] is None
+    internal = fake.operation("Raid", author_person_id=1)
+    refused = await panel_press(organise, guild, 1, internal["id"], "map")
+    assert said(refused) == "That can't be done now; open the panel again to see what can."
+
+
 async def test_a_draft_is_deleted_after_a_confirmation(organise, guild, fake):
     op = fake.operation("Ibis", author_person_id=1)
     asked = await panel_press(organise, guild, 1, op["id"], "delete")

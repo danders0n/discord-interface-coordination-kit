@@ -380,7 +380,8 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
         shown.append("opord")
     if "orbat" in actions or ("slots" in actions and kind not in render.COMING):
         shown.append("orbat")
-    shown += [a for a in ("preset", "mission") if a in actions]  # (frozen in the quiet period: not offered)
+    # (frozen in the quiet period: not offered; zeus / training: a map on the base profile instead)
+    shown += [a for a in ("preset", "mission", "map") if a in actions]
     if "edit" in actions:
         shown += ["signup"] + (["limit", "roles"] if kind in render.COMING else []) + (
             ["join", "author"] if kind == "guest" else [])
@@ -439,7 +440,7 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
                                "and the base are set in the app.", locale))
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
               "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
-              "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
+              "map": t("Map", locale), "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
               "join": t("How to join", locale), "author": t("Author", locale),
               "roles": t("Specialist roles", locale), "organisers": t("Co-organisers", locale),
               "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
@@ -456,6 +457,43 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
             discord.ButtonStyle.success if section in ("publish", "submit") else discord.ButtonStyle.secondary
         view.add_item(PanelAction(op["id"], section, labels[section], style))
     return "\n".join(lines)[:2000], view
+
+
+NO_MAP = "-"  # MapPicker's option for the base profile's own mission
+
+
+def map_text(op: dict[str, Any], locale: Any) -> str:
+    """What the operation plays on now, and what a map changes."""
+    current = op.get("zeus_map")
+    now = t("Map: {name}", locale, name=render.plain(current.get("name") or "")) if current else \
+        t("Map: none (the base profile's own mission)", locale)
+    return now + "\n-# " + t("A map adds its mods to the base profile's modset and plays its Zeus mission.", locale)
+
+
+class MapPicker(discord.ui.View):
+    """The panel's *Map* (zeus / training): a map from the supervisor's Zeus maps list, or none."""
+
+    def __init__(self, interaction: discord.Interaction, op: dict[str, Any], maps: list[dict[str, Any]]) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.op, locale = op, interaction.locale
+        current = (op.get("zeus_map") or {}).get("name")
+        names = [str(m["name"]) for m in maps]
+        if current and current not in names:  # (gone from the list: the operation keeps it)
+            names.insert(0, current)
+        options = [discord.SelectOption(label=t("None: the base profile's own mission", locale)[:100], value=NO_MAP,
+                                        default=not current)]
+        options += [discord.SelectOption(label=name[:100], value=name[:100], default=name == current)
+                    for name in names[:24]]
+        select = discord.ui.Select(placeholder=t("Map", locale), options=options)
+        select.callback = lambda i, s=select: self._chosen(i, s.values[0])
+        self.add_item(select)
+
+    async def _chosen(self, interaction: discord.Interaction, value: str) -> None:
+        await interaction.response.defer()  # (finish() edits this picker)
+        fields = {"zeus_map": None if value == NO_MAP else value}
+        if await write(interaction, self.op["id"], "map", "update_operation", fields, self.op["revision"]) is not None:
+            self.stop()
+            await finish(interaction, t("Saved.", interaction.locale))
 
 
 class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
@@ -513,6 +551,17 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         from app.operations.files import MissionModal
 
         await interaction.response.send_modal(MissionModal(interaction, op))
+
+    async def _map(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A Zeus or training operation's map: one from the supervisor's Zeus maps list, added to the base profile's
+        modset with its Zeus mission; or none (the base profile's own mission)."""
+        meta = await services(interaction).supervisor.operations_meta()  # (the list as it is now)
+        maps = meta.get("zeus_maps") or []
+        if not maps and not op.get("zeus_map"):
+            await reply(interaction, t("There are no Zeus maps yet: staff add them in the app (Operations → Played "
+                                       "presets and groups).", interaction.locale))
+            return
+        await reply(interaction, map_text(op, interaction.locale), view=MapPicker(interaction, op, maps))
 
     async def _signup(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(SignupStartModal(interaction, op))

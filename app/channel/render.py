@@ -167,6 +167,8 @@ def info(op: dict[str, Any], ctx: Context) -> Message:
     mission = op.get("mission") or {}
     if mission.get("name"):
         embed.add_field(name=t("Mission", language), value=plain(mission["name"]), inline=False)
+    if op["kind"] in COMING and op.get("zeus_map"):  # (added to the base profile's modset)
+        embed.add_field(name=t("Map", language), value=plain(op["zeus_map"].get("name") or ""), inline=False)
     if op["kind"] == "guest" and op.get("how_to_join"):
         embed.add_field(name=t("How to join", language), value=op["how_to_join"][:1024], inline=False)
     return Message(embeds=[embed])
@@ -236,6 +238,16 @@ def _mentions(entries: list[dict[str, Any]], language: str, glue: str, limit: in
     return glue.join(out) or "—"
 
 
+def theirs(squad: dict[str, Any]) -> bool:
+    """A squad another group fills (guest / hosted, ``# Name @ACR``): its own sign-up, nobody signs up here."""
+    return bool(squad.get("group"))
+
+
+def ours(op: dict[str, Any]) -> list[dict[str, Any]]:
+    """The squads members sign up for here: with slots, not another group's."""
+    return [squad for squad in op.get("orbat") or [] if squad.get("slots") and not theirs(squad)]
+
+
 def _slot_line(number: int, slot: dict[str, Any], language: str) -> str:
     """```1.` Name (@Role) — holder``; a free, closed or offered slot in words."""
     role = slot.get("required_role") or {}
@@ -266,11 +278,14 @@ def _state_line(op: dict[str, Any], now: datetime, language: str) -> str:
                                                                        when=ts(when(op, "start_at"), "f"))
 
 
-def _header(op: dict[str, Any], ctx: Context, counted: str, closed: int = 0) -> str:
-    """``## Sign-up: title``, the start, how many are in (``counted``) and the slots closed, the state."""
+def _header(op: dict[str, Any], ctx: Context, counted: str, closed: int = 0, other: int = 0) -> str:
+    """``## Sign-up: title``, the start, how many are in (``counted``), the slots closed and those other groups fill,
+    the state."""
     line = f"{t('Start: {when}', ctx.language, when=ts(when(op, 'start_at'), 'F'))} • {counted}"
     if closed:
         line += f" • \U0001F512 {closed}"
+    if other:
+        line += " • " + t("other groups: {count}", ctx.language, count=other)
     return SPACER + "\n".join([f"## {t('Sign-up: {title}', ctx.language, title=plain(op['title']))}", line,
                                _state_line(op, ctx.now, ctx.language)])
 
@@ -281,8 +296,14 @@ def orbat(op: dict[str, Any], ctx: Context) -> list[Message]:
     language, squads, lists = ctx.language, op.get("orbat") or [], op.get("signups") or {}
     counts = op.get("slots") or {}
     blocks = [_header(op, ctx, t("Taken slots: {taken}", language,
-                                 taken=f"**{counts.get('taken', 0)}/{counts.get('total', 0)}**"), counts.get("closed", 0))]
+                                 taken=f"**{counts.get('taken', 0)}/{counts.get('total', 0)}**"),
+                      counts.get("closed", 0), counts.get("other", 0))]
     for squad in squads:
+        if theirs(squad):  # another group fills it in its own sign-up: its slots without holders, no sign-up here
+            head = f"**{plain(squad['name'])}** · *{t('{group} signs up for it on its own', language, group=plain(squad['group']['acronym']))}*"
+            lines = [f"`{n}.` {plain(slot['name'])}" for n, slot in enumerate(squad.get("slots") or [], 1)]
+            blocks.append("\n".join([head, *lines]))
+            continue
         if not squad.get("slots"):  # a headquarters that only holds the tree (the supervisor's diagram)
             continue
         lines = [_slot_line(n, slot, language) for n, slot in enumerate(squad["slots"], 1)]

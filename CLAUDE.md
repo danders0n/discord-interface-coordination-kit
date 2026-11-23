@@ -102,13 +102,15 @@ exactly the settings.
   out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
   `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
   `DetailsModal`, `expired()`; the panel: `PanelButton`, `PanelAction` per section from `my.actions`, `write()` with
-  `If-Match` and *Reopen* on `stale`), `files.py` (the preset and mission uploads shared by the commands and the
+  `If-Match` and *Reopen* on `stale`; `MapPicker`: zeus / training's map from `meta.zeus_maps`, in place of a preset
+  and a mission), `files.py` (the preset and mission uploads shared by the commands and the
   panel's *Preset* / *Mission* modals with a `FileUpload` field), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
   (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
-  or Zeus / training's Coming list, by specialist role when it has some; `phase(op, now)` is the sign-up state from
-  the times), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  or Zeus / training's Coming list, by specialist role when it has some; another group's squad (`# Name @ACR`,
+  guest / hosted: `theirs()`) is drawn without holders and left out of the pickers, `ours()`; `phase(op, now)` is the
+  sign-up state from the times), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
   the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /

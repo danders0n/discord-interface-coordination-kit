@@ -86,6 +86,7 @@ def _label(field: str, language: str) -> str:
             "how_to_join": t("How to join", language), "dont_end_automatically": t("Don't end automatically", language),
             "public": t("Public", language), "hold": t("Hold the host", language),
             "server_id": t("Event server", language), "base_profile_id": t("Base profile", language),
+            "zeus_map": t("Map", language),
             "note": t("Note", language), "hostname": t("Hostname", language),
             "max_players": t("Max players", language), "verify_signatures": t("Verify signatures", language),
             "profile_keep": t("Keep the server profile", language)}.get(field, field)

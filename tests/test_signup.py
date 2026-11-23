@@ -114,6 +114,27 @@ async def test_a_headquarters_without_slots_is_left_out_of_the_list(front, guild
     assert "**Alpha**" in orbat.text and "TF Aegis" not in orbat.text
 
 
+async def test_squads_other_groups_fill_show_without_a_sign_up(front, guild, fake):
+    """An external (or hosted) operation's ORBAT may give squads to other groups (``# Name @ACR``): they sign up on
+    their own, so the squad shows its slots without holders, counts apart, and isn't offered in the lists."""
+    fake.groups = [{"id": 7, "acronym": "3RD", "name": "3rd Rangers"}]
+    op = published(fake, kind="guest", host_group_id=7, how_to_join="ts3",
+                   orbat="# Ours\nLead\n# Theirs < Ours @3rd\nSL\nRifleman x2\n# Platoon HQ @3RD\n")
+    assert [s["name"] for s in fake.operations[op["id"]]["squads"]] == ["Ours", "Theirs", "Platoon HQ"]
+    await run(front)
+    channel = await channel_of(front, guild, op)
+    board = "\n".join(texts(channel))
+    assert "**Theirs** · *3RD zapisuje się na nią u siebie*\n`1.` SL\n`2.` Rifleman\n`3.` Rifleman" in board
+    assert "**Platoon HQ** · *3RD zapisuje się na nią u siebie*" in board  # (no slots written: still shown)
+    assert "Zajęte sloty: **0/1**" in board and "inne grupy: 3" in board
+    squads = controls(channel.messages[-2].view)[f"squad:{op['id']}:0"]
+    assert [o.label for o in squads.options] == ["Ours"]
+    taken = acting(front, guild, 3, channel.id)
+    cog = SlotCog(front)
+    await invoke(cog.take, cog, taken, slot=str(slots(fake, op)["Theirs/SL"]))
+    assert said(taken) == "Another group fills that squad in its own sign-up."
+
+
 async def test_a_press_and_a_sign_up_in_the_app_both_show_and_a_taken_slot_is_refused(front, guild, fake):
     op = published(fake)
     ids = slots(fake, op)

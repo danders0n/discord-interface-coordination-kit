@@ -51,7 +51,9 @@ PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
 EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "author_name", "assembly_at",
             "start_at", "duration_minutes", "signup_opens_at", "signup_limit", "specialist_roles", "how_to_join",
-            "dont_end_automatically", "public", "hold", "note")
+            "dont_end_automatically", "public", "hold", "note", "zeus_map")
+OTHERS = ("guest", "hosted")  # kinds whose ORBAT may give a squad to another group (``# Name @ACR``)
+GROUP_MARK = re.compile(r"@\s*([^\s<{}@]*)")
 TIMES = ("assembly_at", "start_at", "signup_opens_at")
 PUBLISH, SIGNUP, APPROVE = "operations.publish", "operations.signup", "operations.approve"
 SLOT_LINE = re.compile(r"^(?P<lock>!)?\s*(?P<name>.*?)(?:\s+x(?P<count>\d+))?(?:\s*\[(?P<role>[^\[\]]*)\])?"
@@ -93,14 +95,17 @@ def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, 
 
 
 def squad_marks(head: str) -> dict[str, Any]:
-    """A squad line (after ``#``): its name, the name it is under, its unit type and size."""
+    """A squad line (after ``#``): its name, the name it is under, its unit type and size, and the acronym of the
+    other group that fills it (``@ACR``, or None)."""
+    group = next(iter(GROUP_MARK.findall(head)), None)
+    head = re.sub(r"\s+", " ", GROUP_MARK.sub(" ", head)).strip()
     match = SQUAD_HEAD.match(head)
     if match is None:
-        return {"name": head, "parent_name": None, "unit_type": None, "size": None}
+        return {"name": head, "parent_name": None, "unit_type": None, "size": None, "group_acronym": group}
     words = (match.group("marks") or "").split()
     return {"name": match.group("name").strip(), "parent_name": (match.group("parent") or "").strip() or None,
             "unit_type": next((w for w in words if w not in UNIT_SIZES), None),
-            "size": next((w for w in words if w in UNIT_SIZES), None)}
+            "size": next((w for w in words if w in UNIT_SIZES), None), "group_acronym": group}
 
 
 def checklist(op: dict[str, Any]) -> list[str]:
@@ -162,6 +167,8 @@ class State:
     files: dict[tuple[int, str], bytes] = field(default_factory=dict)
     groups: list[dict[str, Any]] = field(default_factory=list)
     climates: list[dict[str, Any]] = field(default_factory=list)
+    # the Zeus maps list ({"id", "name", "mission", "world", "mods", "mod_ids"}): what zeus / training add to the base
+    zeus_maps: list[dict[str, Any]] = field(default_factory=list)
     staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
     acronym: str = "IBC"
     server_missions: list[str] = field(default_factory=list)
@@ -238,7 +245,7 @@ class State:
               "author_person_id": None, "author_name": "", "organisers": [], "assembly_at": assembly,
               "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
               "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
-              "dont_end_automatically": False,
+              "dont_end_automatically": False, "zeus_map": None,
               "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
@@ -316,13 +323,16 @@ class State:
         if problems:
             raise ValueError(problems)
         kept, new = set(), []
+        acronyms = {g["acronym"].casefold(): g["id"] for g in self.groups}
         for head, slots in squads:
             marks = squad_marks(head)
             squad_name = marks["name"]
+            group = marks.pop("group_acronym")
+            marks["group_id"] = acronyms.get(group.casefold()) if group and op["kind"] in OTHERS else None
             made = []
             for n, (name, role_id, locked) in enumerate(slots):
                 before = old.get((squad_name, name, n))
-                holder = before["holder"] if before is not None and not locked else None
+                holder = before["holder"] if before is not None and not locked and not marks["group_id"] else None
                 if holder is not None:
                     kept.add(holder)
                 made.append({"id": self._id("slot"), "name": name, "role_id": role_id, "locked": locked or bool(
@@ -407,10 +417,16 @@ class State:
     def _person_out(self, person_id: int | None) -> dict[str, Any] | None:
         return self._person(person_id)
 
+    @staticmethod
+    def ours(op: dict[str, Any]) -> list[dict[str, Any]]:
+        """The slots members sign up for here (not those of a squad another group fills)."""
+        return [s for squad in op["squads"] if not squad.get("group_id") for s in squad["slots"]]
+
     def board(self, op: dict[str, Any]) -> dict[str, Any]:
-        slots = self.slots(op)
+        slots = self.ours(op)
         counts = {"total": len(slots), "taken": sum(s["holder"] is not None for s in slots),
-                  "closed": sum(s["locked"] and s["holder"] is None for s in slots)}
+                  "closed": sum(s["locked"] and s["holder"] is None for s in slots),
+                  "other": len(self.slots(op)) - len(slots)}
         counts["free"] = counts["total"] - counts["taken"] - counts["closed"]
         coming = sum(e["status"] == "coming" for e in op["signups"])
         offered = {o["slot_id"] for o in op["offers"] if o["state"] == "open"}
@@ -430,7 +446,8 @@ class State:
                        "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"]),
                        "roles": roles},
             "orbat": [{"id": squad["id"], "name": squad["name"], "parent": squad.get("parent"),
-                       "unit_type": squad.get("unit_type"), "size": squad.get("size"), "free": sum(
+                       "unit_type": squad.get("unit_type"), "size": squad.get("size"),
+                       "group": self._group(squad.get("group_id")), "free": 0 if squad.get("group_id") else sum(
                 s["holder"] is None and not s["locked"] for s in squad["slots"]), "slots": [
                 {"id": s["id"], "name": s["name"], "locked": s["locked"], "offered": s["id"] in offered,
                  "required_role": {"id": s["role_id"], "name": s["role_id"]} if s["role_id"] else None,
@@ -465,7 +482,7 @@ class State:
             else:
                 if state == "open" and not pinned:
                     actions.append("take")
-                    free = any(s["holder"] is None and not s["locked"] for s in self.slots(op))
+                    free = any(s["holder"] is None and not s["locked"] for s in self.ours(op))
                     if slot is None and current != "reserve" and not free:
                         actions.append("reserve")
                 if not pinned and current != "maybe":
@@ -585,7 +602,7 @@ class State:
     def actions(self, op: dict[str, Any], person: dict[str, Any]) -> list[str]:
         out, organiser = [], self.organises(op, person)
         if op["status"] in ("draft", "published") and organiser:
-            out += ["edit", "opord", "files", "preset", "mission", "profile"]
+            out += ["edit", "opord", "files"] + (["map"] if op["kind"] in COMING else ["preset", "mission"]) + ["profile"]
             out += ["orbat", "slots"] if op["kind"] not in COMING else ["slots"]
         if op["status"] == "draft" and organiser:
             out.append("publish" if PUBLISH in person["permissions"] or op["kind"] in COMING else "submit")
@@ -616,6 +633,7 @@ class State:
             "specialist_roles": [dict(r) for r in op.get("specialist_roles") or []], "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
             "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
+            "zeus_map": dict(op["zeus_map"]) if op.get("zeus_map") else None,
             "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
                                        "ends_at": iso(ends + timedelta(minutes=30)), "state": "planned",
                                        "hold": op["hold"] == "on"},
@@ -881,6 +899,7 @@ def make_app(state: State | None = None) -> web.Application:
         return web.json_response({
             "api_level": state.api_level, "timezone": state.timezone, "utc_offset": state.utc_offset or "+0100",
             "kinds": [{"id": k, "name": KIND_NAMES[k]} for k in KINDS], "climates": state.climates,
+            "zeus_maps": state.zeus_maps,
             "groups": state.groups, "discord_roles": [], "staff_roles": state.staff_roles,
             "squadxml_url": "https://app.example/squad/squad.xml",
             "defaults": {"server": {"id": 2, "slug": "event", "name": "Event"}, "base_profile": None,
@@ -1023,6 +1042,13 @@ def make_app(state: State | None = None) -> web.Application:
         fields = _fields(await request.json())
         if isinstance(fields, web.Response):
             return fields
+        if fields.get("zeus_map"):  # (by name from the Zeus maps list, stored by value)
+            if op["kind"] not in COMING:
+                return _refuse("wrong_kind", "Only a Zeus or training operation takes a map")
+            found = next((m for m in state.zeus_maps if m["name"].casefold() == fields["zeus_map"].casefold()), None)
+            if found is None:
+                return _refuse("unknown_map", f"Unknown map '{fields['zeus_map']}'", 422)
+            fields["zeus_map"] = {k: found.get(k) for k in ("name", "mission", "world", "mods")}
         trial = op | fields
         problem = _check_times(trial) if any(k in fields for k in ("assembly_at", "start_at")) else None
         if problem is not None:
@@ -1140,6 +1166,8 @@ def make_app(state: State | None = None) -> web.Application:
         refused = _editable(op, request)
         if refused is not None:
             return refused
+        if slot in ("preset", "mission") and op["kind"] in COMING:  # (zeus / training: the base's, with a map)
+            return _refuse("wrong_kind", "A Zeus or training operation uses its base profile's mods and mission")
         form = await request.post()
         upload = form["file"]
         content = upload.file.read()
@@ -1169,6 +1197,8 @@ def make_app(state: State | None = None) -> web.Application:
         refused = _editable(op, request)
         if refused is not None:
             return refused
+        if op["kind"] in COMING:
+            return _refuse("wrong_kind", "A Zeus or training operation uses its base profile's mission")
         name = (await request.json())["name"]
         if name not in state.server_missions:
             return _error(404, f"No mission '{name}' on the server", code="not_found")
@@ -1257,6 +1287,8 @@ def make_app(state: State | None = None) -> web.Application:
         slot = state.slot(op, int(request.match_info["slot_id"]))
         if slot is None:
             return _refuse("no_slot", "No such slot", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         refused = _claim(op, slot, person)
         if refused is not None:
             return refused
@@ -1377,6 +1409,8 @@ def make_app(state: State | None = None) -> web.Application:
         person_id = (await request.json())["person_id"]
         if slot is None or state.by_person(person_id) is None:
             return _refuse("not_found", "No such slot or person", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         if slot["holder"] not in (None, person_id):
             state._list(op, slot["holder"], "reserve", top=0)
         mine = state.held(op, person_id)
@@ -1394,6 +1428,8 @@ def make_app(state: State | None = None) -> web.Application:
         slot = state.slot(op, int(request.match_info["slot_id"]))
         if slot is None:
             return _refuse("no_slot", "No such slot", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         slot["locked"] = bool((await request.json())["locked"])
         _changed(op, request)
         return _signed(op, request)
@@ -1420,6 +1456,9 @@ def make_app(state: State | None = None) -> web.Application:
         _changed(op, request)
         return _signed(op, request)
 
+    def _theirs(op: dict[str, Any], slot: dict[str, Any]) -> bool:
+        return any(squad.get("group_id") and slot in squad["slots"] for squad in op["squads"])
+
     def _orbat_text(op: dict[str, Any]) -> str:
         lines = []
         names = {squad["id"]: squad["name"] for squad in op["squads"]}
@@ -1429,6 +1468,8 @@ def make_app(state: State | None = None) -> web.Application:
                 head += f" < {names[squad['parent']]}"
             if marks := " ".join(m for m in (squad.get("unit_type"), squad.get("size")) if m):
                 head += f" {{{marks}}}"
+            if squad.get("group_id"):
+                head += f" @{(state._group(squad['group_id']) or {}).get('acronym', squad['group_id'])}"
             lines.append(head)
             for slot in squad["slots"]:
                 closed = "!" if slot["locked"] and slot["holder"] is None else ""

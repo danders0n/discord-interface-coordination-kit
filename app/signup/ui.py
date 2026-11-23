@@ -72,7 +72,7 @@ def free(op: dict[str, Any], roles: frozenset[int] | None = None) -> list[tuple[
     """Each squad with its free slots as ``(number as the ORBAT shows it, slot)``, without the squads that have none;
     with ``roles``, only the slots those roles allow (the supervisor checks it again)."""
     found = []
-    for squad in op.get("orbat") or []:
+    for squad in render.ours(op):  # (not another group's squad: it signs up on its own)
         open_slots = []
         for number, slot in enumerate(squad.get("slots") or [], 1):
             if slot.get("holder") or slot.get("locked") or slot.get("offered"):

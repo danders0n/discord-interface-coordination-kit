@@ -768,6 +768,19 @@
             "default": true,
             "title": "Verify Signatures",
             "type": "boolean"
+          },
+          "zeus_map": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus / training: a map from the Zeus maps list (by name), added to the base profile; null: the base's own",
+            "title": "Zeus Map"
           }
         },
         "required": [
@@ -1082,6 +1095,19 @@
               }
             ],
             "title": "Verify Signatures"
+          },
+          "zeus_map": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus / training: a map from the Zeus maps list (by name); null or empty: the base profile's own",
+            "title": "Zeus Map"
           }
         },
         "title": "OperationPatch",
