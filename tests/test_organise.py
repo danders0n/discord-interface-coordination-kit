@@ -214,7 +214,8 @@ async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(
     await modal.on_submit(saved)
     assert said(saved) == "Saved."
     assert fake.operations[zeus["id"]]["specialist_roles"] == [
-        {"name": "Command", "limit": 1}, {"name": "Medic", "limit": None}, {"name": "Pilot", "limit": None}]
+        {"name": "Command", "limit": 1, "min": None}, {"name": "Medic", "limit": None, "min": None},
+        {"name": "Pilot", "limit": None, "min": None}]
     guest = fake.operation("Theirs", kind="guest", author_person_id=1)
     opened = acting(organise, guild, 1)
     await press(PanelButton(guest["id"]), opened)
@@ -263,6 +264,40 @@ async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(or
     internal = fake.operation("Raid", author_person_id=1)
     refused = await panel_press(organise, guild, 1, internal["id"], "map")
     assert said(refused) == "That can't be done now; open the panel again to see what can."
+
+
+async def test_a_zeus_operations_minimum_is_set_in_the_panel(organise, guild, fake, clock):
+    """*Minimum to go ahead* (Zeus only): when sign-up closes, how many must come, cancel or tell when short; a
+    role's own minimum is typed with the roles (``Medic 1-3``)."""
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(zeus["id"]), opened)
+    assert "minimum" in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "minimum")
+    modal = modal_of(pressed)
+    submit(modal, date="x", time="18:00", players="4")
+    wrong = acting(organise, guild, 1)
+    await modal.on_submit(wrong)
+    assert said(wrong).startswith("Type the date")  # (the date's own words)
+    closes = zeus["assembly_at"].astimezone(organise.settings.tz) - timedelta(hours=2)
+    submit(modal, date=f"{closes:%d.%m}", time=f"{closes:%H:%M}", players="4")
+    modal.auto._values = ["yes"]
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved."
+    op = fake.operations[zeus["id"]]
+    assert (op["min_players"], op["auto_cancel"]) == (4, True) and op["signup_closes_at"] == closes.astimezone(UTC)
+    roles = await panel_press(organise, guild, 1, zeus["id"], "roles")
+    modal = modal_of(roles)
+    submit(modal, text="Medic 1-3\nPilot 2+\nCommand x1")
+    await modal.on_submit(acting(organise, guild, 1))
+    assert fake.operations[zeus["id"]]["specialist_roles"] == [
+        {"name": "Medic", "limit": 3, "min": 1}, {"name": "Pilot", "limit": None, "min": 2},
+        {"name": "Command", "limit": 1, "min": None}]
+    training = fake.operation("Drill", kind="training", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(training["id"]), opened)
+    assert "minimum" not in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
 
 
 async def test_a_draft_is_deleted_after_a_confirmation(organise, guild, fake):

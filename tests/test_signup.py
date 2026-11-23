@@ -227,6 +227,39 @@ async def test_a_zeus_operation_lists_coming_by_specialist_role(front, guild, fa
     assert [e.get("role") for e in fake.operations[op["id"]]["signups"] if e["person_id"] == 2] == ["Medic"]
 
 
+async def test_a_zeus_operations_minimum_shows_and_is_told_when_sign_up_closes(front, guild, fake, clock):
+    """A Zeus operation's minimum to go ahead (players, a specialist role's ``min``) shows under its list while sign-up
+    is open; when it closes short, the organisers are pinged, or with ``auto_cancel`` those coming hear it is
+    cancelled and why."""
+    closes = clock.now + timedelta(days=1)
+    told = published(fake, "Night", kind="zeus", orbat="", min_players=2, signup_closes_at=closes,
+                     specialist_roles=[{"name": "Medic", "limit": 2, "min": 1}])
+    gone = published(fake, "Short", kind="zeus", orbat="", min_players=2, auto_cancel=True, signup_closes_at=closes)
+    await run(front)
+    board = "\n".join(texts(await channel_of(front, guild, told)))
+    assert "⏳ Do odbycia się operacji brakuje: jeszcze 2 graczy, jeszcze Medic: 1" in board
+    assert "**Medic** (0/2, min. 1)" in board and f"zamknięcie <t:{int(closes.timestamp())}:f>" in board
+    short = "\n".join(texts(await channel_of(front, guild, gone)))
+    assert "(inaczej zostanie odwołana przy zamknięciu zapisów)" in short
+    await press(SignupAction(gone["id"], "coming"), acting(front, guild, 2))
+
+    at(clock, fake, closes + timedelta(minutes=1))  # sign-up has closed
+    late = acting(front, guild, 3)
+    await press(SignupAction(told["id"], "coming"), late)
+    assert said(late) == "Sign-up has closed."
+    fake.check_requirements()
+    await front.notices.run_once()
+    thread = guild.get_thread((await row(front, told["id"])).thread_id)
+    assert thread.sent[-1].text.startswith("Zapisy na Night zamknęły się bez minimum: brakuje: jeszcze 2 graczy, "
+                                           "jeszcze Medic: 1.") and "<@1>" in thread.sent[-1].text
+    cancelled = guild.get_thread((await row(front, gone["id"])).thread_id).sent[-1]
+    assert cancelled.text.startswith("Short jest odwołana: przy zamknięciu zapisów brakowało: jeszcze 1 gracz.")
+    assert "<@2>" in cancelled.text
+    await run(front)
+    board = "\n".join(texts(await channel_of(front, guild, told)))
+    assert "⚠ Zapisy zamknęły się bez minimum (jeszcze 2 graczy, jeszcze Medic: 1); decydują organizatorzy." in board
+
+
 async def test_the_info_translates_the_kind_and_shows_a_typed_author(front, guild, fake):
     op = published(fake, kind="guest", orbat="", author_person_id=1, author_name="Cpt. Smith", how_to_join="ts3")
     await run(front)

@@ -115,8 +115,16 @@ def op_kind(op: dict[str, Any], language: Any) -> str:
     return kind_name(op.get("kind") or "", op.get("kind_name"), language)
 
 
+def closes(op: dict[str, Any]) -> datetime | None:
+    """When sign-up closes: a Zeus operation's ``signup_closes_at`` (the supervisor checks its minimum then), else
+    the start."""
+    if op.get("kind") == "zeus" and op.get("signup_closes_at"):
+        return when(op, "signup_closes_at")
+    return when(op, "start_at")
+
+
 def signup_state(op: dict[str, Any], now: datetime, language: str) -> str:
-    start, opens = when(op, "start_at"), when(op, "signup_opens_at")
+    start, opens = closes(op), when(op, "signup_opens_at")
     if op["status"] in ("draft", "pending"):
         return t("Opens when the operation is published", language)
     if op["status"] != "published" or (start is not None and now >= start):
@@ -220,7 +228,7 @@ def phase(op: dict[str, Any], now: datetime) -> str:
     from the times: the operation as last read may be older than the opening or the start."""
     if op["status"] in ("draft", "pending"):
         return "not_published"
-    start, opens = when(op, "start_at"), when(op, "signup_opens_at")
+    start, opens = closes(op), when(op, "signup_opens_at")
     if op["status"] != "published" or (start is not None and now >= start):
         return "closed"
     return "not_open" if opens is not None and now < opens else "open"
@@ -275,7 +283,7 @@ def _state_line(op: dict[str, Any], now: datetime, language: str) -> str:
     if state == "not_open":
         return "\U0001F7E1 **" + t("Sign-up opens {when}", language, when=ts(when(op, "signup_opens_at"), "f")) + "**"
     return "\U0001F7E2 **" + t("Sign-up open", language) + "** – " + t("closes {when}", language,
-                                                                       when=ts(when(op, "start_at"), "f"))
+                                                                       when=ts(closes(op), "f"))
 
 
 def _header(op: dict[str, Any], ctx: Context, counted: str, closed: int = 0, other: int = 0) -> str:
@@ -321,8 +329,15 @@ def orbat(op: dict[str, Any], ctx: Context) -> list[Message]:
 
 
 def roles_text(roles: list[dict[str, Any]], glue: str = "\n") -> str:
-    """A Zeus or training operation's specialist roles as organisers type them: ``Medic x3`` (at most 3), ``Command``."""
-    return glue.join(f"{r['name']} x{r['limit']}" if r.get("limit") else str(r["name"]) for r in roles)
+    """A Zeus or training operation's specialist roles as organisers type them: ``Medic x3`` (at most 3), ``Medic
+    1-3`` (at least 1 to go ahead, at most 3; Zeus), ``Medic 1+`` (at least 1), ``Command``."""
+    def one(r: dict[str, Any]) -> str:
+        if r.get("min") and r.get("limit"):
+            return f"{r['name']} {r['min']}-{r['limit']}"
+        if r.get("min"):
+            return f"{r['name']} {r['min']}+"
+        return f"{r['name']} x{r['limit']}" if r.get("limit") else str(r["name"])
+    return glue.join(one(r) for r in roles)
 
 
 def specialist_roles(op: dict[str, Any]) -> list[dict[str, Any]]:
@@ -331,22 +346,58 @@ def specialist_roles(op: dict[str, Any]) -> list[dict[str, Any]]:
     if counted is not None:
         return list(counted)
     coming = (op.get("signups") or {}).get("coming") or []
-    return [{"name": r["name"], "limit": r.get("limit"), "count": sum(1 for p in coming if p.get("role") == r["name"])}
-            for r in op.get("specialist_roles") or []]
+    return [{"name": r["name"], "limit": r.get("limit"), "min": r.get("min"),
+             "count": sum(1 for p in coming if p.get("role") == r["name"])} for r in op.get("specialist_roles") or []]
+
+
+def shortfall(missing: dict[str, Any], language: Any) -> str:
+    """What a Zeus operation still lacks to go ahead: "2 more players, 1 more Medic"."""
+    parts = [t(("{count} more player", "{count} more players"), language, count=int(missing["players"]))] \
+        if missing.get("players") else []
+    parts += [t("{count} more {role}", language, count=int(r["min"]) - int(r["count"]), role=plain(r["name"]))
+              for r in missing.get("roles") or []]
+    return ", ".join(parts)
+
+
+def requirements_line(op: dict[str, Any], language: Any) -> str | None:
+    """A Zeus operation's minimum to go ahead (``signup.requirements``): what it needs and still lacks, or what the
+    check at the close found."""
+    found = (op.get("signup") or {}).get("requirements")
+    if not found or op["kind"] != "zeus":
+        return None
+    state, missing = found.get("state"), found.get("missing") or {}
+    if state == "cancelled":
+        return "❌ " + t("Cancelled: short of the minimum when sign-up closed ({short}).", language,
+                         short=shortfall(missing, language))
+    if state == "missed":
+        return "⚠ " + t("Sign-up closed short of the minimum ({short}); the organisers decide.", language,
+                        short=shortfall(missing, language))
+    if state == "met" or found.get("met"):
+        return "✅ " + t("The minimum to go ahead is reached.", language)
+    needs = t("To go ahead it needs: {short}", language, short=shortfall(missing, language))
+    if found.get("auto_cancel"):
+        needs += " " + t("(else it is cancelled when sign-up closes)", language)
+    return "⏳ " + needs
 
 
 def coming_list(op: dict[str, Any], ctx: Context) -> list[Message]:
-    """A Zeus or training operation: the header, then Coming, one person per line (by specialist role when it has
-    some: each role with its limit, then those coming as none), and Not coming."""
+    """A Zeus or training operation: the header (and a Zeus operation's minimum), then Coming, one person per line
+    (by specialist role when it has some: each role with its limit and minimum, then those coming as none), and Not
+    coming."""
     language, lists = ctx.language, op.get("signups") or {}
     coming, not_coming = lists.get("coming") or [], lists.get("cant") or []
     limit = f"/{op['signup_limit']}" if op.get("signup_limit") else ""
-    blocks = [_header(op, ctx, t("Coming: {count}", language, count=f"**{len(coming)}{limit}**"))]
+    header = _header(op, ctx, t("Coming: {count}", language, count=f"**{len(coming)}{limit}**"))
+    if line := requirements_line(op, language):
+        header += "\n" + line
+    blocks = [header]
     roles = specialist_roles(op)
     if roles:
         for role in roles:
             people = [p for p in coming if p.get("role") == role["name"]]
             cap = f"/{role['limit']}" if role.get("limit") else ""
+            if role.get("min") and op["kind"] == "zeus":
+                cap += ", " + t("min {count}", language, count=int(role["min"]))
             blocks.append(f"**{plain(role['name'])}** ({len(people)}{cap})\n{_mentions(people, language, chr(10), 1000)}")
         named = {r["name"] for r in roles}
         rest = [p for p in coming if p.get("role") not in named]

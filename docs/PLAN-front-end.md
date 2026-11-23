@@ -644,6 +644,29 @@ squads*).
 - Tests: `tests/test_signup.py::test_squads_other_groups_fill_show_without_a_sign_up`,
   `tests/test_organise.py::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission`.
 
+### A Zeus operation's minimum (2026-11-23)
+
+Asked by the owner, with the supervisor's matching change (its *As built*, *A Zeus operation's minimum*). Zeus only,
+not training.
+
+- **Sign-up closes** at `render.closes(op)`: a Zeus operation's `signup_closes_at`, else the start. `phase()`, the
+  info's sign-up state, the "closes ..." line and the scheduled redraw (`CLOSE_KIND`) follow it, so the buttons go
+  off then.
+- **The panel's *Minimum to go ahead*** (Zeus, `MinimumModal`): when sign-up closes (dd.mm and time; empty: at the
+  start), the players needed, and a select *Tell the organisers* / *Cancel it automatically*. A specialist role's own
+  minimum is typed with the roles: `Medic 1-3` (at least 1, at most 3), `Medic 1+` (`ui.parse_roles`,
+  `render.roles_text`).
+- **The list** shows the minimum under the header (`render.requirements_line`: ⏳ what is still needed, "else it is
+  cancelled" with the switch; ✅ reached; ⚠ closed short, the organisers decide; ❌ cancelled) and each role's
+  `min` (`render.shortfall` words the missing).
+- **Notices:** `requirements_missed` pings the organisers in the thread (go ahead or cancel in the panel); a
+  `cancelled` notice with `missing` is worded "cancelled: when sign-up closed it still needed ...". The staff log
+  words `operation.requirements_missed` and the new details. Refusals: `closes_after_start`,
+  `closes_before_opening`, `bad_minimum`.
+- The fake supervisor mirrors it (`closes()`, `requirements()`, `check_requirements()`).
+- Tests: `tests/test_signup.py::test_a_zeus_operations_minimum_shows_and_is_told_when_sign_up_closes`,
+  `tests/test_organise.py::test_a_zeus_operations_minimum_is_set_in_the_panel`.
+
 ### Next
 
 The rest of phase 6, which needs the owner: the test instance against a scratch supervisor (its own checkout and data

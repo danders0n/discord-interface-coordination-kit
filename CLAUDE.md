@@ -110,7 +110,8 @@ exactly the settings.
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
   or Zeus / training's Coming list, by specialist role when it has some; another group's squad (`# Name @ACR`,
   guest / hosted: `theirs()`) is drawn without holders and left out of the pickers, `ours()`; `phase(op, now)` is the
-  sign-up state from the times), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  sign-up state from the times, closing at `closes(op)`: a Zeus operation's `signup_closes_at`, else the start;
+  `requirements_line()`: a Zeus operation's minimum to go ahead), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
   the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /

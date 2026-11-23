@@ -51,10 +51,11 @@ PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
 EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "author_name", "assembly_at",
             "start_at", "duration_minutes", "signup_opens_at", "signup_limit", "specialist_roles", "how_to_join",
-            "dont_end_automatically", "public", "hold", "note", "zeus_map")
+            "dont_end_automatically", "public", "hold", "note", "zeus_map", "signup_closes_at", "min_players",
+            "auto_cancel")
 OTHERS = ("guest", "hosted")  # kinds whose ORBAT may give a squad to another group (``# Name @ACR``)
 GROUP_MARK = re.compile(r"@\s*([^\s<{}@]*)")
-TIMES = ("assembly_at", "start_at", "signup_opens_at")
+TIMES = ("assembly_at", "start_at", "signup_opens_at", "signup_closes_at")
 PUBLISH, SIGNUP, APPROVE = "operations.publish", "operations.signup", "operations.approve"
 SLOT_LINE = re.compile(r"^(?P<lock>!)?\s*(?P<name>.*?)(?:\s+x(?P<count>\d+))?(?:\s*\[(?P<role>[^\[\]]*)\])?"
                        r"(?:\s+x(?P<count2>\d+))?\s*$", re.IGNORECASE)
@@ -247,7 +248,8 @@ class State:
               "author_person_id": None, "author_name": "", "organisers": [], "assembly_at": assembly,
               "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
               "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
-              "dont_end_automatically": False, "zeus_map": None,
+              "dont_end_automatically": False, "zeus_map": None, "signup_closes_at": None, "min_players": None,
+              "auto_cancel": False, "requirements_state": "",
               "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
@@ -424,10 +426,52 @@ class State:
             self._list(op, person["id"], status)
         self._touch(op, by, ["signups"], "updated", revision=False)
 
+    @staticmethod
+    def closes(op: dict[str, Any]) -> datetime:
+        """A zeus operation's ``signup_closes_at``, else the start (the real ``Signups.closes``)."""
+        return op["signup_closes_at"] if op["kind"] == "zeus" and op.get("signup_closes_at") else op["start_at"]
+
+    @staticmethod
+    def requirements(op: dict[str, Any], coming: int, roles: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """A zeus operation's minimum against who comes (the real ``Signups.requirements``)."""
+        wanted = [r for r in roles if r.get("min")]
+        if op["kind"] != "zeus" or (not op.get("min_players") and not wanted):
+            return None
+        short = max(0, (op.get("min_players") or 0) - coming)
+        lacking = [{"name": r["name"], "min": r["min"], "count": r["count"]} for r in wanted if r["count"] < r["min"]]
+        return {"min_players": op.get("min_players"), "coming": coming, "auto_cancel": op.get("auto_cancel", False),
+                "state": op.get("requirements_state") or None, "met": not short and not lacking,
+                "missing": {"players": short, "roles": lacking}}
+
+    def check_requirements(self) -> None:
+        """The supervisor's check when a zeus operation's sign-up closes: met, short (a ``requirements_missed``
+        notice to the organisers), or cancelled (``auto_cancel``: a ``cancelled`` notice with ``missing``)."""
+        for op in list(self.operations.values()):
+            if op["kind"] != "zeus" or op["status"] != "published" or op.get("requirements_state") \
+                    or self.now < self.closes(op):
+                continue
+            found = self.board(op)["signup"]["requirements"]
+            if found is None:
+                continue
+            organisers = [p["discord_id"] for p in self.persons.values() if self.organises(op, p)]
+            if found["met"]:
+                self.change(op["id"], by="supervisor", revision=False, requirements_state="met")
+            elif op.get("auto_cancel"):
+                coming = [self.by_person(e["person_id"])["discord_id"] for e in op["signups"] if e["status"] == "coming"]
+                self.notice("cancelled", operation_id=op["id"], persons=coming,
+                            data={"key": f"OP-{op['id']}", "title": op["title"], "reason": "Not enough sign-ups",
+                                  "missing": found["missing"]})
+                self.change(op["id"], by="supervisor", revision=False, status="cancelled",
+                            cancel_reason="Not enough sign-ups", requirements_state="cancelled")
+            else:
+                self.notice("requirements_missed", operation_id=op["id"], persons=organisers,
+                            data={"key": f"OP-{op['id']}", "title": op["title"], "missing": found["missing"]})
+                self.change(op["id"], by="supervisor", revision=False, requirements_state="missed")
+
     def signup_state(self, op: dict[str, Any]) -> str:
         if op["status"] in ("draft", "pending"):
             return "not_published"
-        if op["status"] != "published" or self.now >= op["start_at"]:
+        if op["status"] != "published" or self.now >= self.closes(op):
             return "closed"
         return "open" if op["signup_opens_at"] is None or self.now >= op["signup_opens_at"] else "not_open"
 
@@ -453,15 +497,16 @@ class State:
             if out is not None:
                 lists[entry["status"]].append(out | {"assigned": entry["assigned"], "missing_dlc": [],
                                                      "role": entry.get("role") or None})
-        roles = [{"name": r["name"], "limit": r.get("limit"), "count": sum(
+        roles = [{"name": r["name"], "limit": r.get("limit"), "min": r.get("min"), "count": sum(
             e["status"] == "coming" and e.get("role") == r["name"] for e in op["signups"])}
             for r in op.get("specialist_roles") or []]
         return {
             "slots": counts,
             "signup": {"state": self.signup_state(op), "opens_at": iso(op["signup_opens_at"]),
                        "limit": op["signup_limit"], "coming": coming,
-                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"]),
-                       "roles": roles},
+                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"],
+                       "closes_at": iso(self.closes(op)), "roles": roles,
+                       "requirements": self.requirements(op, coming, roles)},
             "orbat": [{"id": squad["id"], "name": squad["name"], "parent": squad.get("parent"),
                        "unit_type": squad.get("unit_type"), "size": squad.get("size"),
                        "group": self._group(squad.get("group_id")), "free": 0 if squad.get("group_id") else sum(
@@ -647,6 +692,8 @@ class State:
             "assembly_at": iso(op["assembly_at"]), "start_at": iso(op["start_at"]),
             "duration_minutes": op["duration_minutes"], "ends_at": iso(ends),
             "signup_opens_at": iso(op["signup_opens_at"]), "signup_limit": op["signup_limit"],
+            "signup_closes_at": iso(op.get("signup_closes_at")), "min_players": op.get("min_players"),
+            "auto_cancel": op.get("auto_cancel", False),
             "specialist_roles": [dict(r) for r in op.get("specialist_roles") or []], "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
             "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
@@ -1259,8 +1306,8 @@ def make_app(state: State | None = None) -> web.Application:
         person = _person(request)
         if op["status"] != "published":
             return None, _refuse("not_published", f"OP-{op['id']} is not published: nobody can sign up yet")
-        if state.now >= op["start_at"]:
-            return None, _refuse("closed", f"OP-{op['id']} has started: sign-up is closed")
+        if state.now >= state.closes(op):
+            return None, _refuse("closed", f"Sign-up for OP-{op['id']} is closed")
         if person is None or SIGNUP not in person["permissions"]:
             return None, _refuse("not_allowed", "Signing up needs the permission Sign up for operations", 403)
         if not answer and op["signup_opens_at"] is not None and state.now < op["signup_opens_at"]:

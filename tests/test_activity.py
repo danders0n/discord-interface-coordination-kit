@@ -82,7 +82,8 @@ def test_every_event_of_the_supervisor_is_worded():
         "operation.created", "operation.copied", "operation.changed", "operation.opord", "operation.organisers",
         "operation.file", "operation.mission", "operation.published", "operation.submitted", "operation.withdrawn",
         "operation.cancelled", "operation.deleted", "operation.ended", "operation.extended", "operation.profile_build",
-        "operation.profile_built", "operation.signup_opened", "operation.signup_closed", "orbat.set", "orbat.cleared",
+        "operation.profile_built", "operation.signup_opened", "operation.signup_closed",
+        "operation.requirements_missed", "orbat.set", "orbat.cleared",
         "slot.took", "slot.left", "signup.answered", "offer.made", "offer.declined", "offer.expired", "slot.locked",
         "slot.assigned", "slot.removed", "signup.placed", "signup.freed", "attendance.corrected",
         "attendance.confirmed", "attendance.rated", "link.removed", "account.renamed"}

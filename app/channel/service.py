@@ -542,7 +542,7 @@ class OperationChannels:
     async def _schedule(self, row: OperationChannel) -> None:
         """The operation's own actions, recomputed on every redraw: sign-up opening and closing, the archive."""
         op, now, op_id = row.operation, self.clock(), row.operation_id
-        start, opens, ends = render.when(op, "start_at"), render.when(op, "signup_opens_at"), render.when(op, "ends_at")
+        start, opens, ends = render.closes(op), render.when(op, "signup_opens_at"), render.when(op, "ends_at")
         published = op["status"] == "published"
         if published and start is not None and start > now:
             await self.scheduler.schedule(CLOSE_KIND, start, key=f"{CLOSE_KIND}:{op_id}", operation_id=op_id)

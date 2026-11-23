@@ -18,8 +18,8 @@ from app.channel import render
 from app.i18n import t
 
 COMING = ("zeus", "training")
-TIMES = ("assembly_at", "start_at", "signup_opens_at")
-BOOLEANS = ("dont_end_automatically", "public", "verify_signatures", "profile_keep")
+TIMES = ("assembly_at", "start_at", "signup_opens_at", "signup_closes_at")
+BOOLEANS = ("dont_end_automatically", "public", "verify_signatures", "profile_keep", "auto_cancel")
 
 
 class _Line:
@@ -86,7 +86,8 @@ def _label(field: str, language: str) -> str:
             "how_to_join": t("How to join", language), "dont_end_automatically": t("Don't end automatically", language),
             "public": t("Public", language), "hold": t("Hold the host", language),
             "server_id": t("Event server", language), "base_profile_id": t("Base profile", language),
-            "zeus_map": t("Map", language),
+            "zeus_map": t("Map", language), "signup_closes_at": t("Sign-up closes", language),
+            "min_players": t("Players needed", language), "auto_cancel": t("Cancel automatically", language),
             "note": t("Note", language), "hostname": t("Hostname", language),
             "max_players": t("Max players", language), "verify_signatures": t("Verify signatures", language),
             "profile_keep": t("Keep the server profile", language)}.get(field, field)
@@ -95,7 +96,9 @@ def _label(field: str, language: str) -> str:
 def _value(x: _Line, field: str, value: Any) -> str:
     language = x.language
     if field in TIMES:
-        return x.when(value) if value else (t("at publishing", language) if field == "signup_opens_at" else "—")
+        if not value:
+            return {"signup_opens_at": t("at publishing", language), "signup_closes_at": t("at the start", language)}.get(field, "—")
+        return x.when(value)
     if field == "duration_minutes" and value is not None:
         return render.duration(int(value), language)
     if field == "kind" and value:
@@ -109,7 +112,7 @@ def _value(x: _Line, field: str, value: Any) -> str:
     if field == "hold":
         return {"on": t("yes", language), "off": t("no", language),
                 "requested": t("requested", language)}.get(value, x.text(value))
-    if field in ("signup_limit", "max_players") and not value:
+    if field in ("signup_limit", "max_players", "min_players") and not value:
         return t("none", language)
     if isinstance(value, list):
         return ", ".join(render.plain(str(v)) for v in value) or "—"
@@ -189,6 +192,18 @@ def _simple(key: str) -> Callable[[_Line], list[str]]:
 def _cancelled(x: _Line) -> list[str]:
     return [t("{by} cancelled {operation}. Reason: {reason}", x.language, by=x.by, operation=x.operation,
               reason=x.text(x.get("reason")))]
+
+
+def _requirements_missed(x: _Line) -> list[str]:
+    """A Zeus operation's sign-up closed short of its minimum (``players`` short, ``roles`` as "Medic 0/1")."""
+    parts = [t(("{count} player short", "{count} players short"), x.language, count=int(x["players"]))] \
+        if x.get("players") else []
+    parts += [x.text(str(r)) for r in x.get("roles") or []]
+    line = t("Sign-up for {operation} closed short of its minimum: {short}.", x.language, operation=x.operation,
+             short=", ".join(parts) or "—")
+    if x.get("cancelled"):
+        line += " " + t("It is cancelled automatically.", x.language)
+    return [line]
 
 
 def _deleted(x: _Line) -> list[str]:
@@ -364,7 +379,7 @@ WORDINGS: dict[str, Callable[[_Line], list[str]]] = {
     "operation.withdrawn": _simple("withdrawn"), "operation.cancelled": _cancelled, "operation.deleted": _deleted,
     "operation.ended": _ended, "operation.extended": _extended, "operation.profile_build": _simple("profile_build"),
     "operation.profile_built": _simple("profile_built"), "operation.signup_opened": _simple("signup_opened"),
-    "operation.signup_closed": _simple("signup_closed"),
+    "operation.signup_closed": _simple("signup_closed"), "operation.requirements_missed": _requirements_missed,
     "orbat.set": _orbat_set, "orbat.cleared": _orbat_cleared, "slot.took": _took, "slot.left": _left,
     "signup.answered": _answered, "signup.placed": _placed, "signup.freed": _freed, "offer.made": _offer_made,
     "offer.declined": _offer_declined, "offer.expired": _offer_expired, "slot.locked": _locked,

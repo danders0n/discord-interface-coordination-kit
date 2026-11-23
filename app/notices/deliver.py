@@ -49,6 +49,7 @@ class Delivery:
         notices.register("link_duplicate", self.link_duplicate)
         notices.register("activity", self.activity)
         notices.register("cancelled", self.cancelled)
+        notices.register("requirements_missed", self.requirements_missed)
         notices.register("slot_lost", self.slot_lost)
         notices.register("attendance_reported", self.attendance_reported)
         notices.register("attendance_unconfirmed", self.attendance_unconfirmed)
@@ -148,12 +149,23 @@ class Delivery:
         """The slot holders and those Coming, with the reason."""
         data = notice.get("data") or {}
         title = render.plain(data.get("title") or "?")
-        if data.get("reason"):
+        if data.get("missing"):  # (a Zeus operation short of its minimum when sign-up closed: cancelled by itself)
+            text = t("{title} is cancelled: when sign-up closed it still needed {short}.", self.language, title=title,
+                     short=render.shortfall(data["missing"], self.language))
+        elif data.get("reason"):
             text = t("{title} is cancelled. Reason: {reason}", self.language, title=title,
                      reason=render.plain(data["reason"]))
         else:
             text = t("{title} is cancelled.", self.language, title=title)
         return await self._ping(notice, text)
+
+    async def requirements_missed(self, notice: dict[str, Any]) -> Outcome:
+        """A Zeus operation's sign-up closed short of its minimum (no automatic cancel): the organisers decide."""
+        data = notice.get("data") or {}
+        return await self._ping(notice, t("Sign-up for {title} closed short of its minimum: it still needs {short}. "
+                                          "Go ahead, or cancel it in the panel.", self.language,
+                                          title=render.plain(data.get("title") or "?"),
+                                          short=render.shortfall(data.get("missing") or {}, self.language)))
 
     async def slot_lost(self, notice: dict[str, Any]) -> Outcome:
         """The ORBAT changed under them: now first on the reserve list."""

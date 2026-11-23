@@ -575,6 +575,12 @@
             "description": "the mission's author (a person); default: the creator",
             "title": "Author Person Id"
           },
+          "auto_cancel": {
+            "default": false,
+            "description": "zeus: cancelled when short of the minimum as sign-up closes (else the organisers are told)",
+            "title": "Auto Cancel",
+            "type": "boolean"
+          },
           "base_profile_id": {
             "anyOf": [
               {
@@ -694,6 +700,19 @@
             "description": "default: the mission's playable slots",
             "title": "Max Players"
           },
+          "min_players": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: how many must come to go ahead (0 / null: none)",
+            "title": "Min Players"
+          },
           "note": {
             "default": "",
             "description": "for staff",
@@ -718,6 +737,19 @@
             ],
             "description": "the event server; default: Settings → Operations",
             "title": "Server Id"
+          },
+          "signup_closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: sign-up closes then, and the minimum is checked (null: at the start)",
+            "title": "Signup Closes At"
           },
           "signup_limit": {
             "anyOf": [
@@ -827,6 +859,17 @@
               }
             ],
             "title": "Author Person Id"
+          },
+          "auto_cancel": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Cancel"
           },
           "base_profile_id": {
             "anyOf": [
@@ -975,6 +1018,18 @@
             ],
             "title": "Max Players"
           },
+          "min_players": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Players"
+          },
           "note": {
             "anyOf": [
               {
@@ -1020,6 +1075,18 @@
               }
             ],
             "title": "Server Id"
+          },
+          "signup_closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Closes At"
           },
           "signup_limit": {
             "anyOf": [
@@ -1439,6 +1506,19 @@
             ],
             "description": "how many may come as it (null: no limit)",
             "title": "Limit"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: how many it needs to go ahead (null: none)",
+            "title": "Min"
           },
           "name": {
             "maxLength": 40,

@@ -74,21 +74,22 @@ def duration_text(minutes: int) -> str:
     return f"{minutes // 60}h{minutes % 60:02d}" if minutes % 60 else f"{minutes // 60}h"
 
 
-ROLE_LINE = re.compile(r"^(.*?)\s+x(\d+)$", re.IGNORECASE)
+ROLE_LINE = re.compile(r"^(.*?)\s+(?:x(\d+)|(\d+)-(\d+)|(\d+)\+)$", re.IGNORECASE)
 
 
 def parse_roles(text: str) -> list[dict[str, Any]]:
-    """Specialist roles as typed, one per line: ``Medic x3`` (at most 3; ``x0``: no limit) or ``Command``. The
-    supervisor checks the names."""
+    """Specialist roles as typed, one per line: ``Medic x3`` (at most 3; ``x0``: no limit), ``Medic 1-3`` (at least 1
+    to go ahead, at most 3: Zeus), ``Medic 1+`` (at least 1) or ``Command``. The supervisor checks them."""
     found = []
     for line in (line.strip() for line in text.splitlines()):
         if not line:
             continue
         match = ROLE_LINE.match(line)
         if match and match[1].strip():
-            found.append({"name": match[1].strip(), "limit": int(match[2]) or None})
+            found.append({"name": match[1].strip(), "limit": int(match[2] or match[4] or 0) or None,
+                          "min": int(match[3] or match[5] or 0) or None})
         else:
-            found.append({"name": line, "limit": None})
+            found.append({"name": line, "limit": None, "min": None})
     return found
 
 
@@ -384,6 +385,7 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
     shown += [a for a in ("preset", "mission", "map") if a in actions]
     if "edit" in actions:
         shown += ["signup"] + (["limit", "roles"] if kind in render.COMING else []) + (
+            ["minimum"] if kind == "zeus" else []) + (
             ["join", "author"] if kind == "guest" else [])
         shown.append("organisers")
         if kind != "guest":
@@ -440,7 +442,8 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
                                "and the base are set in the app.", locale))
     labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
               "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
-              "map": t("Map", locale), "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
+              "map": t("Map", locale), "signup": t("Sign-up start", locale),
+              "minimum": t("Minimum to go ahead", locale), "limit": t("Sign-up limit", locale),
               "join": t("How to join", locale), "author": t("Author", locale),
               "roles": t("Specialist roles", locale), "organisers": t("Co-organisers", locale),
               "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
@@ -566,6 +569,9 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
     async def _signup(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(SignupStartModal(interaction, op))
 
+    async def _minimum(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        await interaction.response.send_modal(MinimumModal(interaction, op))
+
     async def _limit(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         client, locale = services(interaction).supervisor, interaction.locale
 
@@ -618,7 +624,8 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
 
         await interaction.response.send_modal(TextModal(
             interaction, t("Specialist roles", locale), render.roles_text(op.get("specialist_roles") or []), 600,
-            save, required=False, label=t("One per line; Medic x3 = at most 3", locale)))
+            save, required=False, label=t("One per line; Medic x3 = at most 3", locale) if op["kind"] != "zeus"
+            else t("Medic x3 = at most 3, 1-3 / 1+ = needs 1", locale)))
 
     async def _organisers(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         names = ", ".join(render.plain(p.get("display_name") or p.get("username") or "?")
@@ -790,6 +797,53 @@ class SignupStartModal(discord.ui.Modal):
         if await write(interaction, op["id"], "signup", "update_operation", {"signup_opens_at": opens},
                        op["revision"]) is not None:
             await reply(interaction, t("Saved.", interaction.locale))
+
+
+class MinimumModal(discord.ui.Modal):
+    """A Zeus operation's minimum to go ahead: when sign-up closes (the supervisor checks it then; empty: at the
+    start), how many must come, and whether it is cancelled when short (else the organisers are told). The
+    specialist roles' own minimum is typed with them (*Specialist roles*: ``Medic 1-3``)."""
+
+    def __init__(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        locale = interaction.locale
+        super().__init__(title=t("Minimum to go ahead", locale)[:45], timeout=TIMEOUT)
+        self.op = op
+        closes = local(op.get("signup_closes_at"), services(interaction).settings.tz)
+        self.date = discord.ui.TextInput(label=t("Sign-up closes (dd.mm), empty: at the start", locale)[:45],
+                                         required=False, max_length=10, default=f"{closes:%d.%m.%Y}" if closes else None)
+        self.time = discord.ui.TextInput(label=t("Time (HH:MM)", locale), required=False, max_length=5,
+                                         default=f"{closes:%H:%M}" if closes else None)
+        self.players = discord.ui.TextInput(label=t("Players needed (empty: none)", locale)[:45], required=False,
+                                            max_length=3, default=str(op["min_players"]) if op.get("min_players") else None)
+        self.auto = discord.ui.Select(options=[
+            discord.SelectOption(label=t("Tell the organisers", locale)[:100], value="no", default=not op.get("auto_cancel")),
+            discord.SelectOption(label=t("Cancel it automatically", locale)[:100], value="yes",
+                                 default=bool(op.get("auto_cancel")))])
+        for item in (self.date, self.time, self.players):
+            self.add_item(item)
+        self.add_item(discord.ui.Label(text=t("When short as sign-up closes", locale)[:45], component=self.auto))
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        s, op, locale = services(interaction), self.op, interaction.locale
+        closes = None
+        if self.date.value.strip():
+            try:
+                day = times.parse_date(self.date.value, s.scheduler.clock(), s.settings.tz,
+                                       int(s.channels.meta.get("max_days_ahead") or 120))
+                clock = times.parse_time(self.time.value or "00:00")
+            except times.TimeError as exc:
+                await reply(interaction, time_problem(exc.problem, locale))
+                return
+            closes = datetime.combine(day, clock, s.settings.tz).isoformat()
+        players = self.players.value.strip()
+        if players and not players.isdigit():
+            await reply(interaction, t("Type a whole number, or leave it empty.", locale))
+            return
+        fields = {"signup_closes_at": closes, "min_players": int(players) if players else None,
+                  "auto_cancel": (self.auto.values or ["no"])[0] == "yes"}
+        await thinking(interaction)
+        if await write(interaction, op["id"], "minimum", "update_operation", fields, op["revision"]) is not None:
+            await reply(interaction, t("Saved.", locale))
 
 
 async def person_ids(interaction: discord.Interaction, members: list[Any]) -> list[int] | None:
