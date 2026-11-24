@@ -375,6 +375,8 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
     """The sections the member's ``actions`` allow, in the panel's order."""
     actions = set((op.get("my") or {}).get("actions") or [])
     kind, shown = op["kind"], []
+    if "server" in actions:  # (while its window is under way: first, it is what matters then)
+        shown.append("server")
     if "edit" in actions:
         shown += ["details", "choices"]
     if "opord" in actions:
@@ -440,7 +442,8 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
         lines.append("-# " + t("Images: /operation image in the operation's channel. A mission over Discord's upload "
                                "limit goes onto the server another way, then Mission picks it by name. The server "
                                "and the base are set in the app.", locale))
-    labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
+    labels = {"server": t("Server", locale),
+              "details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
               "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
               "map": t("Map", locale), "signup": t("Sign-up start", locale),
               "minimum": t("Minimum to go ahead", locale), "limit": t("Sign-up limit", locale),
@@ -457,7 +460,8 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
     view = discord.ui.View(timeout=None)
     for section in panel_sections(op):
         style = discord.ButtonStyle.danger if section in ("cancel", "delete", "end") else \
-            discord.ButtonStyle.success if section in ("publish", "submit") else discord.ButtonStyle.secondary
+            discord.ButtonStyle.success if section in ("publish", "submit") else \
+            discord.ButtonStyle.primary if section == "server" else discord.ButtonStyle.secondary
         view.add_item(PanelAction(op["id"], section, labels[section], style))
     return "\n".join(lines)[:2000], view
 
@@ -499,6 +503,92 @@ class MapPicker(discord.ui.View):
             await finish(interaction, t("Saved.", interaction.locale))
 
 
+def server_text(op: dict[str, Any], locale: Any) -> str:
+    """The operation's server now (``window.server_state``), and what Stop does."""
+    state = (op.get("window") or {}).get("server_state")
+    line = render.server_line(state, locale) if state else t("The server can be started while the window is under way.",
+                                                             locale)
+    return line + "\n-# " + t("The supervisor doesn't start it on its own. Stop only stops the server: the operation "
+                              "goes on, and Start works again.", locale)
+
+
+def server_view(op: dict[str, Any], locale: Any) -> discord.ui.View:
+    """Start while it is stopped; Restart and Stop while it runs; nothing while it starts or stops."""
+    state = ((op.get("window") or {}).get("server_state") or {}).get("state")
+    view = discord.ui.View(timeout=None)
+    if state in (None, "stopped"):
+        view.add_item(ServerAction(op["id"], "start", t("Start server", locale), discord.ButtonStyle.success))
+    elif state == "running":
+        view.add_item(ServerAction(op["id"], "restart", t("Restart server", locale)))
+        view.add_item(ServerAction(op["id"], "stop", t("Stop server", locale), discord.ButtonStyle.danger))
+    return view
+
+
+def server_done(action: str, locale: Any) -> str:
+    return {"start": t("The server is starting.", locale), "restart": t("The server is restarting.", locale),
+            "stop": t("The server is stopped; the operation goes on.", locale)}[action]
+
+
+async def control_server(interaction: discord.Interaction, op_id: int, action: str, confirm: bool = False) -> bool:
+    """Start, stop or restart the operation's server in the member's name; with players on, asks first (a button
+    that sends it again with ``confirm``). True when it was done. Other refusals go up to the error handler."""
+    client, locale = services(interaction).supervisor, interaction.locale
+    try:
+        await act(interaction, lambda me: client.operation_server(me, op_id, action, confirm))
+    except SupervisorError as exc:
+        if exc.code != "players_on" or confirm:
+            raise
+        players = (exc.body or {}).get("players") if isinstance(exc.body, dict) else None
+        question = t("{players} players are on the server. Stop it anyway?", locale, players=players or "?") \
+            if action == "stop" else t("{players} players are on the server. Restart it anyway?", locale,
+                                       players=players or "?")
+        await reply(interaction, question, view=ConfirmServer(interaction, op_id, action))
+        return False
+    await reply(interaction, server_done(action, locale))
+    return True
+
+
+class ServerAction(discord.ui.DynamicItem[discord.ui.Button],
+                   template=r"operation:server:(?P<op>\d+):(?P<action>start|stop|restart)"):
+    """Start / Restart / Stop the operation's server: in the panel's *Server*, and *Start server* on the reminder at
+    the assembly (the organisers', so it outlives a restart)."""
+
+    def __init__(self, op_id: int, action: str, label: str = "",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary) -> None:
+        super().__init__(discord.ui.Button(label=label or action, style=style,
+                                           custom_id=f"operation:server:{op_id}:{action}"))
+        self.op_id, self.action = op_id, action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button,
+                             match: Any) -> ServerAction:
+        return cls(int(match["op"]), match["action"])
+
+    @answers
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await thinking(interaction)
+        await control_server(interaction, self.op_id, self.action)
+
+
+class ConfirmServer(discord.ui.View):
+    """Players are on: stop or restart anyway."""
+
+    def __init__(self, interaction: discord.Interaction, op_id: int, action: str) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.op_id, self.action = op_id, action
+        label = t("Stop anyway", interaction.locale) if action == "stop" else t("Restart anyway", interaction.locale)
+        button = discord.ui.Button(label=label, style=discord.ButtonStyle.danger)
+        button.callback = self._go
+        self.add_item(button)
+
+    async def _go(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()  # (finish() edits the question)
+        client = services(interaction).supervisor
+        await act(interaction, lambda me: client.operation_server(me, self.op_id, self.action, True))
+        self.stop()
+        await finish(interaction, server_done(self.action, interaction.locale))
+
+
 class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
                   template=r"operation:act:(?P<op>\d+):(?P<action>[a-z]+)"):
     def __init__(self, op_id: int, action: str, label: str = "",
@@ -527,6 +617,10 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         await handler(interaction, op)
 
     # ------------------------------------------------------------ sections
+
+    async def _server(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """The operation's server in its window: its state and what can be done with it now."""
+        await reply(interaction, server_text(op, interaction.locale), view=server_view(op, interaction.locale))
 
     async def _details(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(DetailsModal(interaction, op=op))

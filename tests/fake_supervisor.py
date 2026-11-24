@@ -43,7 +43,7 @@ except ImportError:  # run as python -m tests.fake_supervisor
 TOKEN = "test-token"
 ALL = ["events_stream", "heartbeat", "members", "act_as", "notices", "steam_links", "operations", "operation_feed",
        "operation_files", "orbat", "signups", "offers", "orbat_templates", "approval", "operation_attendance",
-       "ratings", "reports", "erasure", "heartbeat_state", "system_events"]
+       "ratings", "reports", "erasure", "heartbeat_state", "system_events", "operation_server"]
 TZ = ZoneInfo("Europe/Warsaw")
 KINDS = ("internal", "guest", "hosted", "zeus", "training")
 COMING = ("zeus", "training")
@@ -168,10 +168,12 @@ class State:
     files: dict[tuple[int, str], bytes] = field(default_factory=dict)
     groups: list[dict[str, Any]] = field(default_factory=list)
     climates: list[dict[str, Any]] = field(default_factory=list)
-    # the Zeus maps list ({"id", "name", "mission", "world", "mod": {"id", "name"} or None, "mod_id"}): what zeus /
-    # training add to their base, whose name and mods for the players (workshop id, name) are ``zeus_base``
+    # the Zeus maps list ({"id", "name", "mission", "world", "mod": {"id", "name", "workshop_id"} or None, "mod_id"}):
+    # what zeus / training add to their base, whose name and mods for the players (workshop id, name) are
+    # ``zeus_base``; staff's standard preset ({"name", "mods"}) replaces the made one when set (``standard_preset``)
     zeus_maps: list[dict[str, Any]] = field(default_factory=list)
     zeus_base: dict[str, Any] = field(default_factory=lambda: {"name": "Standard", "mods": [["463939057", "ACE"]]})
+    standard_preset: dict[str, Any] | None = None
     staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
     acronym: str = "IBC"
     server_missions: list[str] = field(default_factory=list)
@@ -249,7 +251,7 @@ class State:
               "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
               "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
               "dont_end_automatically": False, "zeus_map": None, "signup_closes_at": None, "min_players": None,
-              "auto_cancel": False, "requirements_state": "",
+              "auto_cancel": False, "requirements_state": "", "server_running": False, "players": 0,
               "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
@@ -284,9 +286,17 @@ class State:
 
     def zeus_preset(self, op_id: int) -> None:
         """A zeus / training operation's launcher preset for the players, as the real ``zeus_preset`` makes it: the
-        base's mods (``zeus_base``), then the map's mod; ``generated``."""
+        base's mods (``zeus_base``), then the map's mod; ``generated``. Staff's standard preset instead when set
+        (``standard`` too)."""
         op = self.operations[op_id]
         if op["kind"] not in COMING:
+            return
+        if self.standard_preset is not None:
+            name, mods = self.standard_preset["name"], [list(m) for m in self.standard_preset["mods"]]
+            rows = "".join(f'<tr data-type="ModContainer"><td data-type="DisplayName">{m[1]}</td></tr>' for m in mods)
+            self.set_file(op_id, "preset", f"<html><body><table>{rows}</table></body></html>".encode(), "preset.html",
+                          original=f"{name}.html", preset_name=name, mods=mods, staged=False, generated=True,
+                          standard=True)
             return
         zeus_map = op.get("zeus_map") or {}
         mods = [list(m) for m in self.zeus_base["mods"]]
@@ -661,8 +671,22 @@ class State:
         account = (person.get("account") or {}).get("username")
         return op["created_by"] == account or person["id"] in op["organisers"]
 
+    def window_active(self, op: dict[str, Any]) -> bool:
+        """Its window is under way (assembly - 45 min to the end + 30 min), so its organisers start its server."""
+        ends = op["start_at"] + timedelta(minutes=op["duration_minutes"] + 30)
+        return op["status"] == "published" and op["kind"] != "guest" and \
+            op["assembly_at"] - timedelta(minutes=45) <= self.now < ends
+
+    def server_state(self, op: dict[str, Any]) -> dict[str, Any] | None:
+        """``window.server_state``: the event server while the window is under way (the window never starts it)."""
+        if not self.window_active(op):
+            return None
+        return {"state": "running" if op.get("server_running") else "stopped", "profile": True}
+
     def actions(self, op: dict[str, Any], person: dict[str, Any]) -> list[str]:
         out, organiser = [], self.organises(op, person)
+        if organiser and self.window_active(op):
+            out.append("server")
         if op["status"] in ("draft", "published") and organiser:
             out += ["edit", "opord", "files"] + (["map"] if op["kind"] in COMING else ["preset", "mission"]) + ["profile"]
             out += ["orbat", "slots"] if op["kind"] not in COMING else ["slots"]
@@ -699,8 +723,9 @@ class State:
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
             "zeus_map": dict(op["zeus_map"]) if op.get("zeus_map") else None,
             "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
-                                       "ends_at": iso(ends + timedelta(minutes=30)), "state": "planned",
-                                       "hold": op["hold"] == "on"},
+                                       "ends_at": iso(ends + timedelta(minutes=30)),
+                                       "state": "active" if self.window_active(op) else "planned",
+                                       "hold": op["hold"] == "on", "server_state": self.server_state(op)},
             "frozen": False, "channel_name": self.channel_name(op), "discord": dict(op["discord"]),
             "cancel_reason": op["cancel_reason"], "revision": op["revision"], "change_seq": op["change_seq"],
             "changed_by": op["changed_by"], "changed_fields": list(op["changed_fields"]),
@@ -1706,6 +1731,27 @@ def make_app(state: State | None = None) -> web.Application:
         state._touch(op, _actor(request), ["status", "attendance"], "ended", revision=False)
         return _reply(op, request)
 
+    async def operation_server(request: web.Request) -> web.Response:
+        """Start / stop / restart the operation's server in its window (the real ``server_control``)."""
+        op = _organised(request)
+        if isinstance(op, web.Response):
+            return op
+        body = await request.json()
+        action, confirm = body["action"], bool(body.get("confirm"))
+        if op["kind"] == "guest":
+            return _refuse("no_server", f"OP-{op['id']} has no server of ours")
+        if not state.window_active(op):
+            return _refuse("not_in_window", f"OP-{op['id']}'s server can be started and stopped only while its window "
+                                            "is under way")
+        running = bool(op.get("server_running"))
+        if (action == "stop" and not running) or (action == "start" and running):
+            return _reply(op, request)
+        if running and op.get("players") and not confirm:
+            return _refuse("players_on", f"{op['players']} players are connected", players=op["players"])
+        op["server_running"] = action != "stop"
+        state._touch(op, _actor(request), ["server"], f"server_{action}", revision=False)
+        return _reply(op, request)
+
     async def correct_attendance(request: web.Request) -> web.Response:
         op = _organised(request)
         if isinstance(op, web.Response):
@@ -1931,6 +1977,7 @@ def make_app(state: State | None = None) -> web.Application:
     add.add_post("/api/operations/{op_id:\\d+}/submit", submit)
     add.add_post("/api/operations/{op_id:\\d+}/withdraw", withdraw)
     add.add_post("/api/operations/{op_id:\\d+}/end", end_operation)
+    add.add_post("/api/operations/{op_id:\\d+}/server", operation_server)
     add.add_put("/api/operations/{op_id:\\d+}/attendance", correct_attendance)
     add.add_put("/api/operations/{op_id:\\d+}/rating", rate)
     add.add_get("/api/operations/reports/member/{who}", report_member)

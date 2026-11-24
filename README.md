@@ -22,7 +22,9 @@ has not yet run against the real one; that is the release step (*Next* in the pl
   `/link`, see `/operations`, `/attendance`, `/profile`, `/mission-maker` and `/group`.
 - **Organisers:** *Create operation* on the header opens the wizard; *Organiser panel* under each operation opens the
   panel (details, OPORD, ORBAT and templates, sign-up, co-organisers, publish or send for approval, copy, cancel,
-  end). `/operation preset | image | mission` uploads files.
+  end). `/operation preset | image | mission` uploads files. The supervisor never starts an operation's server: while
+  its window is under way the panel's *Server* starts, restarts and stops it, and the organisers are pinged at the
+  assembly if it is still stopped.
 - **Moderators:** approval requests in the staff channel's moderation thread, with *Approve* / *Reject*.
 - **Pings:** sign-up opening, reminders before the assembly, cancellations and lost slots, all in the operation's
   thread.

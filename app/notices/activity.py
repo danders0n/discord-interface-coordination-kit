@@ -224,6 +224,26 @@ def _extended(x: _Line) -> list[str]:
               until=x.when(x["until"], "t"))]
 
 
+def _server(x: _Line) -> list[str]:
+    """The operation's server by hand in its window (``action``; ``players`` connected when it was confirmed)."""
+    action = x.get("action")
+    if action == "start":
+        line = t("{by} started the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    elif action == "restart":
+        line = t("{by} restarted the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    else:
+        line = t("{by} stopped the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    if x.get("players"):
+        line += " " + t(("{count} player was connected.", "{count} players were connected."), x.language,
+                        count=int(x["players"]))
+    return [line]
+
+
+def _server_failed(x: _Line) -> list[str]:
+    return [t("The server of {operation} did not start for {by}: {reason}", x.language, by=x.by,
+              operation=x.operation, reason=x.text(x.get("reason")))]
+
+
 # ---------------------------------------------------------------- the ORBAT and sign-ups
 
 
@@ -378,6 +398,7 @@ WORDINGS: dict[str, Callable[[_Line], list[str]]] = {
     "operation.mission": _mission, "operation.published": _published, "operation.submitted": _simple("submitted"),
     "operation.withdrawn": _simple("withdrawn"), "operation.cancelled": _cancelled, "operation.deleted": _deleted,
     "operation.ended": _ended, "operation.extended": _extended, "operation.profile_build": _simple("profile_build"),
+    "operation.server": _server, "operation.server_failed": _server_failed,
     "operation.profile_built": _simple("profile_built"), "operation.signup_opened": _simple("signup_opened"),
     "operation.signup_closed": _simple("signup_closed"), "operation.requirements_missed": _requirements_missed,
     "orbat.set": _orbat_set, "orbat.cleared": _orbat_cleared, "slot.took": _took, "slot.left": _left,

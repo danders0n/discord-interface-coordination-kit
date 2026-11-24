@@ -18,6 +18,8 @@ from app.supervisor_client.sse import SseParser, StreamEvent
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=600)  # a mission of a few hundred MB, on the same machine
+SERVER_TIMEOUT = aiohttp.ClientTimeout(total=180)  # an operation's server: a graceful stop, then a start
+SERVER_ACTIONS = ("start", "stop", "restart")
 # The stream sends a keep-alive every 15 s: a minute of silence means the connection is dead.
 STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
 ACT_AS_HEADER = "X-Act-As"
@@ -427,6 +429,14 @@ class SupervisorClient:
     async def end_operation(self, act_as: int, op_id: int) -> dict[str, Any]:
         """*End operation* (its organisers, after the start): the attendance is read shortly after."""
         return await self.request("POST", f"/api/operations/{int(op_id)}/end", act_as=act_as)
+
+    async def operation_server(self, act_as: int, op_id: int, action: str, confirm: bool = False) -> dict[str, Any]:
+        """Start, stop or restart the operation's server while its window is under way (its organisers; the window
+        never starts it). With players connected a stop or restart is 409 ``players_on`` (``players``) unless
+        ``confirm``. Not queued: it is wanted now or not at all."""
+        assert action in SERVER_ACTIONS
+        return await self.request("POST", f"/api/operations/{int(op_id)}/server", act_as=act_as,
+                                  json={"action": action, "confirm": confirm}, timeout=SERVER_TIMEOUT)
 
     async def correct_attendance(self, act_as: int, op_id: int, person_ids: list[int], status: str) -> dict[str, Any]:
         """``attended``, ``no_show`` or ``excused`` for these persons (one missing from the report is added)."""

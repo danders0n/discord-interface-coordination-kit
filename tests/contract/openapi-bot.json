@@ -1459,6 +1459,30 @@
         "title": "RosterMember",
         "type": "object"
       },
+      "ServerIn": {
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "stop",
+              "restart"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirm": {
+            "default": false,
+            "description": "stop / restart with players connected (else 409 players_on with players)",
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ServerIn",
+        "type": "object"
+      },
       "SignupIn": {
         "properties": {
           "role": {
@@ -5543,6 +5567,73 @@
           }
         ],
         "summary": "Rate",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
+    "/api/operations/{op_id}/server": {
+      "post": {
+        "description": "Start, stop or restart the operation's server while its window is under way (its organisers, or Manage\noperations). The window never starts it. Start runs the operation's profile; Stop only stops the server (the\nwindow goes on). Codes: not_in_window, no_server, players_on (with ``players``), busy, start_failed.",
+        "operationId": "control_server_api_operations__op_id__server_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Control Server Api Operations  Op Id  Server Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Control Server",
         "tags": [
           "operations"
         ],

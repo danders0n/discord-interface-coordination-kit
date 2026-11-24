@@ -36,7 +36,7 @@ from app.notices.service import Notices
 from app.operations.feed import Feed
 from app.operations.cog import OperationCog
 from app.operations.header import Header
-from app.operations.ui import CreateOperation, PanelAction, PanelButton, expired
+from app.operations.ui import CreateOperation, PanelAction, PanelButton, ServerAction, expired
 from app.privacy.cog import PrivacyCog
 from app.queued.service import Queue
 from app.queued.ui import Teller
@@ -242,7 +242,8 @@ class EventBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
         self.add_dynamic_items(LinkNow, SignupAction, SquadList, RoleList, OfferAction, ApprovalAction,
-                               CreateOperation, PanelButton, PanelAction, ReportAction, UpdateButton)  # outlive a restart
+                               CreateOperation, PanelButton, PanelAction, ServerAction, ReportAction,
+                               UpdateButton)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),

@@ -18,7 +18,8 @@ The supervisor is a separate project at `D:\Workspace\python\arma-server-supervi
 and `docs/PLAN-operations.md` (*As built*) before touching the integration.
 
 Status: the old stand-alone bot of [docs/PLAN.md](docs/PLAN.md) is on `master`. On `feature/front-end` the front end
-is built: steps 1–7, the plan's phases 1–5, tested against the fake supervisor; so is the remote update with the
+is built: steps 1–7, the plan's phases 1–5 and the operation tweaks (I–III: III is the standard preset, the map's
+Workshop link and the organisers' Start / Stop of the operation's server), tested against the fake supervisor; so is the remote update with the
 two apps watching each other and the queue of members' actions ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md),
 steps 1–7, end to end without Discord; the supervisor's part is its `docs/PLAN-bot-health.md`). Next is phase 6, the release: a test
 instance against a scratch supervisor, then the merge (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays
@@ -103,7 +104,9 @@ exactly the settings.
   `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
   `DetailsModal`, `expired()`; the panel: `PanelButton`, `PanelAction` per section from `my.actions`, `write()` with
   `If-Match` and *Reopen* on `stale`; `MapPicker`: zeus / training's map from `meta.zeus_maps`, in place of a preset
-  and a mission), `files.py` (the preset and mission uploads shared by the commands and the
+  and a mission; the panel's *Server* in the window: `server_view`, the persistent `ServerAction`
+  `operation:server:<op>:<action>`, `control_server()` asking on `players_on` with `ConfirmServer`; the supervisor
+  never starts an operation's server), `files.py` (the preset and mission uploads shared by the commands and the
   panel's *Preset* / *Mission* modals with a `FileUpload` field), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
   (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
@@ -111,7 +114,8 @@ exactly the settings.
   or Zeus / training's Coming list, by specialist role when it has some; another group's squad (`# Name @ACR`,
   guest / hosted: `theirs()`) is drawn without holders and left out of the pickers, `ours()`; `phase(op, now)` is the
   sign-up state from the times, closing at `closes(op)`: a Zeus operation's `signup_closes_at`, else the start;
-  `requirements_line()`: a Zeus operation's minimum to go ahead), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  `requirements_line()`: a Zeus operation's minimum to go ahead; `map_value()`: the map linked to its Steam Workshop
+  page; `server_line()`: `window.server_state` in the info), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
   the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /
@@ -120,7 +124,8 @@ exactly the settings.
   rest, then the operations by start; one bulk position request, only when the order differs), `service.py`
   (`OperationChannels`: `apply(op)` / `gone(id)` from the feed; a redraw converges on the operation: the channel, the
   overwrites (organisers and `meta`'s staff roles), the messages, the thread at publishing (Discord's card last,
-  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the reminders, the archive by
+  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the reminders, at the assembly the organisers'
+  *Start server* ping while the server is stopped (`SERVER_KIND`, read fresh), the archive by
   quarter; batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart; the sign-up buttons on the
   last ORBAT message; `ping()` in the thread (a draft: DMs); `by_channel()`; `watchers` hear `changed(op)` /
   `gone(id)`). `EventBot.build_operations` wires channels, header and feed.

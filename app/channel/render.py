@@ -175,11 +175,39 @@ def info(op: dict[str, Any], ctx: Context) -> Message:
     mission = op.get("mission") or {}
     if mission.get("name"):
         embed.add_field(name=t("Mission", language), value=plain(mission["name"]), inline=False)
-    if op["kind"] in COMING and op.get("zeus_map"):  # (added to the base profile's modset)
-        embed.add_field(name=t("Map", language), value=plain(op["zeus_map"].get("name") or ""), inline=False)
+    if op["kind"] in COMING and op.get("zeus_map"):  # (added to the base profile's modset; players subscribe to it)
+        embed.add_field(name=t("Map", language), value=map_value(op["zeus_map"], language)[:1024], inline=False)
+    state = (op.get("window") or {}).get("server_state")
+    if state and status == "published":  # (while the window is under way: its organisers start it)
+        embed.add_field(name=t("Server", language), value=server_line(state, language), inline=False)
     if op["kind"] == "guest" and op.get("how_to_join"):
         embed.add_field(name=t("How to join", language), value=op["how_to_join"][:1024], inline=False)
     return Message(embeds=[embed])
+
+
+WORKSHOP = "https://steamcommunity.com/sharedfiles/filedetails/?id={id}"
+
+
+def map_value(zeus_map: dict[str, Any], language: str) -> str:
+    """A Zeus / training operation's map: its name, linked to its Steam Workshop page when it is a Workshop mod (the
+    players subscribe to it; the preset, the group's standard one, may not hold it)."""
+    name = plain(zeus_map.get("name") or "")
+    workshop = str((zeus_map.get("mod") or {}).get("workshop_id") or "")
+    if not workshop.isdigit():
+        return name
+    return f"[{name}]({WORKSHOP.format(id=workshop)})\n-# " + t("Subscribe to the map in the Steam Workshop.", language)
+
+
+def server_line(state: dict[str, Any], language: Any) -> str:
+    """The operation's server in its window (``window.server_state``)."""
+    words = {"stopped": "⚪ " + t("Stopped: the organisers start it.", language),
+             "starting": "🟡 " + t("Starting…", language),
+             "running": "🟢 " + t("Running", language),
+             "stopping": "🟡 " + t("Stopping…", language)}
+    line = words.get(str(state.get("state")), str(state.get("state")))
+    if state.get("state") == "running" and state.get("profile") is False:
+        line += " " + t("(another profile than the operation's)", language)
+    return line
 
 
 def texts(blocks: list[str], separator: str = "\n", limit: int = MAX_CONTENT) -> list[str]:

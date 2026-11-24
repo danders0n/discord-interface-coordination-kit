@@ -17,7 +17,9 @@ to repeat, so a redraw after a crash, a restart or the bot's own echo does no ha
   goes out once, mentioning the announcement role and the climate's role, and is edited on every change. Sign-up
   opening pings those roles in the thread (skipped more than an hour late); the start redraws (sign-up closes). The
   sign-up buttons sit on the last ORBAT message. Reminders ping the slot holders (or Coming) in the thread at
-  ``times.reminder_minutes`` before the assembly, skipped once the assembly or a later reminder has come.
+  ``times.reminder_minutes`` before the assembly, skipped once the assembly or a later reminder has come. At the
+  assembly the organisers are pinged with *Start server* if the server is still stopped (the supervisor never starts
+  it), until the start.
 - Watchers (offers, the moderation thread) hear of every change the feed hands over, and of an operation gone.
 - Cancelled: drawn as such, the announcement edited, archived at once. Over (ended, or past its end): archived
   ``archive_hours`` after the end. A deleted draft (a tombstone) loses its channel; an operation missing from a
@@ -45,7 +47,7 @@ from app.resolve import Ids
 from app.scheduler import Action, Scheduler
 from app.settings import SettingsStore
 from app.attendance import ui as attendance_ui
-from app.operations.ui import panel_view
+from app.operations.ui import ServerAction, panel_view
 from app.signup import ui as signup_ui
 from app.supervisor_client import SupervisorClient, SupervisorError
 
@@ -55,6 +57,7 @@ SIGNUP_KIND = "signup_open"  # the sign-up opens: the roles pinged in the thread
 DRAW_KIND = "draw_retry"  # a redraw that couldn't get the operation's files, or Discord held back: tried again
 RATING_KIND = "rating_close"  # the rating window closes: drawn again, without Rate (the supervisor writes no change)
 REMINDER_KIND = "reminder"  # times.reminder_minutes before the assembly: the slot holders (or Coming) pinged
+SERVER_KIND = "server_reminder"  # at the assembly: the organisers pinged if the server is still stopped
 CATEGORY_LIMIT = 50
 CATEGORY_WARNING = 45  # the staff log hears from here on (docs/PLAN.md, *Event channel*, *Where*)
 PING_LATE = timedelta(hours=1)  # a sign-up ping later than this is skipped
@@ -160,6 +163,7 @@ class OperationChannels:
         scheduler.register(DRAW_KIND, self._redraw_action)
         scheduler.register(RATING_KIND, self._redraw_action)
         scheduler.register(REMINDER_KIND, self._reminder_action)
+        scheduler.register(SERVER_KIND, self._server_action)
 
     # ---------------------------------------------------------------- helpers
 
@@ -554,6 +558,11 @@ class OperationChannels:
         elif not published:
             await self.scheduler.cancel(f"{SIGNUP_KIND}:{op_id}")
         await self._schedule_reminders(op, published, now)
+        assembly = render.when(op, "assembly_at")
+        if published and op.get("server") and assembly is not None and assembly > now:
+            await self.scheduler.schedule(SERVER_KIND, assembly, key=f"{SERVER_KIND}:{op_id}", operation_id=op_id)
+        elif not published or not op.get("server"):
+            await self.scheduler.cancel(f"{SERVER_KIND}:{op_id}")
         closes = render.when(op.get("rating") or {}, "closes_at")
         if closes is not None and closes > now:
             await self.scheduler.schedule(RATING_KIND, closes, key=f"{RATING_KIND}:{op_id}", operation_id=op_id)
@@ -584,7 +593,7 @@ class OperationChannels:
         """Gone in the supervisor: a channel never published is deleted, one that was is archived."""
         channel = self._channel(row)
         await self.scheduler.cancel_all(REMINDER_KIND, row.operation_id)
-        for kind in (ARCHIVE_KIND, CLOSE_KIND, SIGNUP_KIND, DRAW_KIND, RATING_KIND):
+        for kind in (ARCHIVE_KIND, CLOSE_KIND, SIGNUP_KIND, DRAW_KIND, RATING_KIND, SERVER_KIND):
             await self.scheduler.cancel(f"{kind}:{row.operation_id}")
         if channel is not None and row.thread_id and row.archived_at is None:
             await self.archive(row.operation_id)
@@ -691,6 +700,35 @@ class OperationChannels:
             return
         for content in mention_chunks(text, members):
             await channel.send(content, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+
+    async def _server_action(self, action: Action, now: datetime) -> datetime | None:
+        """At the assembly: the supervisor never starts the operation's server, so if it is still stopped its
+        organisers are pinged in the thread with *Start server*. The operation is read fresh (the server's state
+        moves outside the organisers' edits); while its window hasn't begun yet (the supervisor's ticker) it looks
+        again a minute later. Skipped from the start on."""
+        self._connected()
+        op_id = int(action.operation_id)  # type: ignore[arg-type]
+        try:
+            op = await self.client.operation(op_id)
+        except SupervisorError as exc:
+            if exc.status == 404:
+                return None  # (gone)
+            raise  # away: retried
+        start = render.when(op, "start_at")
+        if op.get("status") != "published" or start is None or now >= start:
+            return None
+        state = (op.get("window") or {}).get("server_state")
+        if state is None:
+            return now + RETRY
+        members = render.organisers(op)
+        if state.get("state") != "stopped" or not members:
+            return None
+        view = discord.ui.View(timeout=None)
+        view.add_item(ServerAction(op_id, "start", t("Start server", self.language), discord.ButtonStyle.success))
+        text = t("The server for {title} is still stopped, and the assembly is now: start it here or in the Organiser "
+                 "panel.", self.language, title=op["title"])
+        await self.ping(op_id, text, members, view=view)
+        return None
 
     async def ping(self, op_id: int, text: str, member_ids: list[int], view: discord.ui.View | None = None) -> Any:
         """``text`` and the members' mentions in the operation's thread, split before Discord's 2000 characters; a

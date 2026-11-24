@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import HEADER
 from fakes import FakeAttachment, invoke
-from test_channel import row, run, stack  # noqa: F401  (stack: a fixture)
+from test_channel import at, row, run, stack  # noqa: F401  (stack: a fixture)
 from test_signup import ORBAT, OPORD, PUBLISH, acting, controls, front, moderation_thread, press, said  # noqa: F401
 
 from app.discord_util import on_modal_error
@@ -250,11 +250,20 @@ async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(or
     await run(organise)
     channel = guild.get_channel((await row(organise, zeus["id"])).channel_id)
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
-    assert fields["Mapa"] == "Tanoa" and fields["Modset"] == "Standard + Tanoa: 2 mody"
+    assert fields["Mapa"] == ("[Tanoa](https://steamcommunity.com/sharedfiles/filedetails/?id=583496184)\n"
+                              "-# Zasubskrybuj mapę w Warsztacie Steam.")  # (its Workshop page: players subscribe)
+    assert fields["Modset"] == "Standard + Tanoa: 2 mody"
     drawn = await row(organise, zeus["id"])
     preset = channel.get_partial_message(drawn.messages["preset"])._find()
     assert preset.content.endswith("## Modset do Arma 3 Launchera: Standard + Tanoa")
     assert preset.kwargs["files"][0].filename == "Standard + Tanoa.html"
+    # staff's standard preset replaces the made one; the map stays a link
+    fake.standard_preset = {"name": "IBC Standard", "mods": [["463939057", "ACE"], ["450814997", "CBA_A3"]]}
+    fake.zeus_preset(zeus["id"])
+    await run(organise)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Modset"] == "IBC Standard: 2 mody" and fields["Mapa"].startswith("[Tanoa](")
+    fake.standard_preset = None
     again = await panel_press(organise, guild, 1, zeus["id"], "map")
     assert said(again).startswith("Map: Tanoa")
     none = acting(organise, guild, 1)
@@ -264,6 +273,87 @@ async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(or
     internal = fake.operation("Raid", author_person_id=1)
     refused = await panel_press(organise, guild, 1, internal["id"], "map")
     assert said(refused) == "That can't be done now; open the panel again to see what can."
+
+
+async def test_the_organisers_start_and_stop_the_server_in_the_window(organise, guild, fake, clock):
+    """The supervisor never starts an operation's server: in its window the panel's *Server* starts, restarts and
+    stops it (act-as), with players on it asks first; the info shows the state; outside the window there is none."""
+    op = fake.operation("Raid", status="published", author_person_id=1,
+                        assembly=clock.now + timedelta(hours=2))
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(op["id"]), opened)
+    assert "server" not in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]  # (not yet)
+    early = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "start"), early)  # an old button: the supervisor refuses
+    assert said(early) == "The server can be started and stopped only while the operation's window is under way."
+
+    at(clock, fake, clock.now + timedelta(hours=1, minutes=30))  # the window (assembly - 45 min) is under way
+    fake.change(op["id"], revision=False, note="")  # (the supervisor's ticker: the window's begin is in the feed)
+    await run(organise)
+    channel = guild.get_channel((await row(organise, op["id"])).channel_id)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Serwer"] == "⚪ Zatrzymany: uruchamiają go organizatorzy."
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(op["id"]), opened)
+    assert [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])][0] == "server"  # first
+    pressed = await panel_press(organise, guild, 1, op["id"], "server")
+    assert said(pressed).startswith("⚪ Stopped: the organisers start it.")
+    assert list(controls(pressed.replies[-1].kwargs["view"])) == [f"operation:server:{op['id']}:start"]
+    started = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "start"), started)
+    assert said(started) == "The server is starting." and fake.operations[op["id"]]["server_running"] is True
+    assert ("POST", "/api/operations/{op_id}/server", "1") in fake.acted  # (in Anna's name)
+    await run(organise)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Serwer"] == "🟢 Działa"
+    pressed = await panel_press(organise, guild, 1, op["id"], "server")
+    assert list(controls(pressed.replies[-1].kwargs["view"])) == [
+        f"operation:server:{op['id']}:restart", f"operation:server:{op['id']}:stop"]
+
+    fake.operations[op["id"]]["players"] = 4
+    stop = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "stop"), stop)
+    assert said(stop) == "4 players are on the server. Stop it anyway?"
+    assert fake.operations[op["id"]]["server_running"] is True  # (not yet)
+    sure = acting(organise, guild, 1)
+    await stop.replies[-1].kwargs["view"]._go(sure)
+    assert sure.original_edits[-1]["content"] == "The server is stopped; the operation goes on."
+    assert fake.operations[op["id"]]["server_running"] is False
+    stranger = acting(organise, guild, 3)
+    await press(ui.ServerAction(op["id"], "start"), stranger)
+    assert said(stranger) == "You don't have the permission for this."
+
+
+async def test_the_organisers_hear_at_the_assembly_when_the_server_is_still_stopped(organise, guild, fake, clock):
+    """At the assembly the organisers are pinged in the thread with *Start server* if the server is still stopped;
+    not when it runs, nor after the start."""
+    op = fake.operation("Raid", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    thread = guild.get_thread((await row(organise, op["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, op["assembly_at"])
+    await organise.scheduler.run_due()
+    ping = thread.sent[-1]
+    assert len(thread.sent) == before + 1 and ping.content.startswith(
+        "Serwer operacji Raid jest wciąż zatrzymany") and "<@1>" in ping.content
+    assert list(controls(ping.view)) == [f"operation:server:{op['id']}:start"]
+
+    running = fake.operation("Night", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    fake.operations[running["id"]]["server_running"] = True
+    thread = guild.get_thread((await row(organise, running["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, running["assembly_at"])
+    await organise.scheduler.run_due()
+    assert len(thread.sent) == before  # (running: nothing to say)
+
+    late = fake.operation("Late", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    thread = guild.get_thread((await row(organise, late["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, late["start_at"] + timedelta(minutes=5))  # (the bot was away at the assembly)
+    await organise.scheduler.run_due()
+    assert len(thread.sent) == before  # (after the start: no use any more)
 
 
 async def test_a_zeus_operations_minimum_is_set_in_the_panel(organise, guild, fake, clock):

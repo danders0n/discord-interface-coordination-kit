@@ -39,6 +39,11 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
     if code == "bad_orbat":
         problems = [str(p) for p in body.get("problems") or []][:10]
         return t("The ORBAT has problems:", locale) + "\n" + "\n".join(f"- {p}" for p in problems)
+    if code == "players_on":
+        return t("Players are on the server ({players}).", locale, players=body.get("players") or "?")
+    if code == "start_failed":
+        return t("The server did not start: {reason}", locale,
+                 reason=str(body.get("detail") or "?").removeprefix("The server did not start: ")[:500])
     words = {
         "not_published": t("The operation isn't published yet.", locale),
         "not_open": t("Sign-up isn't open yet.", locale),
@@ -91,6 +96,11 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "bad_preset": t("That file is not an Arma 3 Launcher preset.", locale),
         "too_large": t("That file is too large.", locale),
         "unknown_mission": t("There is no such mission on the server.", locale),
+        # the operation's server (docs/PLAN-front-end.md, *Operation tweaks III*)
+        "not_in_window": t("The server can be started and stopped only while the operation's window is under way.",
+                           locale),
+        "no_server": t("This operation has no server of ours.", locale),
+        "busy": t("The server is starting or stopping: try again in a moment.", locale),
         # attendance, ratings, erasure
         "not_started": t("The operation hasn't started yet: cancel it instead.", locale),
         "no_report": t("There is no attendance report yet.", locale),

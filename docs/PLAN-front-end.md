@@ -52,7 +52,7 @@ approval, attendance, ratings, persons, Steam links and squad.xml. The bot:
 | `app/attendance/service.py`, `stats.py`, `history.py` | **Deleted.** `ui.py` (report, *Edit attendance*, *Rate*) and `cog.py` (`/attendance`, `/profile`, `/mission-maker`, `/group`, `/attendance-report`) stay and read supervisor routes. |
 | `app/links/service.py`, `app/squadxml/` | **Deleted.** `/link` and `/unlink` stay (act-as). `links/watch.py` becomes the roster push. Reminder bookkeeping stays (it is delivery). |
 | `app/reservations/`, `app/profiles/`, `app/presets.py` | **Deleted.** The supervisor builds and holds the host itself; the bot uploads the preset and mission files and shows the supervisor's report. |
-| `app/servers/` (`/server`) | **Deleted.** Servers are controlled in the app only (act-as refuses server control). |
+| `app/servers/` (`/server`) | **Deleted.** Servers are controlled in the app only (act-as refuses server control). *(11-24)* Except an operation's own server in its window: the panel's *Server* (*Operation tweaks III*). |
 | `app/activity.py` | **Deleted.** Activity lines come from the supervisor as `activity` notices, so changes made in the app are logged too. |
 | `app/archive/`, `app/privacy/` (`/privacy` text), `scheduler.py`, `staff_threads.py`, `staff_log.py`, `logs.py`, `heartbeat.py`, `startup_checks.py`, `i18n/`, `discord_util.py`, `resolve.py`, `db/backup.py` | **Kept.** `/privacy-erase` calls the supervisor. |
 | `app/permissions.py` | **Shrinks** to the bot's own commands (`/reload`, archive access for *bot admin*). Every other check is the supervisor's. |
@@ -667,6 +667,63 @@ not training.
 - Tests: `tests/test_signup.py::test_a_zeus_operations_minimum_shows_and_is_told_when_sign_up_closes`,
   `tests/test_organise.py::test_a_zeus_operations_minimum_is_set_in_the_panel`.
 
+### Operation tweaks III (2026-11-24)
+
+Asked by the owner (grilled 2026-11-24), with the supervisor's matching change (its `docs/PLAN-operation-server.md`,
+decisions and *As built*). It reverses *Server control from Discord: removed* for one operation's own server, in
+its window.
+
+Decided:
+
+- **A standard preset for Zeus and training:** staff upload **one** launcher preset (the group's "standard" modset)
+  in the app, shared by both kinds; such an operation offers that file instead of the generated `<base> + <map>`
+  one, whatever its base profile (none uploaded: the generated one, as before). The map comes separately, as a
+  **link to its Steam Workshop page**. The server still loads the base's mods plus the map's.
+- **The server doesn't start on its own**, for every kind. The hold still runs on schedule (quiet period, countdown,
+  other servers stopped, jobs held), so the host stays free; only the event server's start waits for an organiser.
+- **Start / Stop / Restart** for the operation's organisers (and `operations.manage`) while the window is under
+  way, as act-as calls. Stop only stops the server: the window goes on and Start works again; Restart picks up a
+  changed map or profile; ending the operation stays *End now*. With players connected, Stop and Restart ask first,
+  then act at once. At the window's end the server is left running, as before.
+- **A reminder at the assembly:** if the server is still stopped then, the organisers are pinged in the thread with
+  *Start server*.
+- Assumed: a guest operation (no server) has none of it; a map of the game or a Creator DLC (no mod) has no
+  Workshop link; `api_level` stays 2 (both projects ship together at the merge), the bot requires the new
+  capability `operation_server`.
+
+As built:
+
+- **The map's link:** the supervisor's `zeus_map.mod.workshop_id`; the info's *Map* (`render.map_value`) is the name
+  linked to `steamcommunity.com/sharedfiles/filedetails/?id=…` with "Subscribe to the map in the Steam Workshop."
+  under it. The standard preset needs nothing of the bot: it comes as `files.preset` (`generated`, `standard`) and is
+  drawn as any preset.
+- **The server's state:** `window.server_state` (`{state: stopped | starting | running | stopping, profile}`, null
+  outside the window); each change of it is a feed change (`changed_fields: ["server"]`), so the info redraws. The
+  info's *Server* field (`render.server_line`: ⚪ stopped, the organisers start it; 🟡 starting / stopping; 🟢
+  running, "another profile than the operation's" when so) shows while it is published and the window is under way.
+- **The panel's *Server*** (first among the sections, when `my.actions` has `server`): the state and what can be
+  done now (`ui.server_text`, `server_view`): *Start server* while stopped, *Restart server* and *Stop server* while
+  it runs, nothing while it starts or stops. The buttons are the persistent `ServerAction`
+  (`operation:server:<op>:<start|stop|restart>`); `ui.control_server` makes the act-as call
+  (`SupervisorClient.operation_server`, `POST /api/operations/{id}/server`, a 180 s timeout for a graceful restart;
+  **not queued**: wanted now or not at all); on 409 `players_on` it asks "N players are on the server. Stop it
+  anyway?" with `ConfirmServer`, which sends it again with `confirm`. Refusals in words: `not_in_window`,
+  `no_server`, `busy`, `players_on`, `start_failed` (with the supervisor's reason).
+- **The reminder:** `SERVER_KIND` (`server_reminder:<op>`) at the assembly for a published operation with a server
+  (`OperationChannels._schedule`); `_server_action` reads the operation fresh (the state moves outside the
+  organisers' edits), looks again a minute later while the window hasn't begun, pings the organisers
+  (`render.organisers`) in the thread with *Start server* when it is still stopped, and does nothing from the start
+  on, when it runs, or when the operation is gone.
+- **The staff log** words the supervisor's `operation.server` ("{by} started / restarted / stopped the server of …",
+  with the players connected when it was confirmed) and `operation.server_failed`.
+- The fake supervisor mirrors it (`window_active()`, `server_state()`, `server_running` / `players` on an
+  operation, the route, `standard_preset`); the Discord fakes close the files they "sent", as discord.py does (on
+  Windows the redraw couldn't otherwise replace a preset it drew).
+- Tests: `tests/test_organise.py::test_the_organisers_start_and_stop_the_server_in_the_window`,
+  `::test_the_organisers_hear_at_the_assembly_when_the_server_is_still_stopped`,
+  `::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission` (the link, the standard preset),
+  `tests/test_activity.py::test_the_operations_server_by_hand`.
+
 ### Next
 
 The rest of phase 6, which needs the owner: the test instance against a scratch supervisor (its own checkout and data
@@ -675,6 +732,6 @@ folder, `tests/fake_server.py` as the Arma executable, the test Discord server a
 
 ## Not in this plan
 
-- Server control from Discord.
+- Server control from Discord, beyond an operation's own server in its window (*Operation tweaks III*).
 - Staff management of Steam links and squad.xml on Discord (the app does it).
 - Any data or rule the supervisor owns, and any fallback for a supervisor without the operations API.
