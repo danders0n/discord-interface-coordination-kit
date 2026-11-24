@@ -95,6 +95,16 @@ class Events(BaseModel):
     discussion: str | None = Field(None, min_length=1, max_length=100,
                                    description="Name of each operation's discussion thread; default: Discussion / "
                                                "Dyskusja")
+    delete_messages: bool = Field(False, description="Delete every message someone writes in an operation's channel "
+                                                     "(organisers too; not its thread) and tell them in a DM")
+    delete_notice: str | None = Field(None, min_length=1, max_length=1500,
+                                      description="That DM; {channel}, {thread} and {title} are filled in, \\n is a "
+                                                  "new line; default: a short note pointing to the thread")
+    delete_sticker: Ref | None = Field(None, description="A sticker sent with that DM: an id, or the name of one of "
+                                                         "the server's stickers")
+    delete_sticker_image: str | None = Field(None, max_length=2000, pattern=r"^https?://\S+$",
+                                             description="An image shown in that DM when the sticker isn't sent "
+                                                         "(none set, not found, or refused by Discord)")
 
 
 class Links(BaseModel):

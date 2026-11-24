@@ -22,6 +22,7 @@ from app.attendance.cog import AttendanceCog
 from app.attendance.ui import ReportAction
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService
+from app.channel.guard import guard
 from app.channel.service import OperationChannels
 from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
 from app.i18n import Translator, t
@@ -223,6 +224,11 @@ class EventBot(commands.Bot):
             member = self.roster_one(after.id)  # (a nickname on the server wins over the global name)
             if member is not None:
                 await self.services.roster.member_changed(member)
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Someone wrote in an operation's channel: deleted and told, when that is switched on (app/channel/guard.py)."""
+        if not await guard(message, self.services.settings, self.services.channels):
+            await self.process_commands(message)
 
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
         """One of the bot's messages deleted by hand: an operation channel posts it again (app/channel/sync.py)."""

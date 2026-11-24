@@ -128,7 +128,11 @@ exactly the settings.
   *Start server* ping while the server is stopped (`SERVER_KIND`, read fresh), the archive by
   quarter; batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart; the sign-up buttons on the
   last ORBAT message; `ping()` in the thread (a draft: DMs); `by_channel()`; `watchers` hear `changed(op)` /
-  `gone(id)`). `EventBot.build_operations` wires channels, header and feed.
+  `gone(id)`), `guard.py` (`BOT_EVENTS__DELETE_MESSAGES`, off by default: whatever someone writes in an operation's
+  channel, organisers too, not its thread, is deleted and its author told by DM, `delete_notice`, their text quoted, with `delete_sticker` (an id, or a server sticker's name) or, when no sticker
+  goes (none, not found, refused), `delete_sticker_image` in an embed;
+  `EventBot.on_message`; the start-up check then wants Manage Messages). `EventBot.build_operations` wires channels,
+  header and feed.
 - `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, Zeus and training's
   `RoleList` (`coming:<op>`: Coming as a specialist role), the private `SlotPicker`, `act()`:
   an act-as call through `Roster.as_member`), `cog.py` (`/slot take | leave`), `offers.py` (`Offers`: the `offer`
