@@ -51,7 +51,7 @@ PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
 EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "author_name", "assembly_at",
             "start_at", "duration_minutes", "signup_opens_at", "signup_limit", "specialist_roles", "how_to_join",
-            "dont_end_automatically", "public", "hold", "note", "zeus_map", "signup_closes_at", "min_players",
+            "dont_end_automatically", "public", "note", "zeus_map", "signup_closes_at", "min_players",
             "auto_cancel")
 OTHERS = ("guest", "hosted")  # kinds whose ORBAT may give a squad to another group (``# Name @ACR``)
 GROUP_MARK = re.compile(r"@\s*([^\s<{}@]*)")
@@ -252,7 +252,7 @@ class State:
               "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
               "dont_end_automatically": False, "zeus_map": None, "signup_closes_at": None, "min_players": None,
               "auto_cancel": False, "requirements_state": "", "server_running": False, "players": 0,
-              "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
+              "public": True, "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
               "published_at": None, "ended_at": None, "squads": [], "signups": [], "offers": [], "requests": [],
@@ -719,13 +719,13 @@ class State:
             "signup_closes_at": iso(op.get("signup_closes_at")), "min_players": op.get("min_players"),
             "auto_cancel": op.get("auto_cancel", False),
             "specialist_roles": [dict(r) for r in op.get("specialist_roles") or []], "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
-            "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
+            "public": op["public"], "server": None if op["kind"] == "guest" else
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
             "zeus_map": dict(op["zeus_map"]) if op.get("zeus_map") else None,
             "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
                                        "ends_at": iso(ends + timedelta(minutes=30)),
                                        "state": "active" if self.window_active(op) else "planned",
-                                       "hold": op["hold"] == "on", "server_state": self.server_state(op)},
+                                       "server_state": self.server_state(op)},
             "frozen": False, "channel_name": self.channel_name(op), "discord": dict(op["discord"]),
             "cancel_reason": op["cancel_reason"], "revision": op["revision"], "change_seq": op["change_seq"],
             "changed_by": op["changed_by"], "changed_fields": list(op["changed_fields"]),
@@ -992,7 +992,7 @@ def make_app(state: State | None = None) -> web.Application:
             "groups": state.groups, "discord_roles": [], "staff_roles": state.staff_roles,
             "squadxml_url": "https://app.example/squad/squad.xml",
             "defaults": {"server": {"id": 2, "slug": "event", "name": "Event"}, "base_profile": None,
-                         "duration_minutes": 180, "hold": "on"},
+                         "duration_minutes": 180},
             "window": {"lead_minutes": 45, "buffer_minutes": 30, "quiet_minutes": 30, "warn_minutes": 15},
             "max_days_ahead": 120, "acronym": state.acronym, "paragraphs": list(PARAGRAPHS),
             "image_slots": ["map", "banner"], "limits": {"title": 100, "paragraph": 4000}})

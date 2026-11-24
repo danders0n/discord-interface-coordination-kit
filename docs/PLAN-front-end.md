@@ -479,7 +479,7 @@ The rest of this plan's phase 4.
   member's name and shows a button per section its `my.actions` allows (`operation:act:<op>:<section>`): Details,
   Type and groups (`edit`), OPORD (`opord`: one modal of five fields), ORBAT (`orbat` / `slots`), Sign-up start, Sign-up
   limit (Zeus, training), How to join (guest), Co-organisers, Hold the host (on / off; without Publish it becomes a
-  request), Don't end automatically (internal, hosted), Publish / Send for approval / Withdraw request, Copy operation
+  request; removed 11-24, *Operation tweaks IV*), Don't end automatically (internal, hosted), Publish / Send for approval / Withdraw request, Copy operation
   (a week later), Delete draft (with a confirmation) / Cancel operation (with the reason). Its text: the status, what
   publishing still lacks, waiting times or host requests, the supervisor's mission `warnings`, a failed profile, ⚠
   slots, and where the files are set. Every press reads the operation again: a section no longer allowed says so; a
@@ -723,6 +723,21 @@ As built:
   `::test_the_organisers_hear_at_the_assembly_when_the_server_is_still_stopped`,
   `::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission` (the link, the standard preset),
   `tests/test_activity.py::test_the_operations_server_by_hand`.
+
+### Operation tweaks IV (2026-11-24)
+
+Asked by the owner, with the supervisor's matching change (its `docs/PLAN-operation-server.md`, part II).
+
+- **A window touches only its own server.** *Hold the host* is gone in the supervisor (no other server stops or is
+  blocked, operations clash only on the same server); jobs not for an operation under way wait for its end, its own
+  go first. The bot loses the panel's *Hold the host* toggle and its "host requested" line (an old button answers
+  "from an older version"); the supervisor's `hold` field is gone from the operation, `meta.defaults` and the bodies.
+- **A server per kind** (`operations.event_server_<kind>` in the supervisor, e.g. server-1 for internal and hosted,
+  server-2 for Zeus and training): the wizard needs nothing, the supervisor picks it from the kind. The info embed
+  now always names the operation's **server** (each kind may have its own), with its state under it while the
+  window is under way.
+- The fake supervisor drops `hold`. Tests: `tests/test_organise.py` (the panel's sections, the old *hold* button,
+  the server field).
 
 ### Next
 

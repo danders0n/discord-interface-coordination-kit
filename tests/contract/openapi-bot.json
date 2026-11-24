@@ -632,16 +632,6 @@
             "description": "hosted: the invited groups",
             "title": "Group Ids"
           },
-          "hold": {
-            "default": "on",
-            "description": "hold the host; without Publish operations it is a request",
-            "enum": [
-              "on",
-              "off"
-            ],
-            "title": "Hold",
-            "type": "string"
-          },
           "host_group_id": {
             "anyOf": [
               {
@@ -936,21 +926,6 @@
               }
             ],
             "title": "Group Ids"
-          },
-          "hold": {
-            "anyOf": [
-              {
-                "enum": [
-                  "on",
-                  "off"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hold"
           },
           "host_group_id": {
             "anyOf": [
@@ -2642,7 +2617,7 @@
         "x-act-as": true
       },
       "post": {
-        "description": "A new draft. Hold the host is on by default (without Publish operations: a request); its window is checked\nagainst the other operations' (409, code clash).",
+        "description": "A new draft on its kind's server (Settings → Operations, unless one is chosen); its window is checked against\nthe other operations' on that server (409, code clash).",
         "operationId": "create_operation_api_operations_post",
         "requestBody": {
           "content": {

@@ -239,4 +239,4 @@ The tests need no network and no Discord. Services are tested directly, the Disc
     token `test-token`).
   - For the real thing, use a **scratch supervisor**: its own checkout and data folder, with its
     `tests/fake_server.py` as the Arma executable.
-  - Never use the group's live supervisor: an operation that holds the host takes the whole host.
+  - Never use the group's live supervisor: a test operation would start, stop and hold back its real servers and jobs.

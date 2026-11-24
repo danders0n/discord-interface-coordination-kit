@@ -21,7 +21,7 @@ def line(event: str, language: str = "en", channel_id: int | None = 55, **fields
 
 
 def test_the_operation_and_who():
-    created = line("operation.created", by=MM, kind="zeus", assembly_at=NINETEEN, hold="off")
+    created = line("operation.created", by=MM, kind="zeus", assembly_at=NINETEEN)
     assert created == f"@mm created **Zeus night** (<#55>) (Zeus, assembly {ts(NINETEEN)})."
     assert line("operation.created", "pl", by=ANNA, kind="zeus", assembly_at=NINETEEN) == \
         f"<@11> tworzy **Zeus night** (<#55>) (Zeus, zbiórka {ts(NINETEEN)})."

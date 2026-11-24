@@ -18,8 +18,8 @@ The supervisor is a separate project at `D:\Workspace\python\arma-server-supervi
 and `docs/PLAN-operations.md` (*As built*) before touching the integration.
 
 Status: the old stand-alone bot of [docs/PLAN.md](docs/PLAN.md) is on `master`. On `feature/front-end` the front end
-is built: steps 1–7, the plan's phases 1–5 and the operation tweaks (I–III: III is the standard preset, the map's
-Workshop link and the organisers' Start / Stop of the operation's server), tested against the fake supervisor; so is the remote update with the
+is built: steps 1–7, the plan's phases 1–5 and the operation tweaks (I–IV: III is the standard preset, the map's
+Workshop link and the organisers' Start / Stop of the operation's server; IV: no *Hold the host*, a server per kind), tested against the fake supervisor; so is the remote update with the
 two apps watching each other and the queue of members' actions ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md),
 steps 1–7, end to end without Discord; the supervisor's part is its `docs/PLAN-bot-health.md`). Next is phase 6, the release: a test
 instance against a scratch supervisor, then the merge (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays
@@ -115,7 +115,7 @@ exactly the settings.
   guest / hosted: `theirs()`) is drawn without holders and left out of the pickers, `ours()`; `phase(op, now)` is the
   sign-up state from the times, closing at `closes(op)`: a Zeus operation's `signup_closes_at`, else the start;
   `requirements_line()`: a Zeus operation's minimum to go ahead; `map_value()`: the map linked to its Steam Workshop
-  page; `server_line()`: `window.server_state` in the info), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  page; the info's *Server*: the operation's server, with `server_line()` (`window.server_state`) under it in the window), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
   the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /

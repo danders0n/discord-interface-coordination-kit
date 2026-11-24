@@ -115,8 +115,8 @@ async def test_the_panel_shows_what_the_supervisor_allows(organise, guild, fake)
     text, view = said(opened), opened.replies[-1].kwargs["view"]
     assert text.startswith("**Ibis** · OP-1 · Draft\nStill missing: the OPORD's Situation, the OPORD's Mission.")
     sections = [custom_id.split(":")[-1] for custom_id in controls(view)]
-    assert sections == ["details", "choices", "opord", "orbat", "preset", "mission", "signup", "organisers", "hold",
-                        "autoend", "submit", "copy", "delete"]
+    assert sections == ["details", "choices", "opord", "orbat", "preset", "mission", "signup", "organisers",
+                        "autoend", "submit", "copy", "delete"]  # (no Hold the host any more)
     stranger = acting(organise, guild, 3)
     await press(PanelButton(op["id"]), stranger)
     assert said(stranger) == "The panel is for this operation's organisers."
@@ -186,15 +186,15 @@ async def test_a_publisher_publishes_and_a_button_no_longer_allowed_says_so(orga
     assert said(again) == "That can't be done now; open the panel again to see what can."
 
 
-async def test_co_organisers_hold_and_cancel(organise, guild, fake):
+async def test_co_organisers_and_cancel(organise, guild, fake):
     op = fake.operation("Ibis", status="published", opord=OPORD, author_person_id=1)
     pressed = await panel_press(organise, guild, 1, op["id"], "organisers")
     organisers = pressed.replies[-1].kwargs["view"]
     added = acting(organise, guild, 1)
     await organisers._change(added, [guild.members[3]], True)
     assert said(added) == "Saved." and fake.operations[op["id"]]["organisers"] == [3]
-    held = await panel_press(organise, guild, 1, op["id"], "hold")
-    assert said(held) == "The host is not held for this operation." and fake.operations[op["id"]]["hold"] == "off"
+    old = await panel_press(organise, guild, 1, op["id"], "hold")  # (a button from before: gone)
+    assert said(old) == "That button is from an older version; open the panel again."
     cancelled = await panel_press(organise, guild, 1, op["id"], "cancel")
     modal = modal_of(cancelled)
     submit(modal, text="Rain")
@@ -292,7 +292,7 @@ async def test_the_organisers_start_and_stop_the_server_in_the_window(organise, 
     await run(organise)
     channel = guild.get_channel((await row(organise, op["id"])).channel_id)
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
-    assert fields["Serwer"] == "⚪ Zatrzymany: uruchamiają go organizatorzy."
+    assert fields["Serwer"] == "Event\n⚪ Zatrzymany: uruchamiają go organizatorzy."  # (its server, and its state)
     opened = acting(organise, guild, 1)
     await press(PanelButton(op["id"]), opened)
     assert [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])][0] == "server"  # first
@@ -305,7 +305,7 @@ async def test_the_organisers_start_and_stop_the_server_in_the_window(organise, 
     assert ("POST", "/api/operations/{op_id}/server", "1") in fake.acted  # (in Anna's name)
     await run(organise)
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
-    assert fields["Serwer"] == "🟢 Działa"
+    assert fields["Serwer"] == "Event\n🟢 Działa"
     pressed = await panel_press(organise, guild, 1, op["id"], "server")
     assert list(controls(pressed.replies[-1].kwargs["view"])) == [
         f"operation:server:{op['id']}:restart", f"operation:server:{op['id']}:stop"]

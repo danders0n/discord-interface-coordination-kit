@@ -389,9 +389,7 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
         shown += ["signup"] + (["limit", "roles"] if kind in render.COMING else []) + (
             ["minimum"] if kind == "zeus" else []) + (
             ["join", "author"] if kind == "guest" else [])
-        shown.append("organisers")
-        if kind != "guest":
-            shown.append("hold")
+        shown.append("organisers")  # (Hold the host is gone: an operation touches only its own server)
         if kind in ("internal", "hosted"):
             shown.append("autoend")
     shown += [a for a in ("publish", "submit", "withdraw", "copy", "delete", "cancel") if a in actions]
@@ -427,8 +425,6 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
     for request in op.get("requests") or []:
         if request.get("state") == "pending" and request.get("kind") == "times":
             lines.append(t("New times wait for a moderator.", locale))
-        elif request.get("state") == "pending" and request.get("kind") == "hold":
-            lines.append(t("The host is requested; a moderator decides.", locale))
     lines += ["⚠ " + warning_words(w, locale) for w in op.get("warnings") or []]
     error = (op.get("profile") or {}).get("error")
     if error:
@@ -449,8 +445,6 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
               "minimum": t("Minimum to go ahead", locale), "limit": t("Sign-up limit", locale),
               "join": t("How to join", locale), "author": t("Author", locale),
               "roles": t("Specialist roles", locale), "organisers": t("Co-organisers", locale),
-              "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
-                  op.get("hold"), t("Hold the host: off", locale)),
               "autoend": t("Don't end automatically: on", locale) if op.get("dont_end_automatically") else
               t("Don't end automatically: off", locale),
               "publish": t("Publish", locale), "submit": t("Send for approval", locale),
@@ -726,18 +720,6 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
                           for p in op.get("organisers") or []) or "—"
         await reply(interaction, t("Co-organisers: {names}", interaction.locale, names=names),
                     view=Organisers(interaction, op["id"]))
-
-    async def _hold(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
-        await thinking(interaction)
-        wanted = "off" if op.get("hold") in ("on", "requested") else "on"
-        client = services(interaction).supervisor
-        answer = await write(interaction, op["id"], "hold", "update_operation", {"hold": wanted}, op["revision"])
-        if answer is None:
-            return
-        words = {"on": t("The host is held for this operation.", interaction.locale),
-                 "requested": t("The host is requested; a moderator decides.", interaction.locale)}
-        await reply(interaction, words.get(answer.get("hold"), t("The host is not held for this operation.",
-                                                                 interaction.locale)))
 
     async def _autoend(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await thinking(interaction)
