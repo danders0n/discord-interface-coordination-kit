@@ -4223,7 +4223,7 @@
     },
     "/api/operations/{op_id}/files/{name}": {
       "get": {
-        "description": "A file of the operation by the name its ``files`` give (preset.html, map.png, banner.jpg).",
+        "description": "A file of the operation by the name its ``files`` give (preset.html, map.png, banner.jpg). The preset comes\nunder the name it was uploaded with (``files.preset.original``).",
         "operationId": "get_file_api_operations__op_id__files__name__get",
         "parameters": [
           {

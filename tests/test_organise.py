@@ -230,8 +230,9 @@ async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(
 
 async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(organise, guild, fake):
     """Zeus and training use their base profile's mods and mission; the panel's *Map* adds one from the
-    supervisor's Zeus maps list (its one mod and its Zeus mission), the info shows it, and the players get the
-    supervisor's preset (the base's mods and the map's) to download in the channel."""
+    supervisor's Zeus maps list (its one mod and its Zeus mission), the info shows it as its Workshop link, and the
+    players get staff's standard preset, the file under its own name, to download in the channel (without one, no
+    preset: nothing is made up)."""
     cup = {"id": 5, "name": "CUP Terrains", "workshop_id": "583496184"}
     fake.zeus_maps = [{"id": 1, "name": "Tanoa", "mission": "zeus.Tanoa", "world": "Tanoa", "mod": cup, "mod_id": 5}]
     zeus = fake.operation("Night", kind="zeus", author_person_id=1)
@@ -252,24 +253,25 @@ async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(or
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
     assert fields["Mapa"] == ("[Tanoa](https://steamcommunity.com/sharedfiles/filedetails/?id=583496184)\n"
                               "-# Zasubskrybuj mapę w Warsztacie Steam.")  # (its Workshop page: players subscribe)
-    assert fields["Modset"] == "Standard + Tanoa: 2 mody"
-    drawn = await row(organise, zeus["id"])
-    preset = channel.get_partial_message(drawn.messages["preset"])._find()
-    assert preset.content.endswith("## Modset do Arma 3 Launchera: Standard + Tanoa")
-    assert preset.kwargs["files"][0].filename == "Standard + Tanoa.html"
-    # staff's standard preset replaces the made one; the map stays a link
-    fake.standard_preset = {"name": "IBC Standard", "mods": [["463939057", "ACE"], ["450814997", "CBA_A3"]]}
+    assert "Modset" not in fields and "preset" not in (await row(organise, zeus["id"])).messages  # (no standard one)
+    # staff's standard preset: the file under the name it was uploaded with; the map stays a link
+    fake.standard_preset = {"name": "IBC Standard", "mods": [["463939057", "ACE"], ["450814997", "CBA_A3"]],
+                            "file": "IBC standard 2026.html"}
     fake.zeus_preset(zeus["id"])
     await run(organise)
     fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
     assert fields["Modset"] == "IBC Standard: 2 mody" and fields["Mapa"].startswith("[Tanoa](")
+    drawn = await row(organise, zeus["id"])
+    preset = channel.get_partial_message(drawn.messages["preset"])._find()
+    assert preset.content.endswith("## Modset do Arma 3 Launchera: IBC Standard")
+    assert preset.kwargs["files"][0].filename == "IBC standard 2026.html"
     fake.standard_preset = None
     again = await panel_press(organise, guild, 1, zeus["id"], "map")
     assert said(again).startswith("Map: Tanoa")
     none = acting(organise, guild, 1)
     await again.replies[-1].kwargs["view"]._chosen(none, ui.NO_MAP)
     assert fake.operations[zeus["id"]]["zeus_map"] is None
-    assert fake.operations[zeus["id"]]["files"]["preset"]["preset_name"] == "Standard"  # (the base's alone)
+    assert "preset" not in fake.operations[zeus["id"]]["files"]  # (the standard one is gone: none is made)
     internal = fake.operation("Raid", author_person_id=1)
     refused = await panel_press(organise, guild, 1, internal["id"], "map")
     assert said(refused) == "That can't be done now; open the panel again to see what can."

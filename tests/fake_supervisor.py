@@ -169,10 +169,9 @@ class State:
     groups: list[dict[str, Any]] = field(default_factory=list)
     climates: list[dict[str, Any]] = field(default_factory=list)
     # the Zeus maps list ({"id", "name", "mission", "world", "mod": {"id", "name", "workshop_id"} or None, "mod_id"}):
-    # what zeus / training add to their base, whose name and mods for the players (workshop id, name) are
-    # ``zeus_base``; staff's standard preset ({"name", "mods"}) replaces the made one when set (``standard_preset``)
+    # what zeus / training add to their base profile; their players' preset is staff's standard preset
+    # ({"name", "mods", "file": the name it was uploaded with}) or none (``standard_preset``)
     zeus_maps: list[dict[str, Any]] = field(default_factory=list)
-    zeus_base: dict[str, Any] = field(default_factory=lambda: {"name": "Standard", "mods": [["463939057", "ACE"]]})
     standard_preset: dict[str, Any] | None = None
     staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
     acronym: str = "IBC"
@@ -285,27 +284,19 @@ class State:
         self.change(op_id, files=files)
 
     def zeus_preset(self, op_id: int) -> None:
-        """A zeus / training operation's launcher preset for the players, as the real ``zeus_preset`` makes it: the
-        base's mods (``zeus_base``), then the map's mod; ``generated``. Staff's standard preset instead when set
-        (``standard`` too)."""
+        """A zeus / training operation's launcher preset for the players, as the real ``zeus_preset`` keeps it: staff's
+        standard preset, under the name it was uploaded with (``generated`` and ``standard``), or none (nothing is
+        made from the base profile); another kind loses it."""
         op = self.operations[op_id]
-        if op["kind"] not in COMING:
-            return
-        if self.standard_preset is not None:
+        current = (op["files"] or {}).get("preset") or {}
+        if op["kind"] in COMING and self.standard_preset is not None:
             name, mods = self.standard_preset["name"], [list(m) for m in self.standard_preset["mods"]]
             rows = "".join(f'<tr data-type="ModContainer"><td data-type="DisplayName">{m[1]}</td></tr>' for m in mods)
             self.set_file(op_id, "preset", f"<html><body><table>{rows}</table></body></html>".encode(), "preset.html",
-                          original=f"{name}.html", preset_name=name, mods=mods, staged=False, generated=True,
-                          standard=True)
-            return
-        zeus_map = op.get("zeus_map") or {}
-        mods = [list(m) for m in self.zeus_base["mods"]]
-        if zeus_map.get("mod"):
-            mods.append([zeus_map["mod"].get("workshop_id"), zeus_map["mod"]["name"]])
-        name = f"{self.zeus_base['name']} + {zeus_map['name']}" if zeus_map else self.zeus_base["name"]
-        rows = "".join(f'<tr data-type="ModContainer"><td data-type="DisplayName">{m[1]}</td></tr>' for m in mods)
-        self.set_file(op_id, "preset", f"<html><body><table>{rows}</table></body></html>".encode(), "preset.html",
-                      original=f"{name}.html", preset_name=name, mods=mods, staged=False, generated=True)
+                          original=self.standard_preset.get("file") or "standard-preset.html", preset_name=name,
+                          mods=mods, staged=False, generated=True, standard=True)
+        elif current.get("generated"):
+            self.change(op_id, files={k: v for k, v in op["files"].items() if k != "preset"})
 
     def delete_operation(self, op_id: int) -> None:
         """A draft deleted (or a stale one cancelled): a tombstone in the feed."""

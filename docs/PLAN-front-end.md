@@ -639,7 +639,7 @@ squads*).
   up for it on its own*" and its slots without holders (shown even without slots), the header counts them apart
   (`slots.other`), and the squad lists and the organisers' slot tools leave it out (`render.ours()`). Pressing one
   anyway: `other_group`.
-- The fake supervisor mirrors them (`State.zeus_maps`, `zeus_base` and `zeus_preset()`, `zeus_map`, `@ACR` in
+- The fake supervisor mirrors them (`State.zeus_maps`, `standard_preset` and `zeus_preset()`: the standard preset under its uploaded name, or none, `zeus_map`, `@ACR` in
   `set_orbat`, `other_group`).
 - Tests: `tests/test_signup.py::test_squads_other_groups_fill_show_without_a_sign_up`,
   `tests/test_organise.py::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission`.
