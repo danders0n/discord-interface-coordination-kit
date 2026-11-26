@@ -15,6 +15,7 @@ which word them)."""
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -73,6 +74,25 @@ def duration_text(minutes: int) -> str:
     return f"{minutes // 60}h{minutes % 60:02d}" if minutes % 60 else f"{minutes // 60}h"
 
 
+ROLE_LINE = re.compile(r"^(.*?)\s+(?:x(\d+)|(\d+)-(\d+)|(\d+)\+)$", re.IGNORECASE)
+
+
+def parse_roles(text: str) -> list[dict[str, Any]]:
+    """Specialist roles as typed, one per line: ``Medic x3`` (at most 3; ``x0``: no limit), ``Medic 1-3`` (at least 1
+    to go ahead, at most 3: Zeus), ``Medic 1+`` (at least 1) or ``Command``. The supervisor checks them."""
+    found = []
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        match = ROLE_LINE.match(line)
+        if match and match[1].strip():
+            found.append({"name": match[1].strip(), "limit": int(match[2] or match[4] or 0) or None,
+                          "min": int(match[3] or match[5] or 0) or None})
+        else:
+            found.append({"name": line, "limit": None, "min": None})
+    return found
+
+
 # ---------------------------------------------------------------------------- the wizard and its choices
 
 async def expired(interaction: discord.Interaction) -> bool:
@@ -99,7 +119,7 @@ class Choices(discord.ui.View):
         self.climate = (op.get("climate") or None) if op else None
         self.host = (op.get("host_group") or {}).get("id") if op else None
         self.guests: list[int] = [g["id"] for g in (op.get("groups") or [])] if op else []
-        kinds = [(k.get("name") or k["id"], k["id"]) for k in meta.get("kinds") or []
+        kinds = [(render.kind_name(k["id"], k.get("name"), self.locale), k["id"]) for k in meta.get("kinds") or []
                  if k["id"] != "guest" or may_guest or (op and op["kind"] == "guest")]
         if op is None or op["status"] == "draft":
             self.add_item(self._select("kind", t("Kind", self.locale), kinds, self.kind))
@@ -355,18 +375,21 @@ def panel_sections(op: dict[str, Any]) -> list[str]:
     """The sections the member's ``actions`` allow, in the panel's order."""
     actions = set((op.get("my") or {}).get("actions") or [])
     kind, shown = op["kind"], []
+    if "server" in actions:  # (while its window is under way: first, it is what matters then)
+        shown.append("server")
     if "edit" in actions:
         shown += ["details", "choices"]
     if "opord" in actions:
         shown.append("opord")
     if "orbat" in actions or ("slots" in actions and kind not in render.COMING):
         shown.append("orbat")
-    shown += [a for a in ("preset", "mission") if a in actions]  # (frozen in the quiet period: not offered)
+    # (frozen in the quiet period: not offered; zeus / training: a map on the base profile instead)
+    shown += [a for a in ("preset", "mission", "map") if a in actions]
     if "edit" in actions:
-        shown += ["signup"] + (["limit"] if kind in render.COMING else []) + (["join"] if kind == "guest" else [])
-        shown.append("organisers")
-        if kind != "guest":
-            shown.append("hold")
+        shown += ["signup"] + (["limit", "roles"] if kind in render.COMING else []) + (
+            ["minimum"] if kind == "zeus" else []) + (
+            ["join", "author"] if kind == "guest" else [])
+        shown.append("organisers")  # (Hold the host is gone: an operation touches only its own server)
         if kind in ("internal", "hosted"):
             shown.append("autoend")
     shown += [a for a in ("publish", "submit", "withdraw", "copy", "delete", "cancel") if a in actions]
@@ -402,8 +425,6 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
     for request in op.get("requests") or []:
         if request.get("state") == "pending" and request.get("kind") == "times":
             lines.append(t("New times wait for a moderator.", locale))
-        elif request.get("state") == "pending" and request.get("kind") == "hold":
-            lines.append(t("The host is requested; a moderator decides.", locale))
     lines += ["⚠ " + warning_words(w, locale) for w in op.get("warnings") or []]
     error = (op.get("profile") or {}).get("error")
     if error:
@@ -417,12 +438,13 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
         lines.append("-# " + t("Images: /operation image in the operation's channel. A mission over Discord's upload "
                                "limit goes onto the server another way, then Mission picks it by name. The server "
                                "and the base are set in the app.", locale))
-    labels = {"details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
+    labels = {"server": t("Server", locale),
+              "details": t("Details", locale), "choices": t("Type and groups", locale), "opord": t("OPORD", locale),
               "orbat": t("ORBAT", locale), "preset": t("Preset", locale), "mission": t("Mission", locale),
-              "signup": t("Sign-up start", locale), "limit": t("Sign-up limit", locale),
-              "join": t("How to join", locale), "organisers": t("Co-organisers", locale),
-              "hold": {"on": t("Hold the host: on", locale), "requested": t("Hold the host: requested", locale)}.get(
-                  op.get("hold"), t("Hold the host: off", locale)),
+              "map": t("Map", locale), "signup": t("Sign-up start", locale),
+              "minimum": t("Minimum to go ahead", locale), "limit": t("Sign-up limit", locale),
+              "join": t("How to join", locale), "author": t("Author", locale),
+              "roles": t("Specialist roles", locale), "organisers": t("Co-organisers", locale),
               "autoend": t("Don't end automatically: on", locale) if op.get("dont_end_automatically") else
               t("Don't end automatically: off", locale),
               "publish": t("Publish", locale), "submit": t("Send for approval", locale),
@@ -432,9 +454,133 @@ def panel(op: dict[str, Any], locale: Any) -> tuple[str, discord.ui.View]:
     view = discord.ui.View(timeout=None)
     for section in panel_sections(op):
         style = discord.ButtonStyle.danger if section in ("cancel", "delete", "end") else \
-            discord.ButtonStyle.success if section in ("publish", "submit") else discord.ButtonStyle.secondary
+            discord.ButtonStyle.success if section in ("publish", "submit") else \
+            discord.ButtonStyle.primary if section == "server" else discord.ButtonStyle.secondary
         view.add_item(PanelAction(op["id"], section, labels[section], style))
     return "\n".join(lines)[:2000], view
+
+
+NO_MAP = "-"  # MapPicker's option for the base profile's own mission
+
+
+def map_text(op: dict[str, Any], locale: Any) -> str:
+    """What the operation plays on now, and what a map changes."""
+    current = op.get("zeus_map")
+    now = t("Map: {name}", locale, name=render.plain(current.get("name") or "")) if current else \
+        t("Map: none (the base profile's own mission)", locale)
+    return now + "\n-# " + t("A map adds its mods to the base profile's modset and plays its Zeus mission.", locale)
+
+
+class MapPicker(discord.ui.View):
+    """The panel's *Map* (zeus / training): a map from the supervisor's Zeus maps list, or none."""
+
+    def __init__(self, interaction: discord.Interaction, op: dict[str, Any], maps: list[dict[str, Any]]) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.op, locale = op, interaction.locale
+        current = (op.get("zeus_map") or {}).get("name")
+        names = [str(m["name"]) for m in maps]
+        if current and current not in names:  # (gone from the list: the operation keeps it)
+            names.insert(0, current)
+        options = [discord.SelectOption(label=t("None: the base profile's own mission", locale)[:100], value=NO_MAP,
+                                        default=not current)]
+        options += [discord.SelectOption(label=name[:100], value=name[:100], default=name == current)
+                    for name in names[:24]]
+        select = discord.ui.Select(placeholder=t("Map", locale), options=options)
+        select.callback = lambda i, s=select: self._chosen(i, s.values[0])
+        self.add_item(select)
+
+    async def _chosen(self, interaction: discord.Interaction, value: str) -> None:
+        await interaction.response.defer()  # (finish() edits this picker)
+        fields = {"zeus_map": None if value == NO_MAP else value}
+        if await write(interaction, self.op["id"], "map", "update_operation", fields, self.op["revision"]) is not None:
+            self.stop()
+            await finish(interaction, t("Saved.", interaction.locale))
+
+
+def server_text(op: dict[str, Any], locale: Any) -> str:
+    """The operation's server now (``window.server_state``), and what Stop does."""
+    state = (op.get("window") or {}).get("server_state")
+    line = render.server_line(state, locale) if state else t("The server can be started while the window is under way.",
+                                                             locale)
+    return line + "\n-# " + t("The supervisor doesn't start it on its own. Stop only stops the server: the operation "
+                              "goes on, and Start works again.", locale)
+
+
+def server_view(op: dict[str, Any], locale: Any) -> discord.ui.View:
+    """Start while it is stopped; Restart and Stop while it runs; nothing while it starts or stops."""
+    state = ((op.get("window") or {}).get("server_state") or {}).get("state")
+    view = discord.ui.View(timeout=None)
+    if state in (None, "stopped"):
+        view.add_item(ServerAction(op["id"], "start", t("Start server", locale), discord.ButtonStyle.success))
+    elif state == "running":
+        view.add_item(ServerAction(op["id"], "restart", t("Restart server", locale)))
+        view.add_item(ServerAction(op["id"], "stop", t("Stop server", locale), discord.ButtonStyle.danger))
+    return view
+
+
+def server_done(action: str, locale: Any) -> str:
+    return {"start": t("The server is starting.", locale), "restart": t("The server is restarting.", locale),
+            "stop": t("The server is stopped; the operation goes on.", locale)}[action]
+
+
+async def control_server(interaction: discord.Interaction, op_id: int, action: str, confirm: bool = False) -> bool:
+    """Start, stop or restart the operation's server in the member's name; with players on, asks first (a button
+    that sends it again with ``confirm``). True when it was done. Other refusals go up to the error handler."""
+    client, locale = services(interaction).supervisor, interaction.locale
+    try:
+        await act(interaction, lambda me: client.operation_server(me, op_id, action, confirm))
+    except SupervisorError as exc:
+        if exc.code != "players_on" or confirm:
+            raise
+        players = (exc.body or {}).get("players") if isinstance(exc.body, dict) else None
+        question = t("{players} players are on the server. Stop it anyway?", locale, players=players or "?") \
+            if action == "stop" else t("{players} players are on the server. Restart it anyway?", locale,
+                                       players=players or "?")
+        await reply(interaction, question, view=ConfirmServer(interaction, op_id, action))
+        return False
+    await reply(interaction, server_done(action, locale))
+    return True
+
+
+class ServerAction(discord.ui.DynamicItem[discord.ui.Button],
+                   template=r"operation:server:(?P<op>\d+):(?P<action>start|stop|restart)"):
+    """Start / Restart / Stop the operation's server: in the panel's *Server*, and *Start server* on the reminder at
+    the assembly (the organisers', so it outlives a restart)."""
+
+    def __init__(self, op_id: int, action: str, label: str = "",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary) -> None:
+        super().__init__(discord.ui.Button(label=label or action, style=style,
+                                           custom_id=f"operation:server:{op_id}:{action}"))
+        self.op_id, self.action = op_id, action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button,
+                             match: Any) -> ServerAction:
+        return cls(int(match["op"]), match["action"])
+
+    @answers
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await thinking(interaction)
+        await control_server(interaction, self.op_id, self.action)
+
+
+class ConfirmServer(discord.ui.View):
+    """Players are on: stop or restart anyway."""
+
+    def __init__(self, interaction: discord.Interaction, op_id: int, action: str) -> None:
+        super().__init__(timeout=TIMEOUT)
+        self.op_id, self.action = op_id, action
+        label = t("Stop anyway", interaction.locale) if action == "stop" else t("Restart anyway", interaction.locale)
+        button = discord.ui.Button(label=label, style=discord.ButtonStyle.danger)
+        button.callback = self._go
+        self.add_item(button)
+
+    async def _go(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()  # (finish() edits the question)
+        client = services(interaction).supervisor
+        await act(interaction, lambda me: client.operation_server(me, self.op_id, self.action, True))
+        self.stop()
+        await finish(interaction, server_done(self.action, interaction.locale))
 
 
 class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
@@ -466,6 +612,10 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
 
     # ------------------------------------------------------------ sections
 
+    async def _server(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """The operation's server in its window: its state and what can be done with it now."""
+        await reply(interaction, server_text(op, interaction.locale), view=server_view(op, interaction.locale))
+
     async def _details(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(DetailsModal(interaction, op=op))
 
@@ -493,8 +643,22 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
 
         await interaction.response.send_modal(MissionModal(interaction, op))
 
+    async def _map(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A Zeus or training operation's map: one from the supervisor's Zeus maps list, added to the base profile's
+        modset with its Zeus mission; or none (the base profile's own mission)."""
+        meta = await services(interaction).supervisor.operations_meta()  # (the list as it is now)
+        maps = meta.get("zeus_maps") or []
+        if not maps and not op.get("zeus_map"):
+            await reply(interaction, t("There are no Zeus maps yet: staff add them in the app (Operations → Played "
+                                       "presets and groups).", interaction.locale))
+            return
+        await reply(interaction, map_text(op, interaction.locale), view=MapPicker(interaction, op, maps))
+
     async def _signup(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await interaction.response.send_modal(SignupStartModal(interaction, op))
+
+    async def _minimum(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        await interaction.response.send_modal(MinimumModal(interaction, op))
 
     async def _limit(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         client, locale = services(interaction).supervisor, interaction.locale
@@ -522,23 +686,40 @@ class PanelAction(discord.ui.DynamicItem[discord.ui.Button],
         await interaction.response.send_modal(TextModal(interaction, t("How to join", locale),
                                                         op.get("how_to_join") or "", 1024, save, required=False))
 
+    async def _author(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A guest operation's author as typed: someone of the host group who isn't on this Discord server. Empty:
+        the author is the person the supervisor has (the creator, unless changed in the app)."""
+        locale = interaction.locale
+
+        async def save(modal_interaction: discord.Interaction, text: str) -> str | None:
+            done = await write(modal_interaction, op["id"], "author", "update_operation",
+                               {"author_name": text.strip()}, op["revision"])
+            return t("Saved.", locale) if done is not None else None
+
+        await interaction.response.send_modal(TextModal(
+            interaction, t("Author", locale), op.get("author_name") or "", 100, save, required=False, long=False,
+            label=t("Name (empty: the creator)", locale)))
+
+    async def _roles(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        """A Zeus or training operation's specialist roles, one per line (``Medic x3``: at most 3); members pick one
+        with *Coming*."""
+        locale = interaction.locale
+
+        async def save(modal_interaction: discord.Interaction, text: str) -> str | None:
+            done = await write(modal_interaction, op["id"], "roles", "update_operation",
+                               {"specialist_roles": parse_roles(text)}, op["revision"])
+            return t("Saved.", locale) if done is not None else None
+
+        await interaction.response.send_modal(TextModal(
+            interaction, t("Specialist roles", locale), render.roles_text(op.get("specialist_roles") or []), 600,
+            save, required=False, label=t("One per line; Medic x3 = at most 3", locale) if op["kind"] != "zeus"
+            else t("Medic x3 = at most 3, 1-3 / 1+ = needs 1", locale)))
+
     async def _organisers(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         names = ", ".join(render.plain(p.get("display_name") or p.get("username") or "?")
                           for p in op.get("organisers") or []) or "—"
         await reply(interaction, t("Co-organisers: {names}", interaction.locale, names=names),
                     view=Organisers(interaction, op["id"]))
-
-    async def _hold(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
-        await thinking(interaction)
-        wanted = "off" if op.get("hold") in ("on", "requested") else "on"
-        client = services(interaction).supervisor
-        answer = await write(interaction, op["id"], "hold", "update_operation", {"hold": wanted}, op["revision"])
-        if answer is None:
-            return
-        words = {"on": t("The host is held for this operation.", interaction.locale),
-                 "requested": t("The host is requested; a moderator decides.", interaction.locale)}
-        await reply(interaction, words.get(answer.get("hold"), t("The host is not held for this operation.",
-                                                                 interaction.locale)))
 
     async def _autoend(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         await thinking(interaction)
@@ -692,6 +873,53 @@ class SignupStartModal(discord.ui.Modal):
         if await write(interaction, op["id"], "signup", "update_operation", {"signup_opens_at": opens},
                        op["revision"]) is not None:
             await reply(interaction, t("Saved.", interaction.locale))
+
+
+class MinimumModal(discord.ui.Modal):
+    """A Zeus operation's minimum to go ahead: when sign-up closes (the supervisor checks it then; empty: at the
+    start), how many must come, and whether it is cancelled when short (else the organisers are told). The
+    specialist roles' own minimum is typed with them (*Specialist roles*: ``Medic 1-3``)."""
+
+    def __init__(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
+        locale = interaction.locale
+        super().__init__(title=t("Minimum to go ahead", locale)[:45], timeout=TIMEOUT)
+        self.op = op
+        closes = local(op.get("signup_closes_at"), services(interaction).settings.tz)
+        self.date = discord.ui.TextInput(label=t("Sign-up closes (dd.mm), empty: at the start", locale)[:45],
+                                         required=False, max_length=10, default=f"{closes:%d.%m.%Y}" if closes else None)
+        self.time = discord.ui.TextInput(label=t("Time (HH:MM)", locale), required=False, max_length=5,
+                                         default=f"{closes:%H:%M}" if closes else None)
+        self.players = discord.ui.TextInput(label=t("Players needed (empty: none)", locale)[:45], required=False,
+                                            max_length=3, default=str(op["min_players"]) if op.get("min_players") else None)
+        self.auto = discord.ui.Select(options=[
+            discord.SelectOption(label=t("Tell the organisers", locale)[:100], value="no", default=not op.get("auto_cancel")),
+            discord.SelectOption(label=t("Cancel it automatically", locale)[:100], value="yes",
+                                 default=bool(op.get("auto_cancel")))])
+        for item in (self.date, self.time, self.players):
+            self.add_item(item)
+        self.add_item(discord.ui.Label(text=t("When short as sign-up closes", locale)[:45], component=self.auto))
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        s, op, locale = services(interaction), self.op, interaction.locale
+        closes = None
+        if self.date.value.strip():
+            try:
+                day = times.parse_date(self.date.value, s.scheduler.clock(), s.settings.tz,
+                                       int(s.channels.meta.get("max_days_ahead") or 120))
+                clock = times.parse_time(self.time.value or "00:00")
+            except times.TimeError as exc:
+                await reply(interaction, time_problem(exc.problem, locale))
+                return
+            closes = datetime.combine(day, clock, s.settings.tz).isoformat()
+        players = self.players.value.strip()
+        if players and not players.isdigit():
+            await reply(interaction, t("Type a whole number, or leave it empty.", locale))
+            return
+        fields = {"signup_closes_at": closes, "min_players": int(players) if players else None,
+                  "auto_cancel": (self.auto.values or ["no"])[0] == "yes"}
+        await thinking(interaction)
+        if await write(interaction, op["id"], "minimum", "update_operation", fields, op["revision"]) is not None:
+            await reply(interaction, t("Saved.", locale))
 
 
 async def person_ids(interaction: discord.Interaction, members: list[Any]) -> list[int] | None:

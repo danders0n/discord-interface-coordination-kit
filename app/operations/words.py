@@ -39,6 +39,11 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
     if code == "bad_orbat":
         problems = [str(p) for p in body.get("problems") or []][:10]
         return t("The ORBAT has problems:", locale) + "\n" + "\n".join(f"- {p}" for p in problems)
+    if code == "players_on":
+        return t("Players are on the server ({players}).", locale, players=body.get("players") or "?")
+    if code == "start_failed":
+        return t("The server did not start: {reason}", locale,
+                 reason=str(body.get("detail") or "?").removeprefix("The server did not start: ")[:500])
     words = {
         "not_published": t("The operation isn't published yet.", locale),
         "not_open": t("Sign-up isn't open yet.", locale),
@@ -50,8 +55,17 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "taken": t("Someone was faster: that slot is taken.", locale),
         "offered": t("That slot is being offered to the reserve list.", locale),
         "locked": t("That slot is locked by the organisers.", locale),
+        "other_group": t("Another group fills that squad in its own sign-up.", locale),
+        "unknown_map": t("There is no such map in the Zeus maps list.", locale),
+        "closes_after_start": t("Sign-up must close before the start.", locale),
+        "closes_before_opening": t("Sign-up must close after it opens.", locale),
+        "bad_minimum": t("The minimum of players is a whole number, at most the sign-up limit.", locale),
         "role": t("That slot needs a role you don't have.", locale),
         "full": t("The operation is full.", locale),
+        "role_full": t("That specialist role is full.", locale),
+        "unknown_role": t("This operation has no such specialist role.", locale),
+        "bad_roles": t("Each specialist role needs a name of its own (at most 40 characters) and a minimum not above "
+                       "its limit; at most 10 roles.", locale),
         "not_full": t("There is a free slot for you: take it instead of the reserve list.", locale),
         "already": t("You are there already.", locale),
         "not_signed_up": t("You aren't signed up.", locale),
@@ -82,6 +96,11 @@ def refusal(code: str | None, body: Any, locale: Any) -> str | None:
         "bad_preset": t("That file is not an Arma 3 Launcher preset.", locale),
         "too_large": t("That file is too large.", locale),
         "unknown_mission": t("There is no such mission on the server.", locale),
+        # the operation's server (docs/PLAN-front-end.md, *Operation tweaks III*)
+        "not_in_window": t("The server can be started and stopped only while the operation's window is under way.",
+                           locale),
+        "no_server": t("This operation has no server of ours.", locale),
+        "busy": t("The server is starting or stopping: try again in a moment.", locale),
         # attendance, ratings, erasure
         "not_started": t("The operation hasn't started yet: cancel it instead.", locale),
         "no_report": t("There is no attendance report yet.", locale),

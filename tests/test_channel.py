@@ -99,7 +99,7 @@ async def test_the_preset_is_posted_and_fetched_once_per_content(stack, guild, f
     drawn = await row(stack, op["id"])
     channel = guild.get_channel(drawn.channel_id)
     preset = channel.get_partial_message(drawn.messages["preset"])._find()
-    assert preset.content == "Modset do Arma 3 Launchera: Ibis mods"
+    assert preset.content == f"{render.SPACER}## Modset do Arma 3 Launchera: Ibis mods"  # (a heading, as the OPORD's)
     assert preset.kwargs["files"][0].filename == "ibis.html"
     modset = next(f for f in channel.messages[0].embeds[0].fields if f.name == "Modset")
     assert modset.value == "Ibis mods: 2 mody\nCreator DLC: Global Mobilization"

@@ -104,7 +104,7 @@ class OperationCog(commands.Cog):
                 names.get(place.get("list") or "", "")
             row = await s.channels.row(int(op["id"]))
             link = f" · <#{row.channel_id}>" if row is not None and row.channel_id else ""
-            lines.append(f"{render.ts(assembly, 'f')} · {render.plain(op.get('kind_name') or op['kind'])} · "
+            lines.append(f"{render.ts(assembly, 'f')} · {render.plain(render.op_kind(op, locale))} · "
                          f"**{render.plain(op['title'])}**{link}" + (f" · __{mine}__" if mine else ""))
         embed = discord.Embed(title=t("The next {days} days", locale, days=days),
                               description="\n".join(lines)[:4096] if lines else t("Nothing planned yet.", locale))

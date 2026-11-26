@@ -264,6 +264,18 @@
       },
       "GroupPatch": {
         "properties": {
+          "acre": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "uses ACRE2 (null: not known)",
+            "title": "Acre"
+          },
           "acronym": {
             "anyOf": [
               {
@@ -277,6 +289,44 @@
             ],
             "title": "Acronym"
           },
+          "contact": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the contact point",
+            "title": "Contact"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "member_count": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Count"
+          },
           "name": {
             "anyOf": [
               {
@@ -289,6 +339,46 @@
               }
             ],
             "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "representative_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "persons on the Discord server who represent the group (listed only)",
+            "title": "Representative Ids"
+          },
+          "tfar": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "uses Task Force Arrowhead Radio (null: not known)",
+            "title": "Tfar"
           }
         },
         "title": "GroupPatch",
@@ -466,6 +556,13 @@
             "title": "Assembly At",
             "type": "string"
           },
+          "author_name": {
+            "default": "",
+            "description": "the author typed, shown before the person (guest: someone who isn't a member here)",
+            "maxLength": 100,
+            "title": "Author Name",
+            "type": "string"
+          },
           "author_person_id": {
             "anyOf": [
               {
@@ -477,6 +574,12 @@
             ],
             "description": "the mission's author (a person); default: the creator",
             "title": "Author Person Id"
+          },
+          "auto_cancel": {
+            "default": false,
+            "description": "zeus: cancelled when short of the minimum as sign-up closes (else the organisers are told)",
+            "title": "Auto Cancel",
+            "type": "boolean"
           },
           "base_profile_id": {
             "anyOf": [
@@ -499,7 +602,7 @@
                 "type": "null"
               }
             ],
-            "description": "A name from the climate list (stored by value)",
+            "description": "A played preset: a name from that list (stored by value)",
             "title": "Climate"
           },
           "dont_end_automatically": {
@@ -528,16 +631,6 @@
             ],
             "description": "hosted: the invited groups",
             "title": "Group Ids"
-          },
-          "hold": {
-            "default": "on",
-            "description": "hold the host; without Publish operations it is a request",
-            "enum": [
-              "on",
-              "off"
-            ],
-            "title": "Hold",
-            "type": "string"
           },
           "host_group_id": {
             "anyOf": [
@@ -597,6 +690,19 @@
             "description": "default: the mission's playable slots",
             "title": "Max Players"
           },
+          "min_players": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: how many must come to go ahead (0 / null: none)",
+            "title": "Min Players"
+          },
           "note": {
             "default": "",
             "description": "for staff",
@@ -621,6 +727,19 @@
             ],
             "description": "the event server; default: Settings → Operations",
             "title": "Server Id"
+          },
+          "signup_closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: sign-up closes then, and the minimum is checked (null: at the start)",
+            "title": "Signup Closes At"
           },
           "signup_limit": {
             "anyOf": [
@@ -647,6 +766,15 @@
             ],
             "title": "Signup Opens At"
           },
+          "specialist_roles": {
+            "description": "zeus / training: what a member may come as (e.g. Medic)",
+            "items": {
+              "$ref": "#/components/schemas/SpecialistRoleIn"
+            },
+            "maxItems": 10,
+            "title": "Specialist Roles",
+            "type": "array"
+          },
           "start_at": {
             "format": "date-time",
             "title": "Start At",
@@ -662,6 +790,19 @@
             "default": true,
             "title": "Verify Signatures",
             "type": "boolean"
+          },
+          "zeus_map": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus / training: a map from the Zeus maps list (by name), added to the base profile; null: the base's own",
+            "title": "Zeus Map"
           }
         },
         "required": [
@@ -686,6 +827,18 @@
             ],
             "title": "Assembly At"
           },
+          "author_name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Name"
+          },
           "author_person_id": {
             "anyOf": [
               {
@@ -696,6 +849,17 @@
               }
             ],
             "title": "Author Person Id"
+          },
+          "auto_cancel": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Cancel"
           },
           "base_profile_id": {
             "anyOf": [
@@ -763,21 +927,6 @@
             ],
             "title": "Group Ids"
           },
-          "hold": {
-            "anyOf": [
-              {
-                "enum": [
-                  "on",
-                  "off"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hold"
-          },
           "host_group_id": {
             "anyOf": [
               {
@@ -844,6 +993,18 @@
             ],
             "title": "Max Players"
           },
+          "min_players": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Players"
+          },
           "note": {
             "anyOf": [
               {
@@ -890,6 +1051,18 @@
             ],
             "title": "Server Id"
           },
+          "signup_closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Closes At"
+          },
           "signup_limit": {
             "anyOf": [
               {
@@ -913,6 +1086,21 @@
               }
             ],
             "title": "Signup Opens At"
+          },
+          "specialist_roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SpecialistRoleIn"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specialist Roles"
           },
           "start_at": {
             "anyOf": [
@@ -949,6 +1137,19 @@
               }
             ],
             "title": "Verify Signatures"
+          },
+          "zeus_map": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus / training: a map from the Zeus maps list (by name); null or empty: the base profile's own",
+            "title": "Zeus Map"
           }
         },
         "title": "OperationPatch",
@@ -1024,7 +1225,7 @@
       "OrbatIn": {
         "properties": {
           "text": {
-            "description": "# Squad lines, then slots: 'Name [Role] xN', '!' closes one",
+            "description": "'# Squad < Parent {type size}' lines, then slots: 'Name [Role] xN', '!' closes one",
             "maxLength": 4000,
             "title": "Text",
             "type": "string"
@@ -1233,8 +1434,45 @@
         "title": "RosterMember",
         "type": "object"
       },
+      "ServerIn": {
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "stop",
+              "restart"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "confirm": {
+            "default": false,
+            "description": "stop / restart with players connected (else 409 players_on with players)",
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ServerIn",
+        "type": "object"
+      },
       "SignupIn": {
         "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "coming: one of the operation's specialist roles (null: none); coming already, it changes the role",
+            "title": "Role"
+          },
           "status": {
             "description": "maybe, cant (a zeus operation's Not coming), reserve (no slot free for you) or coming (zeus / training)",
             "enum": [
@@ -1251,6 +1489,47 @@
           "status"
         ],
         "title": "SignupIn",
+        "type": "object"
+      },
+      "SpecialistRoleIn": {
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "how many may come as it (null: no limit)",
+            "title": "Limit"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zeus: how many it needs to go ahead (null: none)",
+            "title": "Min"
+          },
+          "name": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SpecialistRoleIn",
         "type": "object"
       },
       "SteamBody": {
@@ -2338,7 +2617,7 @@
         "x-act-as": true
       },
       "post": {
-        "description": "A new draft. Hold the host is on by default (without Publish operations: a request); its window is checked\nagainst the other operations' (409, code clash).",
+        "description": "A new draft on its kind's server (Settings → Operations, unless one is chosen); its window is checked against\nthe other operations' on that server (409, code clash).",
         "operationId": "create_operation_api_operations_post",
         "requestBody": {
           "content": {
@@ -2466,6 +2745,7 @@
     },
     "/api/operations/groups": {
       "get": {
+        "description": "The other groups with their details: logo, notes, member count, TFAR / ACRE, language, contact point and\nrepresentatives (their Discord ids for the bot and Manage members).",
         "operationId": "list_groups_api_operations_groups_get",
         "responses": {
           "200": {
@@ -2558,7 +2838,8 @@
     },
     "/api/operations/groups/{group_id}": {
       "patch": {
-        "operationId": "rename_group_api_operations_groups__group_id__patch",
+        "description": "Rename a group or change its details (fields left out stay; ``representative_ids`` replaces the list).",
+        "operationId": "update_group_api_operations_groups__group_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -2586,7 +2867,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Rename Group Api Operations Groups  Group Id  Patch",
+                  "title": "Response Update Group Api Operations Groups  Group Id  Patch",
                   "type": "object"
                 }
               }
@@ -2615,7 +2896,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "Rename Group",
+        "summary": "Update Group",
         "tags": [
           "operations"
         ],
@@ -3942,7 +4223,7 @@
     },
     "/api/operations/{op_id}/files/{name}": {
       "get": {
-        "description": "A file of the operation by the name its ``files`` give (preset.html, map.png, banner.jpg).",
+        "description": "A file of the operation by the name its ``files`` give (preset.html, map.png, banner.jpg). The preset comes\nunder the name it was uploaded with (``files.preset.original``).",
         "operationId": "get_file_api_operations__op_id__files__name__get",
         "parameters": [
           {
@@ -5267,6 +5548,73 @@
         "x-act-as": true
       }
     },
+    "/api/operations/{op_id}/server": {
+      "post": {
+        "description": "Start, stop or restart the operation's server while its window is under way (its organisers, or Manage\noperations). The window never starts it. Start runs the operation's profile; Stop only stops the server (the\nwindow goes on). Codes: not_in_window, no_server, players_on (with ``players``), busy, start_failed.",
+        "operationId": "control_server_api_operations__op_id__server_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "op_id",
+            "required": true,
+            "schema": {
+              "title": "Op Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Control Server Api Operations  Op Id  Server Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKey": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "Control Server",
+        "tags": [
+          "operations"
+        ],
+        "x-act-as": true
+      }
+    },
     "/api/operations/{op_id}/signup": {
       "delete": {
         "description": "Leave your slot or the lists (until the start). A freed slot is offered to the reserve list.",
@@ -5324,7 +5672,7 @@
         "x-act-as": true
       },
       "put": {
-        "description": "Maybe, Can't come (Not coming), the reserve list (only when no slot is free for you), or Coming (zeus /\ntraining; code full at the limit). Maybe and Can't come work before sign-up opens.",
+        "description": "Maybe, Can't come (Not coming), the reserve list (only when no slot is free for you), or Coming (zeus /\ntraining; code full at the limit). Coming takes one of the operation's specialist roles, ``role`` (code\nrole_full at its limit, unknown_role); coming already, it changes the role. Maybe and Can't come work before\nsign-up opens.",
         "operationId": "answer_api_operations__op_id__signup_put",
         "parameters": [
           {

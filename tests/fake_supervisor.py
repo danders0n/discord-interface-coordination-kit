@@ -43,24 +43,32 @@ except ImportError:  # run as python -m tests.fake_supervisor
 TOKEN = "test-token"
 ALL = ["events_stream", "heartbeat", "members", "act_as", "notices", "steam_links", "operations", "operation_feed",
        "operation_files", "orbat", "signups", "offers", "orbat_templates", "approval", "operation_attendance",
-       "ratings", "reports", "erasure", "heartbeat_state", "system_events"]
+       "ratings", "reports", "erasure", "heartbeat_state", "system_events", "operation_server"]
 TZ = ZoneInfo("Europe/Warsaw")
 KINDS = ("internal", "guest", "hosted", "zeus", "training")
 COMING = ("zeus", "training")
 PARAGRAPHS = ("situation", "mission", "execution", "sustainment", "command")
 KIND_NAMES = {"internal": "Internal", "guest": "Guest", "hosted": "Hosted", "zeus": "Zeus", "training": "Training"}
-EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "assembly_at", "start_at",
-            "duration_minutes", "signup_opens_at", "signup_limit", "how_to_join", "dont_end_automatically", "public",
-            "hold", "note")
-TIMES = ("assembly_at", "start_at", "signup_opens_at")
+EDITABLE = ("kind", "title", "climate", "host_group_id", "group_ids", "author_person_id", "author_name", "assembly_at",
+            "start_at", "duration_minutes", "signup_opens_at", "signup_limit", "specialist_roles", "how_to_join",
+            "dont_end_automatically", "public", "note", "zeus_map", "signup_closes_at", "min_players",
+            "auto_cancel")
+OTHERS = ("guest", "hosted")  # kinds whose ORBAT may give a squad to another group (``# Name @ACR``)
+GROUP_MARK = re.compile(r"@\s*([^\s<{}@]*)")
+TIMES = ("assembly_at", "start_at", "signup_opens_at", "signup_closes_at")
 PUBLISH, SIGNUP, APPROVE = "operations.publish", "operations.signup", "operations.approve"
 SLOT_LINE = re.compile(r"^(?P<lock>!)?\s*(?P<name>.*?)(?:\s+x(?P<count>\d+))?(?:\s*\[(?P<role>[^\[\]]*)\])?"
                        r"(?:\s+x(?P<count2>\d+))?\s*$", re.IGNORECASE)
 
 
+SQUAD_HEAD = re.compile(r"^(?P<name>[^<{}]*?)\s*(?:<\s*(?P<parent>[^<{}]*?)\s*)?(?:\{(?P<marks>[^{}]*)\})?\s*$")
+UNIT_SIZES = ("team", "sqd", "sec", "plt", "coy", "bn", "rgt", "bde")
+
+
 def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, bool]]]], list[str]]:
-    """The ORBAT text format (the supervisor's ``app/operations/orbat.py``, simplified: roles by id only): squads
-    with their slots (name, role id, locked), and the problems by line."""
+    """The ORBAT text format (the supervisor's ``app/operations/orbat.py``, simplified: roles by id only, the
+    squad's ``< Parent {type size}`` read without checks): squads with their slots (name, role id, locked), and the
+    problems by line. :func:`squad_marks` gives a squad line's parent and symbol."""
     squads: list[tuple[str, list[tuple[str, str | None, bool]]]] = []
     problems = []
     for number, raw in enumerate(text.splitlines(), 1):
@@ -85,6 +93,20 @@ def parse_orbat(text: str) -> tuple[list[tuple[str, list[tuple[str, str | None, 
         count = int(match.group("count") or match.group("count2") or 1)
         squads[-1][1].extend([(name, role, bool(match.group("lock")))] * count)
     return squads, problems
+
+
+def squad_marks(head: str) -> dict[str, Any]:
+    """A squad line (after ``#``): its name, the name it is under, its unit type and size, and the acronym of the
+    other group that fills it (``@ACR``, or None)."""
+    group = next(iter(GROUP_MARK.findall(head)), None)
+    head = re.sub(r"\s+", " ", GROUP_MARK.sub(" ", head)).strip()
+    match = SQUAD_HEAD.match(head)
+    if match is None:
+        return {"name": head, "parent_name": None, "unit_type": None, "size": None, "group_acronym": group}
+    words = (match.group("marks") or "").split()
+    return {"name": match.group("name").strip(), "parent_name": (match.group("parent") or "").strip() or None,
+            "unit_type": next((w for w in words if w not in UNIT_SIZES), None),
+            "size": next((w for w in words if w in UNIT_SIZES), None), "group_acronym": group}
 
 
 def checklist(op: dict[str, Any]) -> list[str]:
@@ -146,6 +168,11 @@ class State:
     files: dict[tuple[int, str], bytes] = field(default_factory=dict)
     groups: list[dict[str, Any]] = field(default_factory=list)
     climates: list[dict[str, Any]] = field(default_factory=list)
+    # the Zeus maps list ({"id", "name", "mission", "world", "mod": {"id", "name", "workshop_id"} or None, "mod_id"}):
+    # what zeus / training add to their base profile; their players' preset is staff's standard preset
+    # ({"name", "mods", "file": the name it was uploaded with}) or none (``standard_preset``)
+    zeus_maps: list[dict[str, Any]] = field(default_factory=list)
+    standard_preset: dict[str, Any] | None = None
     staff_roles: dict[str, list[str]] = field(default_factory=lambda: {"manage": [], "approve": []})
     acronym: str = "IBC"
     server_missions: list[str] = field(default_factory=list)
@@ -219,10 +246,12 @@ class State:
         assembly = assembly or self.now + timedelta(days=3)
         op = {"id": max(self.operations, default=0) + 1, "kind": kind, "title": title, "status": "draft",
               "climate": "", "climate_role_id": None, "host_group_id": None, "group_ids": [], "created_by": by,
-              "author_person_id": None, "organisers": [], "assembly_at": assembly,
+              "author_person_id": None, "author_name": "", "organisers": [], "assembly_at": assembly,
               "start_at": start or assembly + timedelta(minutes=30), "duration_minutes": 180,
-              "signup_opens_at": None, "signup_limit": None, "how_to_join": "", "dont_end_automatically": False,
-              "public": True, "hold": "off" if kind == "guest" else "on", "note": "", "opord": {}, "files": {},
+              "signup_opens_at": None, "signup_limit": None, "specialist_roles": [], "how_to_join": "",
+              "dont_end_automatically": False, "zeus_map": None, "signup_closes_at": None, "min_players": None,
+              "auto_cancel": False, "requirements_state": "", "server_running": False, "players": 0,
+              "public": True, "note": "", "opord": {}, "files": {},
               "mission": {}, "discord": {}, "cancel_reason": None, "revision": 1, "change_seq": 0,
               "changed_by": by, "changed_fields": [], "changed_at": self.now, "created_at": self.now,
               "published_at": None, "ended_at": None, "squads": [], "signups": [], "offers": [], "requests": [],
@@ -253,6 +282,21 @@ class State:
         entry = {"file": name, "hash": hashlib.sha256(content).hexdigest(), "size": len(content), "type": kind} | info
         files = dict(self.operations[op_id]["files"]) | {slot: entry}
         self.change(op_id, files=files)
+
+    def zeus_preset(self, op_id: int) -> None:
+        """A zeus / training operation's launcher preset for the players, as the real ``zeus_preset`` keeps it: staff's
+        standard preset, under the name it was uploaded with (``generated`` and ``standard``), or none (nothing is
+        made from the base profile); another kind loses it."""
+        op = self.operations[op_id]
+        current = (op["files"] or {}).get("preset") or {}
+        if op["kind"] in COMING and self.standard_preset is not None:
+            name, mods = self.standard_preset["name"], [list(m) for m in self.standard_preset["mods"]]
+            rows = "".join(f'<tr data-type="ModContainer"><td data-type="DisplayName">{m[1]}</td></tr>' for m in mods)
+            self.set_file(op_id, "preset", f"<html><body><table>{rows}</table></body></html>".encode(), "preset.html",
+                          original=self.standard_preset.get("file") or "standard-preset.html", preset_name=name,
+                          mods=mods, staged=False, generated=True, standard=True)
+        elif current.get("generated"):
+            self.change(op_id, files={k: v for k, v in op["files"].items() if k != "preset"})
 
     def delete_operation(self, op_id: int) -> None:
         """A draft deleted (or a stale one cancelled): a tombstone in the feed."""
@@ -299,16 +343,24 @@ class State:
         if problems:
             raise ValueError(problems)
         kept, new = set(), []
-        for squad_name, slots in squads:
+        acronyms = {g["acronym"].casefold(): g["id"] for g in self.groups}
+        for head, slots in squads:
+            marks = squad_marks(head)
+            squad_name = marks["name"]
+            group = marks.pop("group_acronym")
+            marks["group_id"] = acronyms.get(group.casefold()) if group and op["kind"] in OTHERS else None
             made = []
             for n, (name, role_id, locked) in enumerate(slots):
                 before = old.get((squad_name, name, n))
-                holder = before["holder"] if before is not None and not locked else None
+                holder = before["holder"] if before is not None and not locked and not marks["group_id"] else None
                 if holder is not None:
                     kept.add(holder)
                 made.append({"id": self._id("slot"), "name": name, "role_id": role_id, "locked": locked or bool(
                     before and before["locked"] and holder), "holder": holder})
-            new.append({"id": self._id("squad"), "name": squad_name, "slots": made})
+            new.append({"id": self._id("squad"), "name": squad_name, "slots": made, **marks})
+        ids = {squad["name"].casefold(): squad["id"] for squad in new}
+        for squad in new:
+            squad["parent"] = ids.get((squad.pop("parent_name") or "").casefold())
         displaced = [s["holder"] for s in old.values() if s["holder"] is not None and s["holder"] not in kept]
         op["squads"] = new
         for position, person_id in enumerate(displaced):
@@ -321,12 +373,13 @@ class State:
         return displaced
 
     def _list(self, op: dict[str, Any], person_id: int, status: str | None, *, top: int | None = None,
-              assigned: bool = False) -> None:
-        """Put a person on a list (off any other), or off every list (``status`` None)."""
+              assigned: bool = False, role: str = "") -> None:
+        """Put a person on a list (off any other), or off every list (``status`` None); ``role``: Coming as it."""
         op["signups"] = [e for e in op["signups"] if e["person_id"] != person_id]
         if status is None:
             return
-        entry = {"person_id": person_id, "status": status, "assigned": assigned, "reserve_position": None}
+        entry = {"person_id": person_id, "status": status, "assigned": assigned, "reserve_position": None,
+                 "role": role if status == "coming" else ""}
         if status == "reserve":
             reserve = [e for e in op["signups"] if e["status"] == "reserve"]
             entry["reserve_position"] = 0
@@ -374,20 +427,68 @@ class State:
             self._list(op, person["id"], status)
         self._touch(op, by, ["signups"], "updated", revision=False)
 
+    @staticmethod
+    def closes(op: dict[str, Any]) -> datetime:
+        """A zeus operation's ``signup_closes_at``, else the start (the real ``Signups.closes``)."""
+        return op["signup_closes_at"] if op["kind"] == "zeus" and op.get("signup_closes_at") else op["start_at"]
+
+    @staticmethod
+    def requirements(op: dict[str, Any], coming: int, roles: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """A zeus operation's minimum against who comes (the real ``Signups.requirements``)."""
+        wanted = [r for r in roles if r.get("min")]
+        if op["kind"] != "zeus" or (not op.get("min_players") and not wanted):
+            return None
+        short = max(0, (op.get("min_players") or 0) - coming)
+        lacking = [{"name": r["name"], "min": r["min"], "count": r["count"]} for r in wanted if r["count"] < r["min"]]
+        return {"min_players": op.get("min_players"), "coming": coming, "auto_cancel": op.get("auto_cancel", False),
+                "state": op.get("requirements_state") or None, "met": not short and not lacking,
+                "missing": {"players": short, "roles": lacking}}
+
+    def check_requirements(self) -> None:
+        """The supervisor's check when a zeus operation's sign-up closes: met, short (a ``requirements_missed``
+        notice to the organisers), or cancelled (``auto_cancel``: a ``cancelled`` notice with ``missing``)."""
+        for op in list(self.operations.values()):
+            if op["kind"] != "zeus" or op["status"] != "published" or op.get("requirements_state") \
+                    or self.now < self.closes(op):
+                continue
+            found = self.board(op)["signup"]["requirements"]
+            if found is None:
+                continue
+            organisers = [p["discord_id"] for p in self.persons.values() if self.organises(op, p)]
+            if found["met"]:
+                self.change(op["id"], by="supervisor", revision=False, requirements_state="met")
+            elif op.get("auto_cancel"):
+                coming = [self.by_person(e["person_id"])["discord_id"] for e in op["signups"] if e["status"] == "coming"]
+                self.notice("cancelled", operation_id=op["id"], persons=coming,
+                            data={"key": f"OP-{op['id']}", "title": op["title"], "reason": "Not enough sign-ups",
+                                  "missing": found["missing"]})
+                self.change(op["id"], by="supervisor", revision=False, status="cancelled",
+                            cancel_reason="Not enough sign-ups", requirements_state="cancelled")
+            else:
+                self.notice("requirements_missed", operation_id=op["id"], persons=organisers,
+                            data={"key": f"OP-{op['id']}", "title": op["title"], "missing": found["missing"]})
+                self.change(op["id"], by="supervisor", revision=False, requirements_state="missed")
+
     def signup_state(self, op: dict[str, Any]) -> str:
         if op["status"] in ("draft", "pending"):
             return "not_published"
-        if op["status"] != "published" or self.now >= op["start_at"]:
+        if op["status"] != "published" or self.now >= self.closes(op):
             return "closed"
         return "open" if op["signup_opens_at"] is None or self.now >= op["signup_opens_at"] else "not_open"
 
     def _person_out(self, person_id: int | None) -> dict[str, Any] | None:
         return self._person(person_id)
 
+    @staticmethod
+    def ours(op: dict[str, Any]) -> list[dict[str, Any]]:
+        """The slots members sign up for here (not those of a squad another group fills)."""
+        return [s for squad in op["squads"] if not squad.get("group_id") for s in squad["slots"]]
+
     def board(self, op: dict[str, Any]) -> dict[str, Any]:
-        slots = self.slots(op)
+        slots = self.ours(op)
         counts = {"total": len(slots), "taken": sum(s["holder"] is not None for s in slots),
-                  "closed": sum(s["locked"] and s["holder"] is None for s in slots)}
+                  "closed": sum(s["locked"] and s["holder"] is None for s in slots),
+                  "other": len(self.slots(op)) - len(slots)}
         counts["free"] = counts["total"] - counts["taken"] - counts["closed"]
         coming = sum(e["status"] == "coming" for e in op["signups"])
         offered = {o["slot_id"] for o in op["offers"] if o["state"] == "open"}
@@ -395,13 +496,21 @@ class State:
         for entry in sorted(op["signups"], key=lambda e: (e["reserve_position"] is None, e["reserve_position"] or 0)):
             out = self._person_out(entry["person_id"])
             if out is not None:
-                lists[entry["status"]].append(out | {"assigned": entry["assigned"], "missing_dlc": []})
+                lists[entry["status"]].append(out | {"assigned": entry["assigned"], "missing_dlc": [],
+                                                     "role": entry.get("role") or None})
+        roles = [{"name": r["name"], "limit": r.get("limit"), "min": r.get("min"), "count": sum(
+            e["status"] == "coming" and e.get("role") == r["name"] for e in op["signups"])}
+            for r in op.get("specialist_roles") or []]
         return {
             "slots": counts,
             "signup": {"state": self.signup_state(op), "opens_at": iso(op["signup_opens_at"]),
                        "limit": op["signup_limit"], "coming": coming,
-                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"], "closes_at": iso(op["start_at"])},
-            "orbat": [{"id": squad["id"], "name": squad["name"], "free": sum(
+                       "full": bool(op["signup_limit"]) and coming >= op["signup_limit"],
+                       "closes_at": iso(self.closes(op)), "roles": roles,
+                       "requirements": self.requirements(op, coming, roles)},
+            "orbat": [{"id": squad["id"], "name": squad["name"], "parent": squad.get("parent"),
+                       "unit_type": squad.get("unit_type"), "size": squad.get("size"),
+                       "group": self._group(squad.get("group_id")), "free": 0 if squad.get("group_id") else sum(
                 s["holder"] is None and not s["locked"] for s in squad["slots"]), "slots": [
                 {"id": s["id"], "name": s["name"], "locked": s["locked"], "offered": s["id"] in offered,
                  "required_role": {"id": s["role_id"], "name": s["role_id"]} if s["role_id"] else None,
@@ -419,7 +528,8 @@ class State:
         slot, entry = self.held(op, person["id"]), self.entry(op, person["id"])
         place = ({"slot_id": slot["id"], "slot": slot["name"], "locked": slot["locked"],
                   "squad": next(s["name"] for s in op["squads"] if slot in s["slots"])} if slot is not None else
-                 {"list": entry["status"], "reserve_position": entry["reserve_position"]} if entry is not None else None)
+                 {"list": entry["status"], "reserve_position": entry["reserve_position"],
+                  "role": entry.get("role") or None} if entry is not None else None)
         offers = [o["id"] for o in op["offers"] if o["state"] == "open" and (
             o["person_id"] == person["id"] or (o["person_id"] is None and entry and entry["status"] == "reserve"))]
         actions, state = [], self.signup_state(op)
@@ -428,12 +538,14 @@ class State:
             if op["kind"] in COMING:
                 if state == "open" and current != "coming" and not self.board(op)["signup"]["full"]:
                     actions.append("coming")
+                elif state == "open" and current == "coming" and op.get("specialist_roles"):
+                    actions.append("coming")  # (another role)
                 if current != "cant":
                     actions.append("cant")
             else:
                 if state == "open" and not pinned:
                     actions.append("take")
-                    free = any(s["holder"] is None and not s["locked"] for s in self.slots(op))
+                    free = any(s["holder"] is None and not s["locked"] for s in self.ours(op))
                     if slot is None and current != "reserve" and not free:
                         actions.append("reserve")
                 if not pinned and current != "maybe":
@@ -550,10 +662,24 @@ class State:
         account = (person.get("account") or {}).get("username")
         return op["created_by"] == account or person["id"] in op["organisers"]
 
+    def window_active(self, op: dict[str, Any]) -> bool:
+        """Its window is under way (assembly - 45 min to the end + 30 min), so its organisers start its server."""
+        ends = op["start_at"] + timedelta(minutes=op["duration_minutes"] + 30)
+        return op["status"] == "published" and op["kind"] != "guest" and \
+            op["assembly_at"] - timedelta(minutes=45) <= self.now < ends
+
+    def server_state(self, op: dict[str, Any]) -> dict[str, Any] | None:
+        """``window.server_state``: the event server while the window is under way (the window never starts it)."""
+        if not self.window_active(op):
+            return None
+        return {"state": "running" if op.get("server_running") else "stopped", "profile": True}
+
     def actions(self, op: dict[str, Any], person: dict[str, Any]) -> list[str]:
         out, organiser = [], self.organises(op, person)
+        if organiser and self.window_active(op):
+            out.append("server")
         if op["status"] in ("draft", "published") and organiser:
-            out += ["edit", "opord", "files", "preset", "mission", "profile"]
+            out += ["edit", "opord", "files"] + (["map"] if op["kind"] in COMING else ["preset", "mission"]) + ["profile"]
             out += ["orbat", "slots"] if op["kind"] not in COMING else ["slots"]
         if op["status"] == "draft" and organiser:
             out.append("publish" if PUBLISH in person["permissions"] or op["kind"] in COMING else "submit")
@@ -576,17 +702,21 @@ class State:
             "title": op["title"], "status": op["status"], "climate": op["climate"],
             "climate_role_id": op["climate_role_id"], "host_group": self._group(op["host_group_id"]),
             "groups": [g for g in map(self._group, op["group_ids"]) if g], "created_by": op["created_by"],
-            "author": self._person(op["author_person_id"]),
+            "author": self._person(op["author_person_id"]), "author_name": op.get("author_name") or "",
             "organisers": [p for p in map(self._person, op["organisers"]) if p],
             "assembly_at": iso(op["assembly_at"]), "start_at": iso(op["start_at"]),
             "duration_minutes": op["duration_minutes"], "ends_at": iso(ends),
             "signup_opens_at": iso(op["signup_opens_at"]), "signup_limit": op["signup_limit"],
-            "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
-            "public": op["public"], "hold": op["hold"], "server": None if op["kind"] == "guest" else
+            "signup_closes_at": iso(op.get("signup_closes_at")), "min_players": op.get("min_players"),
+            "auto_cancel": op.get("auto_cancel", False),
+            "specialist_roles": [dict(r) for r in op.get("specialist_roles") or []], "how_to_join": op["how_to_join"], "dont_end_automatically": op["dont_end_automatically"],
+            "public": op["public"], "server": None if op["kind"] == "guest" else
             {"id": 2, "slug": "event", "name": "Event"}, "files": files, "mission": op["mission"] or None,
+            "zeus_map": dict(op["zeus_map"]) if op.get("zeus_map") else None,
             "warnings": [], "window": {"starts_at": iso(op["assembly_at"] - timedelta(minutes=45)),
-                                       "ends_at": iso(ends + timedelta(minutes=30)), "state": "planned",
-                                       "hold": op["hold"] == "on"},
+                                       "ends_at": iso(ends + timedelta(minutes=30)),
+                                       "state": "active" if self.window_active(op) else "planned",
+                                       "server_state": self.server_state(op)},
             "frozen": False, "channel_name": self.channel_name(op), "discord": dict(op["discord"]),
             "cancel_reason": op["cancel_reason"], "revision": op["revision"], "change_seq": op["change_seq"],
             "changed_by": op["changed_by"], "changed_fields": list(op["changed_fields"]),
@@ -849,10 +979,11 @@ def make_app(state: State | None = None) -> web.Application:
         return web.json_response({
             "api_level": state.api_level, "timezone": state.timezone, "utc_offset": state.utc_offset or "+0100",
             "kinds": [{"id": k, "name": KIND_NAMES[k]} for k in KINDS], "climates": state.climates,
+            "zeus_maps": state.zeus_maps,
             "groups": state.groups, "discord_roles": [], "staff_roles": state.staff_roles,
             "squadxml_url": "https://app.example/squad/squad.xml",
             "defaults": {"server": {"id": 2, "slug": "event", "name": "Event"}, "base_profile": None,
-                         "duration_minutes": 180, "hold": "on"},
+                         "duration_minutes": 180},
             "window": {"lead_minutes": 45, "buffer_minutes": 30, "quiet_minutes": 30, "warn_minutes": 15},
             "max_days_ahead": 120, "acronym": state.acronym, "paragraphs": list(PARAGRAPHS),
             "image_slots": ["map", "banner"], "limits": {"title": 100, "paragraph": 4000}})
@@ -991,6 +1122,13 @@ def make_app(state: State | None = None) -> web.Application:
         fields = _fields(await request.json())
         if isinstance(fields, web.Response):
             return fields
+        if fields.get("zeus_map"):  # (by name from the Zeus maps list, stored by value)
+            if op["kind"] not in COMING:
+                return _refuse("wrong_kind", "Only a Zeus or training operation takes a map")
+            found = next((m for m in state.zeus_maps if m["name"].casefold() == fields["zeus_map"].casefold()), None)
+            if found is None:
+                return _refuse("unknown_map", f"Unknown map '{fields['zeus_map']}'", 422)
+            fields["zeus_map"] = {k: found.get(k) for k in ("name", "mission", "world", "mod")}
         trial = op | fields
         problem = _check_times(trial) if any(k in fields for k in ("assembly_at", "start_at")) else None
         if problem is not None:
@@ -1006,6 +1144,8 @@ def make_app(state: State | None = None) -> web.Application:
             fields |= moved
         if fields:
             state.change(op["id"], by=_actor(request), **fields)
+        if "zeus_map" in fields or "kind" in fields:
+            state.zeus_preset(op["id"])
         return web.json_response(state.out(op, person) | {"proposal": proposal}, headers={"ETag": f'"{op["revision"]}"'})
 
     async def delete_operation(request: web.Request) -> web.Response:
@@ -1108,6 +1248,8 @@ def make_app(state: State | None = None) -> web.Application:
         refused = _editable(op, request)
         if refused is not None:
             return refused
+        if slot in ("preset", "mission") and op["kind"] in COMING:  # (zeus / training: the base's, with a map)
+            return _refuse("wrong_kind", "A Zeus or training operation uses its base profile's mods and mission")
         form = await request.post()
         upload = form["file"]
         content = upload.file.read()
@@ -1137,6 +1279,8 @@ def make_app(state: State | None = None) -> web.Application:
         refused = _editable(op, request)
         if refused is not None:
             return refused
+        if op["kind"] in COMING:
+            return _refuse("wrong_kind", "A Zeus or training operation uses its base profile's mission")
         name = (await request.json())["name"]
         if name not in state.server_missions:
             return _error(404, f"No mission '{name}' on the server", code="not_found")
@@ -1178,8 +1322,8 @@ def make_app(state: State | None = None) -> web.Application:
         person = _person(request)
         if op["status"] != "published":
             return None, _refuse("not_published", f"OP-{op['id']} is not published: nobody can sign up yet")
-        if state.now >= op["start_at"]:
-            return None, _refuse("closed", f"OP-{op['id']} has started: sign-up is closed")
+        if state.now >= state.closes(op):
+            return None, _refuse("closed", f"Sign-up for OP-{op['id']} is closed")
         if person is None or SIGNUP not in person["permissions"]:
             return None, _refuse("not_allowed", "Signing up needs the permission Sign up for operations", 403)
         if not answer and op["signup_opens_at"] is not None and state.now < op["signup_opens_at"]:
@@ -1225,6 +1369,8 @@ def make_app(state: State | None = None) -> web.Application:
         slot = state.slot(op, int(request.match_info["slot_id"]))
         if slot is None:
             return _refuse("no_slot", "No such slot", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         refused = _claim(op, slot, person)
         if refused is not None:
             return refused
@@ -1235,14 +1381,27 @@ def make_app(state: State | None = None) -> web.Application:
         op = _get(request)
         if isinstance(op, web.Response):
             return op
-        status = (await request.json())["status"]
+        body = await request.json()
+        status, wanted = body["status"], (body.get("role") or "").strip()
         person, refused = _signer(op, request, answer=status in ("maybe", "cant"))
         if refused is not None:
             return refused
         if (status == "coming") != (op["kind"] in COMING) and status != "cant":
             return _refuse("wrong_kind", "That answer doesn't fit this operation")
-        if status == "coming" and state.board(op)["signup"]["full"]:
+        entry, role = state.entry(op, person["id"]), None
+        again = entry is not None and entry["status"] == "coming"
+        if status == "coming" and wanted:  # (as the real Signups.coming: by name, any case, with its limit)
+            role = next((r for r in op.get("specialist_roles") or [] if r["name"].casefold() == wanted.casefold()), None)
+            if role is None:
+                return _error(422, f"OP-{op['id']} has no specialist role {wanted}", code="unknown_role")
+        if status == "coming" and again and (entry.get("role") or "") == (role["name"] if role else ""):
+            return _refuse("already", "You are coming already")
+        if status == "coming" and not again and state.board(op)["signup"]["full"]:
             return _refuse("full", "Everybody who may come is coming already")
+        if role is not None and role.get("limit") and sum(
+                e["status"] == "coming" and e.get("role") == role["name"] and e["person_id"] != person["id"]
+                for e in op["signups"]) >= role["limit"]:
+            return _refuse("role_full", f"{role['name']} is full ({role['limit']})", role=role["name"])
         if status == "reserve" and any(s["holder"] is None and not s["locked"] for s in state.slots(op)):
             return _refuse("not_full", "There is a free slot: take it")
         mine = state.held(op, person["id"])
@@ -1250,7 +1409,7 @@ def make_app(state: State | None = None) -> web.Application:
             return _refuse("locked", "An organiser assigned you a slot: ask them to move you")
         if mine is not None:
             state.free(op, mine)
-        state._list(op, person["id"], status)
+        state._list(op, person["id"], status, role=role["name"] if role else "")
         _changed(op, request)
         return _signed(op, request)
 
@@ -1332,6 +1491,8 @@ def make_app(state: State | None = None) -> web.Application:
         person_id = (await request.json())["person_id"]
         if slot is None or state.by_person(person_id) is None:
             return _refuse("not_found", "No such slot or person", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         if slot["holder"] not in (None, person_id):
             state._list(op, slot["holder"], "reserve", top=0)
         mine = state.held(op, person_id)
@@ -1349,6 +1510,8 @@ def make_app(state: State | None = None) -> web.Application:
         slot = state.slot(op, int(request.match_info["slot_id"]))
         if slot is None:
             return _refuse("no_slot", "No such slot", 404)
+        if _theirs(op, slot):
+            return _refuse("other_group", "Another group fills this squad in its own sign-up")
         slot["locked"] = bool((await request.json())["locked"])
         _changed(op, request)
         return _signed(op, request)
@@ -1375,10 +1538,21 @@ def make_app(state: State | None = None) -> web.Application:
         _changed(op, request)
         return _signed(op, request)
 
+    def _theirs(op: dict[str, Any], slot: dict[str, Any]) -> bool:
+        return any(squad.get("group_id") and slot in squad["slots"] for squad in op["squads"])
+
     def _orbat_text(op: dict[str, Any]) -> str:
         lines = []
+        names = {squad["id"]: squad["name"] for squad in op["squads"]}
         for squad in op["squads"]:
-            lines.append(f"# {squad['name']}")
+            head = f"# {squad['name']}"
+            if squad.get("parent") in names:
+                head += f" < {names[squad['parent']]}"
+            if marks := " ".join(m for m in (squad.get("unit_type"), squad.get("size")) if m):
+                head += f" {{{marks}}}"
+            if squad.get("group_id"):
+                head += f" @{(state._group(squad['group_id']) or {}).get('acronym', squad['group_id'])}"
+            lines.append(head)
             for slot in squad["slots"]:
                 closed = "!" if slot["locked"] and slot["holder"] is None else ""
                 role = f" [{slot['role_id']}]" if slot["role_id"] else ""
@@ -1546,6 +1720,27 @@ def make_app(state: State | None = None) -> web.Application:
             return _refuse("not_started", f"OP-{op['id']} has not started: cancel it instead")
         op["status"], op["ended_at"], op["attendance_state"] = "ended", state.now, "waiting"
         state._touch(op, _actor(request), ["status", "attendance"], "ended", revision=False)
+        return _reply(op, request)
+
+    async def operation_server(request: web.Request) -> web.Response:
+        """Start / stop / restart the operation's server in its window (the real ``server_control``)."""
+        op = _organised(request)
+        if isinstance(op, web.Response):
+            return op
+        body = await request.json()
+        action, confirm = body["action"], bool(body.get("confirm"))
+        if op["kind"] == "guest":
+            return _refuse("no_server", f"OP-{op['id']} has no server of ours")
+        if not state.window_active(op):
+            return _refuse("not_in_window", f"OP-{op['id']}'s server can be started and stopped only while its window "
+                                            "is under way")
+        running = bool(op.get("server_running"))
+        if (action == "stop" and not running) or (action == "start" and running):
+            return _reply(op, request)
+        if running and op.get("players") and not confirm:
+            return _refuse("players_on", f"{op['players']} players are connected", players=op["players"])
+        op["server_running"] = action != "stop"
+        state._touch(op, _actor(request), ["server"], f"server_{action}", revision=False)
         return _reply(op, request)
 
     async def correct_attendance(request: web.Request) -> web.Response:
@@ -1773,6 +1968,7 @@ def make_app(state: State | None = None) -> web.Application:
     add.add_post("/api/operations/{op_id:\\d+}/submit", submit)
     add.add_post("/api/operations/{op_id:\\d+}/withdraw", withdraw)
     add.add_post("/api/operations/{op_id:\\d+}/end", end_operation)
+    add.add_post("/api/operations/{op_id:\\d+}/server", operation_server)
     add.add_put("/api/operations/{op_id:\\d+}/attendance", correct_attendance)
     add.add_put("/api/operations/{op_id:\\d+}/rating", rate)
     add.add_get("/api/operations/reports/member/{who}", report_member)

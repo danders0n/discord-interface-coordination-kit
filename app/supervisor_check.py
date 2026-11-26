@@ -30,7 +30,8 @@ log = logging.getLogger(__name__)
 API_LEVEL = 2  # the operations API (the supervisor's phase 3); raised when the bot needs newer routes
 CAPABILITIES = ("operations", "operation_feed", "operation_files",  # the supervisor's phase 3
                 "orbat", "signups", "offers", "orbat_templates", "approval",  # phase 4
-                "operation_attendance", "ratings", "reports", "erasure")  # phase 5
+                "operation_attendance", "ratings", "reports", "erasure",  # phase 5
+                "operation_server")  # an operation's server by hand (docs/PLAN-front-end.md, *Operation tweaks III*)
 ACT_AS = "integration.act_as"
 RECHECK = 60.0
 

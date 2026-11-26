@@ -52,7 +52,7 @@ approval, attendance, ratings, persons, Steam links and squad.xml. The bot:
 | `app/attendance/service.py`, `stats.py`, `history.py` | **Deleted.** `ui.py` (report, *Edit attendance*, *Rate*) and `cog.py` (`/attendance`, `/profile`, `/mission-maker`, `/group`, `/attendance-report`) stay and read supervisor routes. |
 | `app/links/service.py`, `app/squadxml/` | **Deleted.** `/link` and `/unlink` stay (act-as). `links/watch.py` becomes the roster push. Reminder bookkeeping stays (it is delivery). |
 | `app/reservations/`, `app/profiles/`, `app/presets.py` | **Deleted.** The supervisor builds and holds the host itself; the bot uploads the preset and mission files and shows the supervisor's report. |
-| `app/servers/` (`/server`) | **Deleted.** Servers are controlled in the app only (act-as refuses server control). |
+| `app/servers/` (`/server`) | **Deleted.** Servers are controlled in the app only (act-as refuses server control). *(11-24)* Except an operation's own server in its window: the panel's *Server* (*Operation tweaks III*). |
 | `app/activity.py` | **Deleted.** Activity lines come from the supervisor as `activity` notices, so changes made in the app are logged too. |
 | `app/archive/`, `app/privacy/` (`/privacy` text), `scheduler.py`, `staff_threads.py`, `staff_log.py`, `logs.py`, `heartbeat.py`, `startup_checks.py`, `i18n/`, `discord_util.py`, `resolve.py`, `db/backup.py` | **Kept.** `/privacy-erase` calls the supervisor. |
 | `app/permissions.py` | **Shrinks** to the bot's own commands (`/reload`, archive access for *bot admin*). Every other check is the supervisor's. |
@@ -110,7 +110,7 @@ recomputed on every change of that operation:
 | Ping | Rule |
 |---|---|
 | Sign-up open | At `signup_opens_at`, the announcement and climate roles in the thread; skipped if more than 1 h late. Publishing without a later opening posts no ping (the announcement is it). |
-| Reminders | At `times.reminder_minutes` before the assembly, every slot holder (or *Coming*) in the thread, split past 2000 characters; skipped once a later reminder or the assembly has passed. |
+| Reminders | At `times.reminder_minutes` before the assembly, every slot holder (or *Coming*) in the operation's channel (decided 2026-11-22; before, the thread), split past 2000 characters; skipped once a later reminder or the assembly has passed. |
 
 ### Notices
 
@@ -439,7 +439,8 @@ templates, approval; its `State` gained `set_orbat`, `sign`, `free`, `request` f
   offer no longer open, the message is closed (*has ended*, no buttons), after one fresh read of the operation, since an
   older one from the feed looks the same.
 - **Reminders:** `reminder:<op>:<minutes>` actions while ahead, recomputed on every redraw (an offset /reload removed is
-  dropped); the slot holders and Coming in the thread, skipped once the assembly or a later reminder has come.
+  dropped); the slot holders and Coming in the thread (the channel since 2026-11-22, below), skipped once the
+  assembly or a later reminder has come.
 - **Pings** (`OperationChannels.ping`): the thread, mentions split at 2000 characters, a view on the first message; a
   draft (no thread): by DM; an archived thread (a cancelled operation, archived at once) is opened for the message and
   locked again.
@@ -478,7 +479,7 @@ The rest of this plan's phase 4.
   member's name and shows a button per section its `my.actions` allows (`operation:act:<op>:<section>`): Details,
   Type and groups (`edit`), OPORD (`opord`: one modal of five fields), ORBAT (`orbat` / `slots`), Sign-up start, Sign-up
   limit (Zeus, training), How to join (guest), Co-organisers, Hold the host (on / off; without Publish it becomes a
-  request), Don't end automatically (internal, hosted), Publish / Send for approval / Withdraw request, Copy operation
+  request; removed 11-24, *Operation tweaks IV*), Don't end automatically (internal, hosted), Publish / Send for approval / Withdraw request, Copy operation
   (a week later), Delete draft (with a confirmation) / Cancel operation (with the reason). Its text: the status, what
   publishing still lacks, waiting times or host requests, the supervisor's mission `warnings`, a failed profile, ⚠
   slots, and where the files are set. Every press reads the operation again: a section no longer allowed says so; a
@@ -585,6 +586,159 @@ the config language, as `master`'s `app/activity.py` did.
 - The panel's *End* no longer posts its own line: the supervisor's `operation.ended` says it, also for an end in the
   app.
 
+### Operation tweaks (2026-11-22)
+
+Asked by the owner after the test server: with the supervisor's matching change (its `feature/operation-tweaks`).
+
+- **Reminders go to the operation's channel**, under its messages, not to the thread (`_reminder_action`), so they are
+  seen with the operation. They are the bot's own messages outside `operation_channel.messages`: redraws keep to their
+  stored ids and append after them, and the archive skips the bot's messages. Without the channel at hand: the thread,
+  as other pings. Every other ping still goes to the thread.
+- **The preset message is a heading**, `## Modset for the Arma 3 Launcher: name`, with the empty first line, as the
+  OPORD's paragraphs.
+- **The kind is translated** (`render.kind_name` / `op_kind`): the supervisor's English default names (`Internal`,
+  `Guest`, `Hosted`, `Zeus`, `Training`) in the config language (or the member's, privately; `guest` is *External*,
+  *Zewnętrzna*); a name its admin chose is shown as it is. Everywhere: the info, the topic, the announcement, the
+  header calendar, `/operations`, the wizard, the approval request, the archive, the staff log.
+- **An external (guest) operation's author can be typed** (`author_name`, at most 100 characters): someone of the
+  host group who isn't on this server. The panel's *Author* (guest only); shown before the person in the info and the
+  archive. Organiser rights stay with the creator and the co-organisers.
+- **Zeus and training operations have specialist roles** (`specialist_roles`: `[{name, limit}]`, at most 10, names
+  unique): the panel's *Specialist roles*, one per line, `Medic x3` for at most 3 (`ui.parse_roles`). A member comes
+  *as* one: the persistent list `coming:<op>` (`RoleList`) under the Coming list, a role or *No specialist role*;
+  coming already, it changes the role (`answer(..., "coming", role)`, queueable like the other answers). The list
+  shows each role with its people and limit, then *Others coming* and *Not coming*. Refusals: `role_full`,
+  `unknown_role`, `bad_roles`. The supervisor keeps the role on the sign-up, counts the limit in the same locked step
+  as the operation's, and drops a role that an edit removed.
+- **The supervisor says *played preset*** for what its code and API still call `climate` (the bot already did).
+- **Other groups have details** in the supervisor (logo, notes, member count, TFAR / ACRE, language, contact point,
+  representatives from the Discord server, listed only). The contract is synced; the bot shows none of it yet (its
+  *New group* still sends the acronym and name).
+- **The supervisor draws the ORBAT as a diagram** (its *As built*, *ORBAT diagram*): a squad line may name the squad
+  it is under and its NATO symbol, `# 1st Plt < A Coy {inf plt}`, and each squad of `orbat` carries `parent`,
+  `unit_type` and `size`. Only the app draws it. The text pasted on Discord passes through unchanged; the bot leaves a
+  squad without slots (a headquarters only holding the tree) out of its ORBAT messages and the organisers' squad
+  picker. The fake supervisor reads the marks without checking them.
+
+### Operation tweaks II (2026-11-23)
+
+Asked by the owner, with the supervisor's matching change (its *As built*, *A base per kind, Zeus maps, other groups'
+squads*).
+
+- **A base profile per kind** is the supervisor's setting (e.g. internal: the mission template, Zeus: the standard
+  one, training: another chosen in the app). Nothing changes in the bot: the server and the base stay set in the app.
+- **Zeus and training take a map, not a preset and a mission.** They play their base profile's mods and mission; the
+  panel's *Map* (`my.actions` has `map` in place of `preset` / `mission`) picks one from the supervisor's Zeus maps
+  list (`meta.zeus_maps`, read when pressed) or none (`ui.MapPicker`, a patch of `zeus_map` with `If-Match`,
+  queueable as any detail). A map is one mod (and its Zeus mission). The info shows *Map*. `/operation preset |
+  mission` on one are refused (`wrong_kind`). The supervisor makes their launcher preset for the players (the base's
+  mods and the map's, `files.preset` with `generated`), which the bot draws as any preset: the channel offers it to
+  download and the info's *Modset* counts it.
+- **Other groups' squads** (external and hosted operations): a squad written `# Name @ACR` belongs to that other
+  group, which fills it in its own sign-up. The squad comes with `group`; the ORBAT message draws it with "*ACR signs
+  up for it on its own*" and its slots without holders (shown even without slots), the header counts them apart
+  (`slots.other`), and the squad lists and the organisers' slot tools leave it out (`render.ours()`). Pressing one
+  anyway: `other_group`.
+- The fake supervisor mirrors them (`State.zeus_maps`, `standard_preset` and `zeus_preset()`: the standard preset under its uploaded name, or none, `zeus_map`, `@ACR` in
+  `set_orbat`, `other_group`).
+- Tests: `tests/test_signup.py::test_squads_other_groups_fill_show_without_a_sign_up`,
+  `tests/test_organise.py::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission`.
+
+### A Zeus operation's minimum (2026-11-23)
+
+Asked by the owner, with the supervisor's matching change (its *As built*, *A Zeus operation's minimum*). Zeus only,
+not training.
+
+- **Sign-up closes** at `render.closes(op)`: a Zeus operation's `signup_closes_at`, else the start. `phase()`, the
+  info's sign-up state, the "closes ..." line and the scheduled redraw (`CLOSE_KIND`) follow it, so the buttons go
+  off then.
+- **The panel's *Minimum to go ahead*** (Zeus, `MinimumModal`): when sign-up closes (dd.mm and time; empty: at the
+  start), the players needed, and a select *Tell the organisers* / *Cancel it automatically*. A specialist role's own
+  minimum is typed with the roles: `Medic 1-3` (at least 1, at most 3), `Medic 1+` (`ui.parse_roles`,
+  `render.roles_text`).
+- **The list** shows the minimum under the header (`render.requirements_line`: ⏳ what is still needed, "else it is
+  cancelled" with the switch; ✅ reached; ⚠ closed short, the organisers decide; ❌ cancelled) and each role's
+  `min` (`render.shortfall` words the missing).
+- **Notices:** `requirements_missed` pings the organisers in the thread (go ahead or cancel in the panel); a
+  `cancelled` notice with `missing` is worded "cancelled: when sign-up closed it still needed ...". The staff log
+  words `operation.requirements_missed` and the new details. Refusals: `closes_after_start`,
+  `closes_before_opening`, `bad_minimum`.
+- The fake supervisor mirrors it (`closes()`, `requirements()`, `check_requirements()`).
+- Tests: `tests/test_signup.py::test_a_zeus_operations_minimum_shows_and_is_told_when_sign_up_closes`,
+  `tests/test_organise.py::test_a_zeus_operations_minimum_is_set_in_the_panel`.
+
+### Operation tweaks III (2026-11-24)
+
+Asked by the owner (grilled 2026-11-24), with the supervisor's matching change (its `docs/PLAN-operation-server.md`,
+decisions and *As built*). It reverses *Server control from Discord: removed* for one operation's own server, in
+its window.
+
+Decided:
+
+- **A standard preset for Zeus and training:** staff upload **one** launcher preset (the group's "standard" modset)
+  in the app, shared by both kinds; such an operation offers that file instead of the generated `<base> + <map>`
+  one, whatever its base profile (none uploaded: the generated one, as before). The map comes separately, as a
+  **link to its Steam Workshop page**. The server still loads the base's mods plus the map's.
+- **The server doesn't start on its own**, for every kind. The hold still runs on schedule (quiet period, countdown,
+  other servers stopped, jobs held), so the host stays free; only the event server's start waits for an organiser.
+- **Start / Stop / Restart** for the operation's organisers (and `operations.manage`) while the window is under
+  way, as act-as calls. Stop only stops the server: the window goes on and Start works again; Restart picks up a
+  changed map or profile; ending the operation stays *End now*. With players connected, Stop and Restart ask first,
+  then act at once. At the window's end the server is left running, as before.
+- **A reminder at the assembly:** if the server is still stopped then, the organisers are pinged in the thread with
+  *Start server*.
+- Assumed: a guest operation (no server) has none of it; a map of the game or a Creator DLC (no mod) has no
+  Workshop link; `api_level` stays 2 (both projects ship together at the merge), the bot requires the new
+  capability `operation_server`.
+
+As built:
+
+- **The map's link:** the supervisor's `zeus_map.mod.workshop_id`; the info's *Map* (`render.map_value`) is the name
+  linked to `steamcommunity.com/sharedfiles/filedetails/?id=…` with "Subscribe to the map in the Steam Workshop."
+  under it. The standard preset needs nothing of the bot: it comes as `files.preset` (`generated`, `standard`) and is
+  drawn as any preset.
+- **The server's state:** `window.server_state` (`{state: stopped | starting | running | stopping, profile}`, null
+  outside the window); each change of it is a feed change (`changed_fields: ["server"]`), so the info redraws. The
+  info's *Server* field (`render.server_line`: ⚪ stopped, the organisers start it; 🟡 starting / stopping; 🟢
+  running, "another profile than the operation's" when so) shows while it is published and the window is under way.
+- **The panel's *Server*** (first among the sections, when `my.actions` has `server`): the state and what can be
+  done now (`ui.server_text`, `server_view`): *Start server* while stopped, *Restart server* and *Stop server* while
+  it runs, nothing while it starts or stops. The buttons are the persistent `ServerAction`
+  (`operation:server:<op>:<start|stop|restart>`); `ui.control_server` makes the act-as call
+  (`SupervisorClient.operation_server`, `POST /api/operations/{id}/server`, a 180 s timeout for a graceful restart;
+  **not queued**: wanted now or not at all); on 409 `players_on` it asks "N players are on the server. Stop it
+  anyway?" with `ConfirmServer`, which sends it again with `confirm`. Refusals in words: `not_in_window`,
+  `no_server`, `busy`, `players_on`, `start_failed` (with the supervisor's reason).
+- **The reminder:** `SERVER_KIND` (`server_reminder:<op>`) at the assembly for a published operation with a server
+  (`OperationChannels._schedule`); `_server_action` reads the operation fresh (the state moves outside the
+  organisers' edits), looks again a minute later while the window hasn't begun, pings the organisers
+  (`render.organisers`) in the thread with *Start server* when it is still stopped, and does nothing from the start
+  on, when it runs, or when the operation is gone.
+- **The staff log** words the supervisor's `operation.server` ("{by} started / restarted / stopped the server of …",
+  with the players connected when it was confirmed) and `operation.server_failed`.
+- The fake supervisor mirrors it (`window_active()`, `server_state()`, `server_running` / `players` on an
+  operation, the route, `standard_preset`); the Discord fakes close the files they "sent", as discord.py does (on
+  Windows the redraw couldn't otherwise replace a preset it drew).
+- Tests: `tests/test_organise.py::test_the_organisers_start_and_stop_the_server_in_the_window`,
+  `::test_the_organisers_hear_at_the_assembly_when_the_server_is_still_stopped`,
+  `::test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission` (the link, the standard preset),
+  `tests/test_activity.py::test_the_operations_server_by_hand`.
+
+### Operation tweaks IV (2026-11-24)
+
+Asked by the owner, with the supervisor's matching change (its `docs/PLAN-operation-server.md`, part II).
+
+- **A window touches only its own server.** *Hold the host* is gone in the supervisor (no other server stops or is
+  blocked, operations clash only on the same server); jobs not for an operation under way wait for its end, its own
+  go first. The bot loses the panel's *Hold the host* toggle and its "host requested" line (an old button answers
+  "from an older version"); the supervisor's `hold` field is gone from the operation, `meta.defaults` and the bodies.
+- **A server per kind** (`operations.event_server_<kind>` in the supervisor, e.g. server-1 for internal and hosted,
+  server-2 for Zeus and training): the wizard needs nothing, the supervisor picks it from the kind. The info embed
+  now always names the operation's **server** (each kind may have its own), with its state under it while the
+  window is under way.
+- The fake supervisor drops `hold`. Tests: `tests/test_organise.py` (the panel's sections, the old *hold* button,
+  the server field).
+
 ### Next
 
 The rest of phase 6, which needs the owner: the test instance against a scratch supervisor (its own checkout and data
@@ -593,6 +747,6 @@ folder, `tests/fake_server.py` as the Arma executable, the test Discord server a
 
 ## Not in this plan
 
-- Server control from Discord.
+- Server control from Discord, beyond an operation's own server in its window (*Operation tweaks III*).
 - Staff management of Steam links and squad.xml on Discord (the app does it).
 - Any data or rule the supervisor owns, and any fallback for a supervisor without the operations API.

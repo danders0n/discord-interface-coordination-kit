@@ -41,7 +41,8 @@ def request_message(request: dict[str, Any], language: Any, channel_id: int | No
     title = render.plain(op.get("title") or request.get("title") or "?")
     embed = discord.Embed(title=f"{asked(request.get('kind', ''), language)}: {title}"[:256],
                           colour=COLOURS.get(state, 0x95A5A6))
-    embed.add_field(name=t("Kind", language), value=kind_name or op.get("kind") or "—")
+    kind = render.kind_name(op.get("kind") or "", kind_name, language) if op.get("kind") or kind_name else ""
+    embed.add_field(name=t("Kind", language), value=kind or "—")
     embed.add_field(name=t("Requested by", language), value=render.plain(request.get("requested_by") or "?"))
     if channel_id:
         embed.add_field(name=t("Channel", language), value=f"<#{channel_id}>")

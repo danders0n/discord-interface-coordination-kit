@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import HEADER
 from fakes import FakeAttachment, invoke
-from test_channel import row, run, stack  # noqa: F401  (stack: a fixture)
+from test_channel import at, row, run, stack  # noqa: F401  (stack: a fixture)
 from test_signup import ORBAT, OPORD, PUBLISH, acting, controls, front, moderation_thread, press, said  # noqa: F401
 
 from app.discord_util import on_modal_error
@@ -115,8 +115,8 @@ async def test_the_panel_shows_what_the_supervisor_allows(organise, guild, fake)
     text, view = said(opened), opened.replies[-1].kwargs["view"]
     assert text.startswith("**Ibis** · OP-1 · Draft\nStill missing: the OPORD's Situation, the OPORD's Mission.")
     sections = [custom_id.split(":")[-1] for custom_id in controls(view)]
-    assert sections == ["details", "choices", "opord", "orbat", "preset", "mission", "signup", "organisers", "hold",
-                        "autoend", "submit", "copy", "delete"]
+    assert sections == ["details", "choices", "opord", "orbat", "preset", "mission", "signup", "organisers",
+                        "autoend", "submit", "copy", "delete"]  # (no Hold the host any more)
     stranger = acting(organise, guild, 3)
     await press(PanelButton(op["id"]), stranger)
     assert said(stranger) == "The panel is for this operation's organisers."
@@ -186,15 +186,15 @@ async def test_a_publisher_publishes_and_a_button_no_longer_allowed_says_so(orga
     assert said(again) == "That can't be done now; open the panel again to see what can."
 
 
-async def test_co_organisers_hold_and_cancel(organise, guild, fake):
+async def test_co_organisers_and_cancel(organise, guild, fake):
     op = fake.operation("Ibis", status="published", opord=OPORD, author_person_id=1)
     pressed = await panel_press(organise, guild, 1, op["id"], "organisers")
     organisers = pressed.replies[-1].kwargs["view"]
     added = acting(organise, guild, 1)
     await organisers._change(added, [guild.members[3]], True)
     assert said(added) == "Saved." and fake.operations[op["id"]]["organisers"] == [3]
-    held = await panel_press(organise, guild, 1, op["id"], "hold")
-    assert said(held) == "The host is not held for this operation." and fake.operations[op["id"]]["hold"] == "off"
+    old = await panel_press(organise, guild, 1, op["id"], "hold")  # (a button from before: gone)
+    assert said(old) == "That button is from an older version; open the panel again."
     cancelled = await panel_press(organise, guild, 1, op["id"], "cancel")
     modal = modal_of(cancelled)
     submit(modal, text="Rain")
@@ -202,6 +202,194 @@ async def test_co_organisers_hold_and_cancel(organise, guild, fake):
     await modal.on_submit(done)
     assert said(done) == "Cancelled."
     assert (fake.operations[op["id"]]["status"], fake.operations[op["id"]]["cancel_reason"]) == ("cancelled", "Rain")
+
+
+async def test_a_zeus_operations_specialist_roles_and_a_guest_operations_author(organise, guild, fake):
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1, specialist_roles=[{"name": "Medic", "limit": 2}])
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "roles")
+    modal = modal_of(pressed)
+    assert modal.text.default == "Medic x2"
+    submit(modal, text="Command x1\n\n  Medic  \nPilot x0")
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved."
+    assert fake.operations[zeus["id"]]["specialist_roles"] == [
+        {"name": "Command", "limit": 1, "min": None}, {"name": "Medic", "limit": None, "min": None},
+        {"name": "Pilot", "limit": None, "min": None}]
+    guest = fake.operation("Theirs", kind="guest", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(guest["id"]), opened)
+    assert "author" in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    pressed = await panel_press(organise, guild, 1, guest["id"], "author")
+    modal = modal_of(pressed)
+    submit(modal, text=" Cpt. Smith ")
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved." and fake.operations[guest["id"]]["author_name"] == "Cpt. Smith"
+
+
+async def test_a_zeus_operation_picks_a_map_instead_of_a_preset_and_a_mission(organise, guild, fake):
+    """Zeus and training use their base profile's mods and mission; the panel's *Map* adds one from the
+    supervisor's Zeus maps list (its one mod and its Zeus mission), the info shows it as its Workshop link, and the
+    players get staff's standard preset, the file under its own name, to download in the channel (without one, no
+    preset: nothing is made up)."""
+    cup = {"id": 5, "name": "CUP Terrains", "workshop_id": "583496184"}
+    fake.zeus_maps = [{"id": 1, "name": "Tanoa", "mission": "zeus.Tanoa", "world": "Tanoa", "mod": cup, "mod_id": 5}]
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(zeus["id"]), opened)
+    sections = [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    assert "map" in sections and "preset" not in sections and "mission" not in sections
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "map")
+    assert said(pressed).startswith("Map: none (the base profile's own mission)")
+    picker = pressed.replies[-1].kwargs["view"]
+    assert [o.label for o in picker.children[0].options] == ["None: the base profile's own mission", "Tanoa"]
+    chose = acting(organise, guild, 1)
+    await picker._chosen(chose, "Tanoa")
+    assert chose.original_edits[-1]["content"] == "Saved."
+    assert fake.operations[zeus["id"]]["zeus_map"]["mission"] == "zeus.Tanoa"
+    await run(organise)
+    channel = guild.get_channel((await row(organise, zeus["id"])).channel_id)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Mapa"] == ("[Tanoa](https://steamcommunity.com/sharedfiles/filedetails/?id=583496184)\n"
+                              "-# Zasubskrybuj mapę w Warsztacie Steam.")  # (its Workshop page: players subscribe)
+    assert "Modset" not in fields and "preset" not in (await row(organise, zeus["id"])).messages  # (no standard one)
+    # staff's standard preset: the file under the name it was uploaded with; the map stays a link
+    fake.standard_preset = {"name": "IBC Standard", "mods": [["463939057", "ACE"], ["450814997", "CBA_A3"]],
+                            "file": "IBC standard 2026.html"}
+    fake.zeus_preset(zeus["id"])
+    await run(organise)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Modset"] == "IBC Standard: 2 mody" and fields["Mapa"].startswith("[Tanoa](")
+    drawn = await row(organise, zeus["id"])
+    preset = channel.get_partial_message(drawn.messages["preset"])._find()
+    assert preset.content.endswith("## Modset do Arma 3 Launchera: IBC Standard")
+    assert preset.kwargs["files"][0].filename == "IBC standard 2026.html"
+    fake.standard_preset = None
+    again = await panel_press(organise, guild, 1, zeus["id"], "map")
+    assert said(again).startswith("Map: Tanoa")
+    none = acting(organise, guild, 1)
+    await again.replies[-1].kwargs["view"]._chosen(none, ui.NO_MAP)
+    assert fake.operations[zeus["id"]]["zeus_map"] is None
+    assert "preset" not in fake.operations[zeus["id"]]["files"]  # (the standard one is gone: none is made)
+    internal = fake.operation("Raid", author_person_id=1)
+    refused = await panel_press(organise, guild, 1, internal["id"], "map")
+    assert said(refused) == "That can't be done now; open the panel again to see what can."
+
+
+async def test_the_organisers_start_and_stop_the_server_in_the_window(organise, guild, fake, clock):
+    """The supervisor never starts an operation's server: in its window the panel's *Server* starts, restarts and
+    stops it (act-as), with players on it asks first; the info shows the state; outside the window there is none."""
+    op = fake.operation("Raid", status="published", author_person_id=1,
+                        assembly=clock.now + timedelta(hours=2))
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(op["id"]), opened)
+    assert "server" not in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]  # (not yet)
+    early = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "start"), early)  # an old button: the supervisor refuses
+    assert said(early) == "The server can be started and stopped only while the operation's window is under way."
+
+    at(clock, fake, clock.now + timedelta(hours=1, minutes=30))  # the window (assembly - 45 min) is under way
+    fake.change(op["id"], revision=False, note="")  # (the supervisor's ticker: the window's begin is in the feed)
+    await run(organise)
+    channel = guild.get_channel((await row(organise, op["id"])).channel_id)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Serwer"] == "Event\n⚪ Zatrzymany: uruchamiają go organizatorzy."  # (its server, and its state)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(op["id"]), opened)
+    assert [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])][0] == "server"  # first
+    pressed = await panel_press(organise, guild, 1, op["id"], "server")
+    assert said(pressed).startswith("⚪ Stopped: the organisers start it.")
+    assert list(controls(pressed.replies[-1].kwargs["view"])) == [f"operation:server:{op['id']}:start"]
+    started = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "start"), started)
+    assert said(started) == "The server is starting." and fake.operations[op["id"]]["server_running"] is True
+    assert ("POST", "/api/operations/{op_id}/server", "1") in fake.acted  # (in Anna's name)
+    await run(organise)
+    fields = {f.name: f.value for f in channel.messages[0].embeds[0].fields}
+    assert fields["Serwer"] == "Event\n🟢 Działa"
+    pressed = await panel_press(organise, guild, 1, op["id"], "server")
+    assert list(controls(pressed.replies[-1].kwargs["view"])) == [
+        f"operation:server:{op['id']}:restart", f"operation:server:{op['id']}:stop"]
+
+    fake.operations[op["id"]]["players"] = 4
+    stop = acting(organise, guild, 1)
+    await press(ui.ServerAction(op["id"], "stop"), stop)
+    assert said(stop) == "4 players are on the server. Stop it anyway?"
+    assert fake.operations[op["id"]]["server_running"] is True  # (not yet)
+    sure = acting(organise, guild, 1)
+    await stop.replies[-1].kwargs["view"]._go(sure)
+    assert sure.original_edits[-1]["content"] == "The server is stopped; the operation goes on."
+    assert fake.operations[op["id"]]["server_running"] is False
+    stranger = acting(organise, guild, 3)
+    await press(ui.ServerAction(op["id"], "start"), stranger)
+    assert said(stranger) == "You don't have the permission for this."
+
+
+async def test_the_organisers_hear_at_the_assembly_when_the_server_is_still_stopped(organise, guild, fake, clock):
+    """At the assembly the organisers are pinged in the thread with *Start server* if the server is still stopped;
+    not when it runs, nor after the start."""
+    op = fake.operation("Raid", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    thread = guild.get_thread((await row(organise, op["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, op["assembly_at"])
+    await organise.scheduler.run_due()
+    ping = thread.sent[-1]
+    assert len(thread.sent) == before + 1 and ping.content.startswith(
+        "Serwer operacji Raid jest wciąż zatrzymany") and "<@1>" in ping.content
+    assert list(controls(ping.view)) == [f"operation:server:{op['id']}:start"]
+
+    running = fake.operation("Night", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    fake.operations[running["id"]]["server_running"] = True
+    thread = guild.get_thread((await row(organise, running["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, running["assembly_at"])
+    await organise.scheduler.run_due()
+    assert len(thread.sent) == before  # (running: nothing to say)
+
+    late = fake.operation("Late", status="published", author_person_id=1, assembly=clock.now + timedelta(hours=2))
+    await run(organise)
+    thread = guild.get_thread((await row(organise, late["id"])).thread_id)
+    before = len(thread.sent)
+    at(clock, fake, late["start_at"] + timedelta(minutes=5))  # (the bot was away at the assembly)
+    await organise.scheduler.run_due()
+    assert len(thread.sent) == before  # (after the start: no use any more)
+
+
+async def test_a_zeus_operations_minimum_is_set_in_the_panel(organise, guild, fake, clock):
+    """*Minimum to go ahead* (Zeus only): when sign-up closes, how many must come, cancel or tell when short; a
+    role's own minimum is typed with the roles (``Medic 1-3``)."""
+    zeus = fake.operation("Night", kind="zeus", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(zeus["id"]), opened)
+    assert "minimum" in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
+    pressed = await panel_press(organise, guild, 1, zeus["id"], "minimum")
+    modal = modal_of(pressed)
+    submit(modal, date="x", time="18:00", players="4")
+    wrong = acting(organise, guild, 1)
+    await modal.on_submit(wrong)
+    assert said(wrong).startswith("Type the date")  # (the date's own words)
+    closes = zeus["assembly_at"].astimezone(organise.settings.tz) - timedelta(hours=2)
+    submit(modal, date=f"{closes:%d.%m}", time=f"{closes:%H:%M}", players="4")
+    modal.auto._values = ["yes"]
+    saved = acting(organise, guild, 1)
+    await modal.on_submit(saved)
+    assert said(saved) == "Saved."
+    op = fake.operations[zeus["id"]]
+    assert (op["min_players"], op["auto_cancel"]) == (4, True) and op["signup_closes_at"] == closes.astimezone(UTC)
+    roles = await panel_press(organise, guild, 1, zeus["id"], "roles")
+    modal = modal_of(roles)
+    submit(modal, text="Medic 1-3\nPilot 2+\nCommand x1")
+    await modal.on_submit(acting(organise, guild, 1))
+    assert fake.operations[zeus["id"]]["specialist_roles"] == [
+        {"name": "Medic", "limit": 3, "min": 1}, {"name": "Pilot", "limit": None, "min": 2},
+        {"name": "Command", "limit": 1, "min": None}]
+    training = fake.operation("Drill", kind="training", author_person_id=1)
+    opened = acting(organise, guild, 1)
+    await press(PanelButton(training["id"]), opened)
+    assert "minimum" not in [c.split(":")[-1] for c in controls(opened.replies[-1].kwargs["view"])]
 
 
 async def test_a_draft_is_deleted_after_a_confirmation(organise, guild, fake):
@@ -273,6 +461,9 @@ async def test_an_organiser_assigns_a_member_to_a_slot(organise, guild, fake):
     assert said(done) == "Saved."
     slot = fake.slot(fake.operations[op["id"]], lead)
     assert (slot["holder"], slot["locked"]) == (fake.persons["3"]["id"], True)
+    fake.set_orbat(op["id"], "# HQ {hq}\n" + ORBAT.replace("# Alpha", "# Alpha < HQ"))
+    tools = SlotTools(acting(organise, guild, 1), fake.out(fake.operations[op["id"]], fake.persons["1"]))
+    assert "HQ" not in [option.label for option in tools.children[0].options]  # (a squad without slots: nothing to pick)
 
 
 # ---------------------------------------------------------------- files and the list

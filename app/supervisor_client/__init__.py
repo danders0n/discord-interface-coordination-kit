@@ -18,6 +18,8 @@ from app.supervisor_client.sse import SseParser, StreamEvent
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=600)  # a mission of a few hundred MB, on the same machine
+SERVER_TIMEOUT = aiohttp.ClientTimeout(total=180)  # an operation's server: a graceful stop, then a start
+SERVER_ACTIONS = ("start", "stop", "restart")
 # The stream sends a keep-alive every 15 s: a minute of silence means the connection is dead.
 STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
 ACT_AS_HEADER = "X-Act-As"
@@ -285,10 +287,11 @@ class SupervisorClient:
         """Take the slot if it is still free (one atomic update), moving from the member's other place."""
         return await self.request("POST", f"/api/operations/{int(op_id)}/slots/{int(slot_id)}/take", act_as=act_as)
 
-    async def answer(self, act_as: int, op_id: int, status: str) -> dict[str, Any]:
-        """``maybe``, ``cant``, ``reserve`` or ``coming`` (Zeus and training)."""
-        return await self.request("PUT", f"/api/operations/{int(op_id)}/signup", act_as=act_as,
-                                  json={"status": status})
+    async def answer(self, act_as: int, op_id: int, status: str, role: str | None = None) -> dict[str, Any]:
+        """``maybe``, ``cant``, ``reserve`` or ``coming`` (Zeus and training), the last as one of the operation's
+        specialist roles (``role``; coming already, it changes the role)."""
+        body: dict[str, Any] = {"status": status} | ({"role": role} if role else {})
+        return await self.request("PUT", f"/api/operations/{int(op_id)}/signup", act_as=act_as, json=body)
 
     async def leave(self, act_as: int, op_id: int) -> dict[str, Any]:
         """Off the member's slot and every list."""
@@ -426,6 +429,14 @@ class SupervisorClient:
     async def end_operation(self, act_as: int, op_id: int) -> dict[str, Any]:
         """*End operation* (its organisers, after the start): the attendance is read shortly after."""
         return await self.request("POST", f"/api/operations/{int(op_id)}/end", act_as=act_as)
+
+    async def operation_server(self, act_as: int, op_id: int, action: str, confirm: bool = False) -> dict[str, Any]:
+        """Start, stop or restart the operation's server while its window is under way (its organisers; the window
+        never starts it). With players connected a stop or restart is 409 ``players_on`` (``players``) unless
+        ``confirm``. Not queued: it is wanted now or not at all."""
+        assert action in SERVER_ACTIONS
+        return await self.request("POST", f"/api/operations/{int(op_id)}/server", act_as=act_as,
+                                  json={"action": action, "confirm": confirm}, timeout=SERVER_TIMEOUT)
 
     async def correct_attendance(self, act_as: int, op_id: int, person_ids: list[int], status: str) -> dict[str, Any]:
         """``attended``, ``no_show`` or ``excused`` for these persons (one missing from the report is added)."""

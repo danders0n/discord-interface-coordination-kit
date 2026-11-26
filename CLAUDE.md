@@ -18,7 +18,8 @@ The supervisor is a separate project at `D:\Workspace\python\arma-server-supervi
 and `docs/PLAN-operations.md` (*As built*) before touching the integration.
 
 Status: the old stand-alone bot of [docs/PLAN.md](docs/PLAN.md) is on `master`. On `feature/front-end` the front end
-is built: steps 1–7, the plan's phases 1–5, tested against the fake supervisor; so is the remote update with the
+is built: steps 1–7, the plan's phases 1–5 and the operation tweaks (I–IV: III is the standard preset, the map's
+Workshop link and the organisers' Start / Stop of the operation's server; IV: no *Hold the host*, a server per kind), tested against the fake supervisor; so is the remote update with the
 two apps watching each other and the queue of members' actions ([docs/PLAN-remote-update.md](docs/PLAN-remote-update.md),
 steps 1–7, end to end without Discord; the supervisor's part is its `docs/PLAN-bot-health.md`). Next is phase 6, the release: a test
 instance against a scratch supervisor, then the merge (*As built*, *Next* in the front-end plan). `docs/PLAN.md` stays
@@ -102,13 +103,20 @@ exactly the settings.
   out; for the wizard), `words.py` (the supervisor's operation refusal codes in words, used by
   `discord_util.supervisor_words`; typed-time problems), `ui.py` (the wizard: `CreateOperation`, `Choices`,
   `DetailsModal`, `expired()`; the panel: `PanelButton`, `PanelAction` per section from `my.actions`, `write()` with
-  `If-Match` and *Reopen* on `stale`), `files.py` (the preset and mission uploads shared by the commands and the
+  `If-Match` and *Reopen* on `stale`; `MapPicker`: zeus / training's map from `meta.zeus_maps`, in place of a preset
+  and a mission; the panel's *Server* in the window: `server_view`, the persistent `ServerAction`
+  `operation:server:<op>:<action>`, `control_server()` asking on `players_on` with `ConfirmServer`; the supervisor
+  never starts an operation's server), `files.py` (the preset and mission uploads shared by the commands and the
   panel's *Preset* / *Mission* modals with a `FileUpload` field), `orbat_ui.py` (`OrbatTools`, `TemplateTools`, `SlotTools`), `cog.py`
   (`/operation preset | image | mission`, `/operations`).
 - `app/channel/`: `render.py` (pure: the operation JSON -> `Message`s keyed `info` (embed), the OPORD paragraphs
   `situation` ... `command` (each `[:N]`, split by `texts()` at 2000 characters), `preset`, `orbat:0` ... (the ORBAT,
-  or Zeus / training's Coming list; `phase(op, now)` is the sign-up state from the times), `discussion` (the thread
-  link, last); `organisers(op)` gives the Discord ids), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
+  or Zeus / training's Coming list, by specialist role when it has some; another group's squad (`# Name @ACR`,
+  guest / hosted: `theirs()`) is drawn without holders and left out of the pickers, `ours()`; `phase(op, now)` is the
+  sign-up state from the times, closing at `closes(op)`: a Zeus operation's `signup_closes_at`, else the start;
+  `requirements_line()`: a Zeus operation's minimum to go ahead; `map_value()`: the map linked to its Steam Workshop
+  page; the info's *Server*: the operation's server, with `server_line()` (`window.server_state`) under it in the window), `discussion` (the thread link, last); `organisers(op)` gives the Discord ids; `op_kind` / `kind_name`:
+  the kind in the language, a name the supervisor's admin chose as it is), `sync.py` (keeps them in order: edit in place only what changed, by `fingerprint` in `operation_channel.drawn`
   (Discord caps edits of old messages); `Pacer` spaces edits of messages older than an hour per channel, so Discord
   never answers 429; a deleted message's fingerprint is dropped so it is posted again; append /
   delete continuations, re-post what follows a message that must go before it, or one deleted by hand; edits always
@@ -116,11 +124,17 @@ exactly the settings.
   rest, then the operations by start; one bulk position request, only when the order differs), `service.py`
   (`OperationChannels`: `apply(op)` / `gone(id)` from the feed; a redraw converges on the operation: the channel, the
   overwrites (organisers and `meta`'s staff roles), the messages, the thread at publishing (Discord's card last,
-  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the reminders, the archive by
+  stored as `card`), the plumbing back, the announcement, the rename, the sign-up ping, the reminders, at the assembly the organisers'
+  *Start server* ping while the server is stopped (`SERVER_KIND`, read fresh), the archive by
   quarter; batched via `Redrawer`, `sorter` for the order; `refresh_all` after a restart; the sign-up buttons on the
   last ORBAT message; `ping()` in the thread (a draft: DMs); `by_channel()`; `watchers` hear `changed(op)` /
-  `gone(id)`). `EventBot.build_operations` wires channels, header and feed.
-- `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, the private `SlotPicker`, `act()`:
+  `gone(id)`), `guard.py` (`BOT_EVENTS__DELETE_MESSAGES`, off by default: whatever someone writes in an operation's
+  channel, organisers too, not its thread, is deleted and its author told by DM, `delete_notice`, their text quoted, with `delete_sticker` (an id, or a server sticker's name) or, when no sticker
+  goes (none, not found, refused), `delete_sticker_image` in an embed;
+  `EventBot.on_message`; the start-up check then wants Manage Messages). `EventBot.build_operations` wires channels,
+  header and feed.
+- `app/signup/`: `ui.py` (persistent `SquadList` / `SignupAction` / `OfferAction`, Zeus and training's
+  `RoleList` (`coming:<op>`: Coming as a specialist role), the private `SlotPicker`, `act()`:
   an act-as call through `Roster.as_member`), `cog.py` (`/slot take | leave`), `offers.py` (`Offers`: the `offer`
   notice by DM or thread, `delivered`, the message closed when the offer ends; table `offer_message`).
 - `app/approval/`: `ui.py` (the request embed, `ApprovalAction`, `RejectModal`), `moderation.py` (`Moderation`: the
@@ -191,13 +205,14 @@ These rules span many features; read them before writing any handler.
 - **Nothing typed goes into a supervisor URL unchecked.** Autocomplete only suggests, and the client quotes every
   outside path segment (`_segment`).
 - **Every button survives a restart:** persistent `DynamicItem`s with ids in `custom_id` (`operation:create`,
-  `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `offer:<op>:<offer>:`, `approval:`,
+  `operation:panel:<op>`, `operation:act:<op>:<section>`, `signup:`, `squad:`, `coming:`, `offer:<op>:<offer>:`, `approval:`,
   `attendance:`, `link:now`). Private pickers and the wizard live in memory for 15 minutes. Every `DynamicItem`'s
   `callback` carries `@answers` (`discord_util`): discord.py only logs what it raises and never calls
   `View.on_error`, so without it a refusal leaves the member unanswered (a test enforces it).
 - **The operation channel is a set of bot-owned messages** (info, the OPORD paragraphs, preset, ORBAT, report, the
   thread link last), kept in order and edited in place by stored message ids; redraws are batched. Members talk in the
-  thread, and **every ping goes to the thread** too (a draft has none: DMs); the channel is read-only for members.
+  thread, and **every ping goes to the thread** too (a draft has none: DMs), except the **reminders**, which go to the
+  channel under its messages (the bot's own, outside the stored ids); the channel is read-only for members.
 - **Times** are typed in the config time zone, sent to the supervisor zone-aware (it reads naive times as its own
   local time), and shown as Discord timestamps.
 - **Naming:** *operation* in code, commands and texts (Polish *operacja*, feminine), as in the supervisor. The

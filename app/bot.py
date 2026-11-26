@@ -22,6 +22,7 @@ from app.attendance.cog import AttendanceCog
 from app.attendance.ui import ReportAction
 from app.archive.export import Exporter
 from app.archive.service import ArchiveService
+from app.channel.guard import guard
 from app.channel.service import OperationChannels
 from app.discord_util import NO_MENTIONS, install_error_handlers, on_app_command_error
 from app.i18n import Translator, t
@@ -36,7 +37,7 @@ from app.notices.service import Notices
 from app.operations.feed import Feed
 from app.operations.cog import OperationCog
 from app.operations.header import Header
-from app.operations.ui import CreateOperation, PanelAction, PanelButton, expired
+from app.operations.ui import CreateOperation, PanelAction, PanelButton, ServerAction, expired
 from app.privacy.cog import PrivacyCog
 from app.queued.service import Queue
 from app.queued.ui import Teller
@@ -46,7 +47,7 @@ from app.roster.service import Roster
 from app.services import Services
 from app.signup.cog import SlotCog
 from app.signup.offers import Offers
-from app.signup.ui import OfferAction, SignupAction, SquadList
+from app.signup.ui import OfferAction, RoleList, SignupAction, SquadList
 from app.staff_threads import KINDS
 from app.supervisor_client import SupervisorUnreachable
 from app.update.cog import UpdateButton, UpdateCog
@@ -224,6 +225,11 @@ class EventBot(commands.Bot):
             if member is not None:
                 await self.services.roster.member_changed(member)
 
+    async def on_message(self, message: discord.Message) -> None:
+        """Someone wrote in an operation's channel: deleted and told, when that is switched on (app/channel/guard.py)."""
+        if not await guard(message, self.services.settings, self.services.channels):
+            await self.process_commands(message)
+
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
         """One of the bot's messages deleted by hand: an operation channel posts it again (app/channel/sync.py)."""
         if payload.guild_id == self.services.settings.guild_id and self.services.channels is not None:
@@ -241,8 +247,9 @@ class EventBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.tree.set_translator(Translator())
-        self.add_dynamic_items(LinkNow, SignupAction, SquadList, OfferAction, ApprovalAction, CreateOperation,
-                               PanelButton, PanelAction, ReportAction, UpdateButton)  # outlive a restart
+        self.add_dynamic_items(LinkNow, SignupAction, SquadList, RoleList, OfferAction, ApprovalAction,
+                               CreateOperation, PanelButton, PanelAction, ServerAction, ReportAction,
+                               UpdateButton)  # outlive a restart
         self.tree.on_error = on_app_command_error
         install_error_handlers()
         for cog in (AdminCog(self.services), PrivacyCog(self.services), LinkCog(self.services),

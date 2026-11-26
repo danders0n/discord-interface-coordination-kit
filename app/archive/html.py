@@ -15,7 +15,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from app.channel.render import PARAGRAPHS, heading, when
+from app.channel.render import PARAGRAPHS, heading, op_kind, when
 from app.i18n import t
 
 MODES = ("inline", "zip", "listed")
@@ -51,10 +51,11 @@ def render(op: dict[str, Any], messages: list, mode: str, language: str, tz: tzi
     parts = [f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_text(op['title'])}</title>"
              f"<style>{STYLE}</style></head><body>",
              f"<h1>{_text(op['title'])}</h1>",
-             f"<p class=\"meta\">{_text(op.get('kind_name') or op['kind'])} · {t('Assembly', language)} "
+             f"<p class=\"meta\">{_text(op_kind(op, language))} · {t('Assembly', language)} "
              f"{local(when(op, 'assembly_at'))} · {t('Start', language)} {local(when(op, 'start_at'))} · "
              f"{op['duration_minutes']} min · {t('Author', language)}: "
-             f"{_text(author.get('display_name') or author.get('username') or '—')}</p>"]
+             f"{_text((op.get('author_name') or '').strip() or author.get('display_name') or author.get('username') or '—')}"
+             "</p>"]
     if op["status"] == "cancelled":
         parts.append(f"<p><strong>{t('CANCELLED', language)}</strong>: {_text(op.get('cancel_reason') or '')}</p>")
     written = [(p, (op.get("opord") or {}).get(p)) for p in PARAGRAPHS]

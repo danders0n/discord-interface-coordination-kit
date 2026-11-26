@@ -18,7 +18,7 @@ from app.notices.service import Notices
 from app.roster.service import Roster
 from app.signup.cog import SlotCog
 from app.signup.offers import Offers
-from app.signup.ui import OfferAction, SignupAction, SquadList
+from app.signup.ui import OfferAction, RoleList, SignupAction, SquadList
 
 SIGNUP, APPROVE, PUBLISH = "operations.signup", "operations.approve", "operations.publish"
 ORBAT = "# Alpha\nLead\nRifleman x2\n# Bravo\nMedic"
@@ -102,6 +102,39 @@ async def test_a_draft_shows_its_orbat_without_buttons(front, guild, fake):
     assert orbat.view is None
 
 
+async def test_a_headquarters_without_slots_is_left_out_of_the_list(front, guild, fake):
+    """The supervisor's diagram may have a squad that only holds others (``< Parent``); Discord lists slots only."""
+    op = fake.operation("Ibis")
+    fake.set_orbat(op["id"], "# TF Aegis {hq bn}\n# Alpha < TF Aegis {inf sqd}\nLead\n")
+    assert [(s["name"], s["parent"] is not None, s["unit_type"]) for s in fake.operations[op["id"]]["squads"]] == [
+        ("TF Aegis", False, "hq"), ("Alpha", True, "inf")]
+    await run(front)
+    channel = await channel_of(front, guild, op)
+    orbat = channel.get_partial_message((await row(front, op["id"])).messages["orbat:0"])._find()
+    assert "**Alpha**" in orbat.text and "TF Aegis" not in orbat.text
+
+
+async def test_squads_other_groups_fill_show_without_a_sign_up(front, guild, fake):
+    """An external (or hosted) operation's ORBAT may give squads to other groups (``# Name @ACR``): they sign up on
+    their own, so the squad shows its slots without holders, counts apart, and isn't offered in the lists."""
+    fake.groups = [{"id": 7, "acronym": "3RD", "name": "3rd Rangers"}]
+    op = published(fake, kind="guest", host_group_id=7, how_to_join="ts3",
+                   orbat="# Ours\nLead\n# Theirs < Ours @3rd\nSL\nRifleman x2\n# Platoon HQ @3RD\n")
+    assert [s["name"] for s in fake.operations[op["id"]]["squads"]] == ["Ours", "Theirs", "Platoon HQ"]
+    await run(front)
+    channel = await channel_of(front, guild, op)
+    board = "\n".join(texts(channel))
+    assert "**Theirs** · *3RD zapisuje się na nią u siebie*\n`1.` SL\n`2.` Rifleman\n`3.` Rifleman" in board
+    assert "**Platoon HQ** · *3RD zapisuje się na nią u siebie*" in board  # (no slots written: still shown)
+    assert "Zajęte sloty: **0/1**" in board and "inne grupy: 3" in board
+    squads = controls(channel.messages[-2].view)[f"squad:{op['id']}:0"]
+    assert [o.label for o in squads.options] == ["Ours"]
+    taken = acting(front, guild, 3, channel.id)
+    cog = SlotCog(front)
+    await invoke(cog.take, cog, taken, slot=str(slots(fake, op)["Theirs/SL"]))
+    assert said(taken) == "Another group fills that squad in its own sign-up."
+
+
 async def test_a_press_and_a_sign_up_in_the_app_both_show_and_a_taken_slot_is_refused(front, guild, fake):
     op = published(fake)
     ids = slots(fake, op)
@@ -166,6 +199,75 @@ async def test_a_zeus_operation_counts_coming_and_turns_coming_off_when_full(fro
     late = acting(front, guild, 2)
     await press(SignupAction(op["id"], "coming"), late)
     assert said(late) == "The operation is full."
+
+
+async def test_a_zeus_operation_lists_coming_by_specialist_role(front, guild, fake):
+    roles = [{"name": "Command", "limit": 1}, {"name": "Medic", "limit": None}]
+    op = published(fake, kind="zeus", orbat="", specialist_roles=roles)
+    await run(front)
+    anna = acting(front, guild, 1)
+    anna.data = {"values": ["Command"]}
+    await press(RoleList(op["id"]), anna)
+    assert said(anna) == "You are coming as Command. See you there!"
+    bob = acting(front, guild, 2)
+    bob.data = {"values": ["Command"]}
+    await press(RoleList(op["id"]), bob)
+    assert said(bob) == "That specialist role is full."
+    await press(SignupAction(op["id"], "coming"), acting(front, guild, 2))  # (Coming without a role still works)
+    await run(front)
+    channel = await channel_of(front, guild, op)
+    board = "\n".join(texts(channel))
+    assert "**Command** (1/1)\n<@1>" in board and "**Medic** (0)\n—" in board and "**Pozostali** (1)\n<@2>" in board
+    picker = controls(channel.messages[-2].view)[f"coming:{op['id']}"]
+    assert [o.label for o in picker.options] == ["Command", "Medic", "Bez roli specjalisty"]
+    assert picker.options[0].description == "Pełna · 1/1"
+    medic = acting(front, guild, 2)
+    medic.data = {"values": ["Medic"]}
+    await press(RoleList(op["id"]), medic)  # coming already: the role changes
+    assert [e.get("role") for e in fake.operations[op["id"]]["signups"] if e["person_id"] == 2] == ["Medic"]
+
+
+async def test_a_zeus_operations_minimum_shows_and_is_told_when_sign_up_closes(front, guild, fake, clock):
+    """A Zeus operation's minimum to go ahead (players, a specialist role's ``min``) shows under its list while sign-up
+    is open; when it closes short, the organisers are pinged, or with ``auto_cancel`` those coming hear it is
+    cancelled and why."""
+    closes = clock.now + timedelta(days=1)
+    told = published(fake, "Night", kind="zeus", orbat="", min_players=2, signup_closes_at=closes,
+                     specialist_roles=[{"name": "Medic", "limit": 2, "min": 1}])
+    gone = published(fake, "Short", kind="zeus", orbat="", min_players=2, auto_cancel=True, signup_closes_at=closes)
+    await run(front)
+    board = "\n".join(texts(await channel_of(front, guild, told)))
+    assert "⏳ Do odbycia się operacji brakuje: jeszcze 2 graczy, jeszcze Medic: 1" in board
+    assert "**Medic** (0/2, min. 1)" in board and f"zamknięcie <t:{int(closes.timestamp())}:f>" in board
+    short = "\n".join(texts(await channel_of(front, guild, gone)))
+    assert "(inaczej zostanie odwołana przy zamknięciu zapisów)" in short
+    await press(SignupAction(gone["id"], "coming"), acting(front, guild, 2))
+
+    at(clock, fake, closes + timedelta(minutes=1))  # sign-up has closed
+    late = acting(front, guild, 3)
+    await press(SignupAction(told["id"], "coming"), late)
+    assert said(late) == "Sign-up has closed."
+    fake.check_requirements()
+    await front.notices.run_once()
+    thread = guild.get_thread((await row(front, told["id"])).thread_id)
+    assert thread.sent[-1].text.startswith("Zapisy na Night zamknęły się bez minimum: brakuje: jeszcze 2 graczy, "
+                                           "jeszcze Medic: 1.") and "<@1>" in thread.sent[-1].text
+    cancelled = guild.get_thread((await row(front, gone["id"])).thread_id).sent[-1]
+    assert cancelled.text.startswith("Short jest odwołana: przy zamknięciu zapisów brakowało: jeszcze 1 gracz.")
+    assert "<@2>" in cancelled.text
+    await run(front)
+    board = "\n".join(texts(await channel_of(front, guild, told)))
+    assert "⚠ Zapisy zamknęły się bez minimum (jeszcze 2 graczy, jeszcze Medic: 1); decydują organizatorzy." in board
+
+
+async def test_the_info_translates_the_kind_and_shows_a_typed_author(front, guild, fake):
+    op = published(fake, kind="guest", orbat="", author_person_id=1, author_name="Cpt. Smith", how_to_join="ts3")
+    await run(front)
+    fields = {f.name: f.value for f in (await channel_of(front, guild, op)).messages[0].embeds[0].fields}
+    assert fields["Rodzaj"] == "Zewnętrzna" and fields["Autor"] == "Cpt. Smith"
+    from app.channel import render
+    assert render.kind_name("zeus", "Zeus night", "pl") == "Zeus night"  # (renamed in the supervisor: as it is)
+    assert render.kind_name("training", "Training", "pl") == "Szkolenie"
 
 
 async def test_an_unknown_refusal_shows_the_supervisors_message(front, guild, fake):
@@ -237,16 +339,22 @@ async def test_near_the_assembly_the_whole_reserve_list_is_offered_in_the_thread
 # ---------------------------------------------------------------- reminders and pings
 
 
-async def test_reminders_ping_the_holders_and_a_late_one_is_skipped(front, guild, fake, clock):
+async def test_reminders_ping_the_holders_in_the_channel_and_a_late_one_is_skipped(front, guild, fake, clock):
     op = published(fake, assembly=clock.now + timedelta(days=2))
     ids = slots(fake, op)
     fake.sign(op["id"], 1, slot_id=ids["Alpha/Lead"])
     await run(front)
-    thread = guild.get_thread((await row(front, op["id"])).thread_id)
+    drawn = await row(front, op["id"])
+    channel, thread = guild.get_channel(drawn.channel_id), guild.get_thread(drawn.thread_id)
+    drawn_ids = set(drawn.messages.values())
     at(clock, fake, op["assembly_at"] - timedelta(minutes=30))  # down through the day's reminder and the hour's
     await run(front)
-    reminders = [m.text for m in thread.sent if m.text.startswith("Przypomnienie")]
-    assert len(reminders) == 1 and reminders[0].endswith("<@1>")
+    reminders = [m.text for m in channel.sent if m.text.startswith("Przypomnienie")]
+    assert len(reminders) == 1 and reminders[0].endswith("<@1>")  # in the channel, under the operation
+    assert not [m for m in thread.sent if m.text.startswith("Przypomnienie")]
+    fake.change(op["id"], title="Ibis II")  # a redraw after it: the bot's messages edited in place, nothing re-posted
+    await run(front)
+    assert set((await row(front, op["id"])).messages.values()) == drawn_ids
 
 
 async def test_cancelled_slot_lost_and_activity_notices(front, guild, fake):

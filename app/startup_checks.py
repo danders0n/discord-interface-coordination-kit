@@ -29,12 +29,19 @@ def check(guild: Any, settings: Settings) -> tuple[Ids, list[str]]:
             continue
         channel = guild.get_channel(channel_id)
         needed = CATEGORY if name in CATEGORY_CHANNELS else STAFF if name == "staff" else TEXT
+        if name == "events_category" and settings.events.delete_messages:
+            needed += ("manage_messages",)  # (app/channel/guard.py)
         allowed = channel.permissions_for(me)
         missing = [perm for perm in needed if not getattr(allowed, perm)]
         if missing:
             problems.append(t("{variable}: the bot lacks {permissions} in {name}", language,
                               variable=f"BOT_CHANNELS__{name.upper()}", permissions=", ".join(missing),
                               name=channel.name))
+    wanted = settings.events.delete_sticker  # (app/channel/guard.py; an id may be one of Discord's own)
+    if isinstance(wanted, str) and not any(s.name.casefold() == wanted.casefold()
+                                           for s in getattr(guild, "stickers", ())):
+        problems.append(t("{variable}: {ref} not found on this server", language,
+                          variable="BOT_EVENTS__DELETE_STICKER", ref=wanted))
     # Announcements and the sign-up ping mention the announcement role (and the climate's, from the supervisor).
     role = guild.get_role(ids.announcement) if ids.announcement else None
     if role is not None and not role.mentionable and not me.guild_permissions.mention_everyone:

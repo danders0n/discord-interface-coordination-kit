@@ -21,7 +21,7 @@ def line(event: str, language: str = "en", channel_id: int | None = 55, **fields
 
 
 def test_the_operation_and_who():
-    created = line("operation.created", by=MM, kind="zeus", assembly_at=NINETEEN, hold="off")
+    created = line("operation.created", by=MM, kind="zeus", assembly_at=NINETEEN)
     assert created == f"@mm created **Zeus night** (<#55>) (Zeus, assembly {ts(NINETEEN)})."
     assert line("operation.created", "pl", by=ANNA, kind="zeus", assembly_at=NINETEEN) == \
         f"<@11> tworzy **Zeus night** (<#55>) (Zeus, zbiórka {ts(NINETEEN)})."
@@ -68,6 +68,16 @@ def test_sign_ups_and_the_orbat():
         "@mm removed @bob from the co-organisers of **Zeus night** (<#55>)."]
 
 
+def test_the_operations_server_by_hand():
+    assert line("operation.server", by=ANNA, action="start") == "<@11> started the server of **Zeus night** (<#55>)."
+    assert line("operation.server", "pl", by=ANNA, action="stop", players=3) == \
+        "<@11> zatrzymuje serwer **Zeus night** (<#55>). Połączeni byli 3 gracze."
+    assert line("operation.server", by=MM, action="restart", players=1) == \
+        "@mm restarted the server of **Zeus night** (<#55>). 1 player was connected."
+    assert line("operation.server_failed", by=ANNA, action="start", reason="No profile is assigned") == \
+        "The server of **Zeus night** (<#55>) did not start for <@11>: No profile is assigned"
+
+
 def test_what_isnt_known_is_the_supervisors_text():
     assert describe({"event": "operation.teleported", "text": "OP-7 Zeus night: *beamed* up"}, "pl") == \
         "OP-7 Zeus night: \\*beamed\\* up"
@@ -82,7 +92,8 @@ def test_every_event_of_the_supervisor_is_worded():
         "operation.created", "operation.copied", "operation.changed", "operation.opord", "operation.organisers",
         "operation.file", "operation.mission", "operation.published", "operation.submitted", "operation.withdrawn",
         "operation.cancelled", "operation.deleted", "operation.ended", "operation.extended", "operation.profile_build",
-        "operation.profile_built", "operation.signup_opened", "operation.signup_closed", "orbat.set", "orbat.cleared",
+        "operation.profile_built", "operation.signup_opened", "operation.signup_closed",
+        "operation.requirements_missed", "operation.server", "operation.server_failed", "orbat.set", "orbat.cleared",
         "slot.took", "slot.left", "signup.answered", "offer.made", "offer.declined", "offer.expired", "slot.locked",
         "slot.assigned", "slot.removed", "signup.placed", "signup.freed", "attendance.corrected",
         "attendance.confirmed", "attendance.rated", "link.removed", "account.renamed"}

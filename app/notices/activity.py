@@ -18,8 +18,8 @@ from app.channel import render
 from app.i18n import t
 
 COMING = ("zeus", "training")
-TIMES = ("assembly_at", "start_at", "signup_opens_at")
-BOOLEANS = ("dont_end_automatically", "public", "verify_signatures", "profile_keep")
+TIMES = ("assembly_at", "start_at", "signup_opens_at", "signup_closes_at")
+BOOLEANS = ("dont_end_automatically", "public", "verify_signatures", "profile_keep", "auto_cancel")
 
 
 class _Line:
@@ -59,7 +59,7 @@ class _Line:
         return render.plain(value) if value else "—"
 
     def kind(self, kind: str) -> str:
-        return render.plain(self.kinds.get(kind) or kind)
+        return render.plain(self.kinds.get(kind) or render.kind_name(kind, None, self.language))
 
 
 # ---------------------------------------------------------------- the operation
@@ -79,12 +79,15 @@ def _copied(x: _Line) -> list[str]:
 def _label(field: str, language: str) -> str:
     return {"kind": t("Kind", language), "title": t("Title", language), "climate": t("Played preset", language),
             "host_group_id": t("Host group", language), "group_ids": t("Invited groups", language),
-            "author_person_id": t("Author", language), "assembly_at": t("Assembly", language),
+            "author_person_id": t("Author", language), "author_name": t("Author", language),
+            "specialist_roles": t("Specialist roles", language), "assembly_at": t("Assembly", language),
             "start_at": t("Start", language), "duration_minutes": t("Duration", language),
             "signup_opens_at": t("Sign-up opens", language), "signup_limit": t("Sign-up limit", language),
             "how_to_join": t("How to join", language), "dont_end_automatically": t("Don't end automatically", language),
             "public": t("Public", language), "hold": t("Hold the host", language),
             "server_id": t("Event server", language), "base_profile_id": t("Base profile", language),
+            "zeus_map": t("Map", language), "signup_closes_at": t("Sign-up closes", language),
+            "min_players": t("Players needed", language), "auto_cancel": t("Cancel automatically", language),
             "note": t("Note", language), "hostname": t("Hostname", language),
             "max_players": t("Max players", language), "verify_signatures": t("Verify signatures", language),
             "profile_keep": t("Keep the server profile", language)}.get(field, field)
@@ -93,19 +96,23 @@ def _label(field: str, language: str) -> str:
 def _value(x: _Line, field: str, value: Any) -> str:
     language = x.language
     if field in TIMES:
-        return x.when(value) if value else (t("at publishing", language) if field == "signup_opens_at" else "—")
+        if not value:
+            return {"signup_opens_at": t("at publishing", language), "signup_closes_at": t("at the start", language)}.get(field, "—")
+        return x.when(value)
     if field == "duration_minutes" and value is not None:
         return render.duration(int(value), language)
     if field == "kind" and value:
         return x.kind(value)
     if field == "author_person_id":
         return x.who(value)
+    if field == "specialist_roles":
+        return render.roles_text(value or [], ", ") or "—"
     if field in BOOLEANS or isinstance(value, bool):
         return t("yes", language) if value else t("no", language)
     if field == "hold":
         return {"on": t("yes", language), "off": t("no", language),
                 "requested": t("requested", language)}.get(value, x.text(value))
-    if field in ("signup_limit", "max_players") and not value:
+    if field in ("signup_limit", "max_players", "min_players") and not value:
         return t("none", language)
     if isinstance(value, list):
         return ", ".join(render.plain(str(v)) for v in value) or "—"
@@ -187,6 +194,18 @@ def _cancelled(x: _Line) -> list[str]:
               reason=x.text(x.get("reason")))]
 
 
+def _requirements_missed(x: _Line) -> list[str]:
+    """A Zeus operation's sign-up closed short of its minimum (``players`` short, ``roles`` as "Medic 0/1")."""
+    parts = [t(("{count} player short", "{count} players short"), x.language, count=int(x["players"]))] \
+        if x.get("players") else []
+    parts += [x.text(str(r)) for r in x.get("roles") or []]
+    line = t("Sign-up for {operation} closed short of its minimum: {short}.", x.language, operation=x.operation,
+             short=", ".join(parts) or "—")
+    if x.get("cancelled"):
+        line += " " + t("It is cancelled automatically.", x.language)
+    return [line]
+
+
 def _deleted(x: _Line) -> list[str]:
     return [t("{by} deleted the draft {operation}. Reason: {reason}", x.language, by=x.by, operation=x.operation,
               reason=x.text(x.get("reason")))]
@@ -203,6 +222,26 @@ def _ended(x: _Line) -> list[str]:
 def _extended(x: _Line) -> list[str]:
     return [t("{by} extended {operation} until {until}.", x.language, by=x.by, operation=x.operation,
               until=x.when(x["until"], "t"))]
+
+
+def _server(x: _Line) -> list[str]:
+    """The operation's server by hand in its window (``action``; ``players`` connected when it was confirmed)."""
+    action = x.get("action")
+    if action == "start":
+        line = t("{by} started the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    elif action == "restart":
+        line = t("{by} restarted the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    else:
+        line = t("{by} stopped the server of {operation}.", x.language, by=x.by, operation=x.operation)
+    if x.get("players"):
+        line += " " + t(("{count} player was connected.", "{count} players were connected."), x.language,
+                        count=int(x["players"]))
+    return [line]
+
+
+def _server_failed(x: _Line) -> list[str]:
+    return [t("The server of {operation} did not start for {by}: {reason}", x.language, by=x.by,
+              operation=x.operation, reason=x.text(x.get("reason")))]
 
 
 # ---------------------------------------------------------------- the ORBAT and sign-ups
@@ -257,6 +296,8 @@ def _answered(x: _Line) -> list[str]:
     else:
         line = t("{member} answered {answer} for {operation}.", x.language, member=member,
                  answer=_list_name(x, status), operation=x.operation)
+    if status == "coming" and x.get("role"):
+        line += " " + t("(as {role})", x.language, role=x.text(x["role"]))
     if x.get("left_slot"):
         line += " " + t("(gave up {slot})", x.language, slot=x.text(x["left_slot"]))
     return [line]
@@ -357,8 +398,9 @@ WORDINGS: dict[str, Callable[[_Line], list[str]]] = {
     "operation.mission": _mission, "operation.published": _published, "operation.submitted": _simple("submitted"),
     "operation.withdrawn": _simple("withdrawn"), "operation.cancelled": _cancelled, "operation.deleted": _deleted,
     "operation.ended": _ended, "operation.extended": _extended, "operation.profile_build": _simple("profile_build"),
+    "operation.server": _server, "operation.server_failed": _server_failed,
     "operation.profile_built": _simple("profile_built"), "operation.signup_opened": _simple("signup_opened"),
-    "operation.signup_closed": _simple("signup_closed"),
+    "operation.signup_closed": _simple("signup_closed"), "operation.requirements_missed": _requirements_missed,
     "orbat.set": _orbat_set, "orbat.cleared": _orbat_cleared, "slot.took": _took, "slot.left": _left,
     "signup.answered": _answered, "signup.placed": _placed, "signup.freed": _freed, "offer.made": _offer_made,
     "offer.declined": _offer_declined, "offer.expired": _offer_expired, "slot.locked": _locked,

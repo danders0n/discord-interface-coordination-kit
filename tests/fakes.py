@@ -139,6 +139,13 @@ def _bot_messages(sent: list[Sent]) -> list[FakeMessage]:
                         type=m.type, components=_components(m), embeds=list(m.embeds)) for m in sent if not m.deleted]
 
 
+def _close_files(kwargs: dict[str, Any]) -> None:
+    """discord.py closes the files it sent (on Windows an open one can't be removed: the redraw cleans up its copies)."""
+    for item in [kwargs.get("file"), *(kwargs.get("files") or [])]:
+        if isinstance(item, discord.File):
+            item.close()
+
+
 def _not_found(what: str) -> discord.NotFound:
     return discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), f"Unknown {what}")
 
@@ -187,6 +194,7 @@ class FakeThread:
             raise AssertionError("sent to an archived thread")
         message = Sent(content, kwargs, channel=self)
         self.sent.append(message)
+        _close_files(kwargs)
         return message
 
     def get_partial_message(self, message_id: int) -> MessageRef:
@@ -236,6 +244,7 @@ class FakeChannel:
     async def send(self, content: str | None = None, **kwargs: Any) -> Sent:
         message = Sent(content, kwargs, channel=self)
         self.sent.append(message)
+        _close_files(kwargs)
         return message
 
     @property

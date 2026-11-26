@@ -9,6 +9,7 @@ from typing import Any
 
 import discord
 
+from app.channel import render
 from app.discord_util import finish, reply, services, thinking
 from app.i18n import t
 from app.operations.ui import TIMEOUT, TextModal, person_ids, read, write
@@ -165,7 +166,8 @@ class SlotTools(discord.ui.View):
 
     def __init__(self, interaction: discord.Interaction, op: dict[str, Any]) -> None:
         super().__init__(timeout=TIMEOUT)
-        self.op_id, self.squads, self.slot_id = int(op["id"]), op.get("orbat") or [], None
+        self.op_id, self.slot_id = int(op["id"]), None
+        self.squads = render.ours(op)  # (not a headquarters only, nor another group's squad)
         squads = discord.ui.Select(placeholder=t("Squad", interaction.locale), options=[
             discord.SelectOption(label=str(squad["name"])[:100], value=str(squad["id"])) for squad in self.squads[:25]])
         squads.callback = lambda i, s=squads: self._squad(i, int(s.values[0]))
